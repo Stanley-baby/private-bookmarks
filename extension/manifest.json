@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "Private Bookmarks",
+  "version": "0.1.0",
+  "description": "Private bookmarks, highlights, and link health checks.",
+  "icons": {
+    "16": "icons/bookmark.png",
+    "32": "icons/bookmark.png",
+    "48": "icons/bookmark.png",
+    "128": "icons/bookmark.png"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": "icons/bookmark.png"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "permissions": ["activeTab", "contextMenus", "scripting", "sidePanel", "storage"],
+  "optional_permissions": ["tabs"],
+  "optional_host_permissions": ["https://*/*"],
+  "omnibox": {
+    "keyword": "pb"
+  },
+  "commands": {
+    "save_page": {
+      "suggested_key": { "default": "Ctrl+Shift+S" },
+      "description": "Save page or highlight"
+    },
+    "open_side_panel": {
+      "suggested_key": { "default": "Ctrl+Period" },
+      "description": "Open Private Bookmarks side panel"
+    }
+  }
+}

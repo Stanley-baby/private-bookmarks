@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node --check src/core.js && node --check worker.js && node --check extension/app.js && node --check extension/background.js",
+    "check": "node --check src/core.js && node --check src/d1-store.js && node --check src/health.js && node --check worker.js && node --check extension/api.js && node --check extension/background.js && node --check extension/content.js && node --check extension/popup.js && node --check extension/library.js && node --check extension/ui.js",
     "test": "node --test"
   }
 }

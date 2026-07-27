@@ -1,0 +1,168 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { canonicalizeUrl, createApi } from "../src/core.js";
+
+class MemoryStore {
+  bookmarks = new Map();
+  collections = new Map([["unsorted", { id: "unsorted", name: "Unsorted", parentId: null, revision: 1 }]]);
+  nextId = 1;
+
+  async createBookmark(bookmark) {
+    const saved = { ...bookmark, id: String(this.nextId++), revision: 1 };
+    this.bookmarks.set(saved.id, saved);
+    return saved;
+  }
+
+  async getBookmark(id) {
+    return this.bookmarks.get(id) ?? null;
+  }
+
+  async getBookmarksByLink(link) {
+    return [...this.bookmarks.values()].filter((bookmark) => bookmark.link === link);
+  }
+
+  async updateBookmark(id, expectedRevision, changes) {
+    const current = await this.getBookmark(id);
+    if (!current) return { missing: true };
+    if (current.revision !== expectedRevision) return { conflict: current };
+
+    const saved = { ...current, ...changes, revision: current.revision + 1 };
+    this.bookmarks.set(id, saved);
+    return { bookmark: saved };
+  }
+
+  async listCollections() {
+    return [...this.collections.values()];
+  }
+
+  async createCollection({ name, parentId = null }) {
+    const saved = { id: `collection-${this.collections.size}`, name, parentId, revision: 1 };
+    this.collections.set(saved.id, saved);
+    return saved;
+  }
+
+  async getPreferences() {
+    return { theme: "auto", revision: 0 };
+  }
+
+  async batchBookmarks(items, action) {
+    const current = items.map(({ id }) => this.bookmarks.get(id));
+    if (current.some((item, index) => !item || item.revision !== items[index].revision)) return { conflict: true };
+    const bookmarks = current.map((item) => ({ ...item, favorite: action.favorite, revision: item.revision + 1 }));
+    bookmarks.forEach((item) => this.bookmarks.set(item.id, item));
+    return { bookmarks };
+  }
+
+  async exportData() {
+    return { format: "private-bookmarks/v1", bookmarks: [...this.bookmarks.values()] };
+  }
+}
+
+function request(path, init = {}) {
+  return new Request(`https://private-bookmarks.test${path}`, {
+    ...init,
+    headers: {
+      "content-type": "application/json",
+      "x-private-bookmarks-key": "test-key",
+      ...init.headers,
+    },
+  });
+}
+
+test("canonicalizeUrl removes tracking parameters and normalizes path/query order", () => {
+  assert.equal(
+    canonicalizeUrl("https://user:pass@example.com/articles/?z=2&utm_source=newsletter&a=1#:~:text=clip"),
+    "https://example.com/articles?a=1&z=2",
+  );
+});
+
+test("bookmark API creates a bookmark and rejects stale updates", async () => {
+  const api = createApi({ key: "test-key", store: new MemoryStore() });
+  const created = await api.fetch(request("/v1/bookmarks", {
+    method: "POST",
+    body: JSON.stringify({
+      link: "https://example.com/?utm_campaign=spring",
+      title: "Example",
+      collectionId: "unsorted",
+    }),
+  }));
+
+  assert.equal(created.status, 201);
+  const bookmark = await created.json();
+  assert.equal(bookmark.link, "https://example.com/");
+  assert.equal(bookmark.revision, 1);
+
+  const updated = await api.fetch(request(`/v1/bookmarks/${bookmark.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ revision: 1, note: "Read later" }),
+  }));
+  assert.equal(updated.status, 200);
+
+  const stale = await api.fetch(request(`/v1/bookmarks/${bookmark.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ revision: 1, note: "Stale edit" }),
+  }));
+  assert.equal(stale.status, 409);
+  assert.equal((await stale.json()).code, "editing_conflict");
+
+  const forced = await api.fetch(request(`/v1/bookmarks/${bookmark.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ revision: 1, note: "Owner override", force: true }),
+  }));
+  assert.equal(forced.status, 200);
+  assert.equal((await forced.json()).note, "Owner override");
+});
+
+test("bookmarks by link keeps duplicate URLs distinct", async () => {
+  const api = createApi({ key: "test-key", store: new MemoryStore() });
+  for (const title of ["First", "Second"]) await api.fetch(request("/v1/bookmarks", {
+    method: "POST",
+    body: JSON.stringify({ link: "https://example.com/article", title, collectionId: "unsorted" }),
+  }));
+
+  const response = await api.fetch(request("/v1/bookmarks/by-link?link=https%3A%2F%2Fexample.com%2Farticle"));
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).map((bookmark) => bookmark.title), ["First", "Second"]);
+});
+
+test("collection API creates nested collections and bootstrap returns preferences", async () => {
+  const api = createApi({ key: "test-key", store: new MemoryStore() });
+  const created = await api.fetch(request("/v1/collections", {
+    method: "POST",
+    body: JSON.stringify({ name: "Reading", parentId: "unsorted" }),
+  }));
+
+  assert.equal(created.status, 201);
+  assert.deepEqual(await created.json(), {
+    id: "collection-1",
+    name: "Reading",
+    parentId: "unsorted",
+    revision: 1,
+  });
+
+  const bootstrap = await api.fetch(request("/v1/bootstrap"));
+  assert.equal(bootstrap.status, 200);
+  assert.equal((await bootstrap.json()).preferences.theme, "auto");
+});
+
+test("batch API changes every bookmark or reports one conflict", async () => {
+  const api = createApi({ key: "test-key", store: new MemoryStore() });
+  const create = (link) => api.fetch(request("/v1/bookmarks", { method: "POST", body: JSON.stringify({ link, collectionId: "unsorted" }) }));
+  const first = await (await create("https://example.com/one")).json();
+  const second = await (await create("https://example.com/two")).json();
+
+  const changed = await api.fetch(request("/v1/bookmarks/batch", {
+    method: "POST",
+    body: JSON.stringify({ items: [{ id: first.id, revision: 1 }, { id: second.id, revision: 1 }], action: { type: "favorite", favorite: true } }),
+  }));
+
+  assert.equal(changed.status, 200);
+  assert.equal((await changed.json()).bookmarks.every((item) => item.favorite), true);
+});
+
+test("export API returns a portable backup", async () => {
+  const api = createApi({ key: "test-key", store: new MemoryStore() });
+  const response = await api.fetch(request("/v1/export"));
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).format, "private-bookmarks/v1");
+});

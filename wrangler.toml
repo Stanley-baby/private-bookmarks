@@ -1,0 +1,11 @@
+name = "private-bookmarks"
+main = "worker.js"
+compatibility_date = "2026-07-27"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "private-bookmarks"
+database_id = "replace-with-your-d1-database-id"
+
+[triggers]
+crons = ["0 3 * * 1"]
