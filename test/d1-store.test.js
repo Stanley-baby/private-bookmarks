@@ -82,3 +82,14 @@ test("D1 updates reject stale bookmark revisions", async () => {
   assert.ok((await store.updateBookmark(bookmark.id, bookmark.revision, { note: "new" })).bookmark);
   assert.ok((await store.updateBookmark(bookmark.id, bookmark.revision, { note: "stale" })).conflict);
 });
+
+test("D1 collection counts include only live bookmarks", async () => {
+  const store = new D1Store(new D1TestDatabase());
+  const collection = await store.createCollection({ name: "Counted" });
+  const live = await store.createBookmark({ link: "https://example.com/live", title: "Live", description: "", note: "", cover: "", media: [], collectionId: collection.id, tags: [], highlights: [], favorite: false });
+  const trashed = await store.createBookmark({ link: "https://example.com/trash", title: "Trash", description: "", note: "", cover: "", media: [], collectionId: collection.id, tags: [], highlights: [], favorite: false });
+  await store.trashBookmark(trashed.id, trashed.revision);
+
+  assert.equal((await store.listCollectionCounts())[collection.id], 1);
+  assert.equal((await store.getBookmark(live.id)).deletedAt, null);
+});

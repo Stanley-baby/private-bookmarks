@@ -304,6 +304,11 @@ export class D1Store {
     return results.map(collection);
   }
 
+  async listCollectionCounts() {
+    const { results } = await this.db.prepare("SELECT collection_id, COUNT(*) AS count FROM bookmarks WHERE deleted_at IS NULL GROUP BY collection_id").all();
+    return Object.fromEntries(results.map((row) => [row.collection_id, row.count]));
+  }
+
   async getCollection(id) {
     return collection(await this.db.prepare("SELECT * FROM collections WHERE id = ?").bind(id).first());
   }
