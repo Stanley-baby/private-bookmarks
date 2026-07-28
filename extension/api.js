@@ -6,11 +6,11 @@ export async function connection() {
 
 export async function connect(endpoint, key) {
   const url = new URL(endpoint);
-  if (url.protocol !== "https:") throw new TypeError("The Private Instance URL must use HTTPS");
+  if (url.protocol !== "https:") throw new TypeError("私有实例地址必须使用 HTTPS");
   const granted = await chrome.permissions.request({ origins: [`${url.origin}/*`] });
-  if (!granted) throw new TypeError("Permission for the Private Instance URL was not granted");
+  if (!granted) throw new TypeError("未获得私有实例地址的访问权限");
   const value = { endpoint: url.origin, key: String(key).trim() };
-  if (!value.key) throw new TypeError("An access key is required");
+  if (!value.key) throw new TypeError("需要访问密钥");
   await chrome.storage.local.set({ [CONNECTION_KEY]: value });
   await api("/v1/health");
   return value;
@@ -28,7 +28,7 @@ export async function requestPagePermission(pageUrl) {
 
 export async function api(path, init = {}) {
   const config = await connection();
-  if (!config) throw new TypeError("Connect a Private Instance first");
+  if (!config) throw new TypeError("请先连接私有实例");
   const response = await fetch(`${config.endpoint}${path}`, {
     ...init,
     headers: {

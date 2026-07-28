@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Private Bookmarks",
+  "name": "私有书签",
   "version": "0.1.0",
-  "description": "Private bookmarks, highlights, and link health checks.",
+  "description": "私有书签、高亮和失效链接检查。",
   "icons": {
     "16": "icons/bookmark.png",
     "32": "icons/bookmark.png",
@@ -29,11 +29,11 @@
   "commands": {
     "save_page": {
       "suggested_key": { "default": "Ctrl+Shift+S" },
-      "description": "Save page or highlight"
+      "description": "保存页面或高亮"
     },
     "open_side_panel": {
       "suggested_key": { "default": "Ctrl+Period" },
-      "description": "Open Private Bookmarks side panel"
+      "description": "打开私有书签侧边栏"
     }
   }
 }

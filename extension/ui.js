@@ -1,7 +1,7 @@
 import { connect } from "./api.js";
 
 export function connectionView(root, onConnected) {
-  root.innerHTML = `<section class="connection"><img class="logo" src="icons/bookmark.svg" alt=""><h1>Connect Private Bookmarks</h1><p class="muted">Enter the HTTPS Worker URL and the access key configured in Cloudflare. They stay only in this browser.</p><form><label>Private Instance URL<input name="endpoint" type="url" placeholder="https://bookmarks.example.workers.dev" required></label><label>Access key<input name="key" type="password" autocomplete="off" required></label><button class="primary">Connect</button><p class="error hidden"></p></form></section>`;
+  root.innerHTML = `<section class="connection"><img class="logo" src="icons/bookmark.svg" alt=""><h1>连接私有书签</h1><p class="muted">输入 Cloudflare Worker 的 HTTPS 地址和访问密钥；它们只保存在此浏览器中。</p><form><label>私有实例地址<input name="endpoint" type="url" placeholder="https://bookmarks.example.workers.dev" required></label><label>访问密钥<input name="key" type="password" autocomplete="off" required></label><button class="primary">连接</button><p class="error hidden"></p></form></section>`;
   root.querySelector("form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);

@@ -91,5 +91,6 @@ test("D1 collection counts include only live bookmarks", async () => {
   await store.trashBookmark(trashed.id, trashed.revision);
 
   assert.equal((await store.listCollectionCounts())[collection.id], 1);
+  assert.equal(await store.getTrashCount(), 1);
   assert.equal((await store.getBookmark(live.id)).deletedAt, null);
 });

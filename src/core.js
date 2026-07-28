@@ -118,15 +118,17 @@ export function createApi({ key, store, healthCheck }) {
           return json({ ok: true });
         }
         if (request.method === "GET" && pathname === "/v1/bootstrap") {
-          const [collections, preferences, collectionCounts] = await Promise.all([
+          const [collections, preferences, collectionCounts, trashCount] = await Promise.all([
             store.listCollections(),
             store.getPreferences(),
             store.listCollectionCounts(),
+            store.getTrashCount(),
           ]);
           return json({
             collections,
             preferences,
             collectionCounts,
+            trashCount,
           });
         }
         if (request.method === "PATCH" && pathname === "/v1/preferences") {

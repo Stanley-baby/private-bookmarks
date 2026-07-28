@@ -6,7 +6,7 @@ const dialog = document.querySelector("#collection-dialog");
 const bookmarkDialog = document.querySelector("#bookmark-dialog");
 const state = {
   view: "all", collectionId: null, query: "", quickFilter: "", tag: "", selected: new Set(),
-  items: [], collections: [], collectionCounts: {}, trashedCollections: [], preferences: null, layout: "list",
+  items: [], collections: [], collectionCounts: {}, trashCount: 0, trashedCollections: [], preferences: null, layout: "list",
   collapsedCollections: new Set(), dragBookmark: null, dragCollection: null, searchTimer: null,
 };
 
@@ -15,12 +15,12 @@ function applyTheme() {
 }
 
 function collectionTree(parentId = null, depth = 0) {
-  return state.collections.filter((item) => item.parentId === parentId).map((item) => {
+  return state.collections.filter((item) => item.parentId === parentId && item.id !== "unsorted").map((item) => {
     const hasChildren = state.collections.some((child) => child.parentId === item.id);
     const collapsed = state.collapsedCollections.has(item.id);
     const editable = item.id !== "unsorted";
     const count = state.collectionCounts[item.id] || 0;
-    return `<div class="collection-branch"><div class="collection-row indent" style="--depth:${depth}" data-drop-collection="${item.id}" ${editable ? `data-drag-collection="${item.id}" draggable="true"` : ""}><button class="collection-toggle ${hasChildren ? "" : "placeholder"}" ${hasChildren ? `data-toggle-collection="${item.id}" aria-label="${collapsed ? "Expand" : "Collapse"} ${escapeHtml(item.name)}" aria-expanded="${!collapsed}"` : "tabindex=\"-1\""}>${collapsed ? "›" : "⌄"}</button><button class="collection-link ${state.collectionId === item.id ? "active" : ""}" data-collection="${item.id}"><span class="collection-icon">▱</span><span class="collection-name">${escapeHtml(item.name)}</span><small class="collection-count">${count}</small></button>${editable ? `<span class="collection-actions"><button data-edit-collection="${item.id}" title="Edit collection" aria-label="Edit ${escapeHtml(item.name)}">✎</button><button data-delete-collection="${item.id}" title="Move collection to Trash" aria-label="Move ${escapeHtml(item.name)} to Trash">⌫</button></span>` : ""}</div>${hasChildren && !collapsed ? collectionTree(item.id, depth + 1) : ""}</div>`;
+    return `<div class="collection-branch"><div class="collection-row indent" style="--depth:${depth}" data-drop-collection="${item.id}" ${editable ? `data-drag-collection="${item.id}" draggable="true"` : ""}><button class="collection-toggle ${hasChildren ? "" : "placeholder"}" ${hasChildren ? `data-toggle-collection="${item.id}" aria-label="${collapsed ? "展开" : "收起"}${escapeHtml(item.name)}" aria-expanded="${!collapsed}"` : "tabindex=\"-1\""}>${collapsed ? "›" : "⌄"}</button><button class="collection-link ${state.collectionId === item.id ? "active" : ""}" data-collection="${item.id}"><span class="collection-icon">▱</span><span class="collection-name">${escapeHtml(item.name)}</span><small class="collection-count">${count}</small></button>${editable ? `<span class="collection-actions"><button data-edit-collection="${item.id}" title="编辑收藏夹" aria-label="编辑${escapeHtml(item.name)}">✎</button><button data-delete-collection="${item.id}" title="移入废纸篓" aria-label="将${escapeHtml(item.name)}移入废纸篓">⌫</button></span>` : ""}</div>${hasChildren && !collapsed ? collectionTree(item.id, depth + 1) : ""}</div>`;
   }).join("");
 }
 
@@ -33,8 +33,8 @@ function queryPath() {
 }
 
 function viewName() {
-  if (state.collectionId) return state.collections.find((item) => item.id === state.collectionId)?.name || "Collection";
-  return ({ all: "All bookmarks", favorites: "Favorites", broken: "Broken links", unknown: "Needs review", trash: "Trash" })[state.view];
+  if (state.collectionId) return state.collections.find((item) => item.id === state.collectionId)?.name || "收藏夹";
+  return ({ all: "所有书签", favorites: "星标", broken: "失效链接", unknown: "待检查", trash: "废纸篓" })[state.view];
 }
 
 function visibleItems() {
@@ -62,7 +62,7 @@ async function mutate(path, init) {
     return await api(path, init);
   } catch (error) {
     if (error?.code !== "editing_conflict") throw error;
-    if (!window.confirm("This item changed on another device. Press OK to overwrite it with your change, or Cancel to refresh the latest version.")) {
+    if (!window.confirm("此项目已在其他设备上更新。点击“确定”覆盖为当前修改，或点击“取消”刷新最新内容。")) {
       await load();
       return null;
     }
@@ -79,8 +79,8 @@ function card(item, index) {
   const selected = state.selected.has(item.id) ? "checked" : "";
   const tags = item.tags.map((tag) => `<span class="tag">#${escapeHtml(tag)}</span>`).join("");
   const description = escapeHtml(item.description || item.note || "");
-  const status = item.health.status === "broken" ? `<span class="health broken" title="Broken link">⌁</span>` : "";
-  return `<article draggable="true" data-drag-bookmark="${item.id}" class="bookmark-card" style="--stagger:${Math.min(index, 12)}"><label class="card-select"><input aria-label="Select ${escapeHtml(item.title || item.link)}" type="checkbox" data-select="${item.id}" ${selected}></label><a class="card-main" href="${escapeHtml(item.link)}" target="_blank"><span class="card-cover"><img src="${escapeHtml(item.cover || "icons/bookmark.svg")}" alt="" referrerpolicy="no-referrer" onerror="this.src='icons/bookmark.svg'"></span><span class="card-copy"><strong class="card-title">${escapeHtml(item.title || item.link)}</strong>${description ? `<span class="card-description">${description}</span>` : ""}<span class="card-meta">${tags || ""}<span class="domain">${escapeHtml(host(item.link))}</span>${item.highlights.length ? `<span>· ${item.highlights.length} highlight${item.highlights.length === 1 ? "" : "s"}</span>` : ""}${status}</span></span></a><span class="card-actions"><button title="Edit" aria-label="Edit bookmark" data-edit="${item.id}">✎</button><button title="${item.favorite ? "Remove favorite" : "Favorite"}" aria-label="${item.favorite ? "Remove favorite" : "Favorite"}" data-favorite="${item.id}">${item.favorite ? "★" : "☆"}</button><button title="${state.view === "trash" ? "Restore" : "Delete"}" aria-label="${state.view === "trash" ? "Restore" : "Delete"}" data-delete="${item.id}">${state.view === "trash" ? "↩" : "⌫"}</button></span></article>`;
+  const status = item.health.status === "broken" ? `<span class="health broken" title="失效链接">⌁</span>` : "";
+  return `<article draggable="true" data-drag-bookmark="${item.id}" class="bookmark-card" style="--stagger:${Math.min(index, 12)}"><label class="card-select"><input aria-label="选择${escapeHtml(item.title || item.link)}" type="checkbox" data-select="${item.id}" ${selected}></label><a class="card-main" href="${escapeHtml(item.link)}" target="_blank"><span class="card-cover"><img src="${escapeHtml(item.cover || "icons/bookmark.svg")}" alt="" referrerpolicy="no-referrer"></span><span class="card-copy"><strong class="card-title">${escapeHtml(item.title || item.link)}</strong>${description ? `<span class="card-description">${description}</span>` : ""}<span class="card-meta">${tags || ""}<span class="domain">${escapeHtml(host(item.link))}</span>${item.highlights.length ? `<span>· ${item.highlights.length} 条高亮</span>` : ""}${status}</span></span></a><span class="card-actions"><button title="编辑" aria-label="编辑书签" data-edit="${item.id}">✎</button><button title="${item.favorite ? "取消星标" : "添加星标"}" aria-label="${item.favorite ? "取消星标" : "添加星标"}" data-favorite="${item.id}">${item.favorite ? "★" : "☆"}</button><button title="${state.view === "trash" ? "恢复" : "移入废纸篓"}" aria-label="${state.view === "trash" ? "恢复" : "移入废纸篓"}" data-delete="${item.id}">${state.view === "trash" ? "↩" : "⌫"}</button></span></article>`;
 }
 
 async function load() {
@@ -89,6 +89,7 @@ async function load() {
   const [boot, items, trashedCollections = []] = await Promise.all(requests);
   state.collections = boot.collections;
   state.collectionCounts = boot.collectionCounts || {};
+  state.trashCount = boot.trashCount || 0;
   state.preferences = boot.preferences;
   state.layout = boot.preferences.layout === "grid" ? "grid" : "list";
   state.collapsedCollections = new Set(Array.isArray(boot.preferences.collapsedCollectionIds) ? boot.preferences.collapsedCollectionIds : []);
@@ -102,9 +103,11 @@ function render() {
   const items = visibleItems();
   const selection = items.filter((item) => state.selected.has(item.id));
   const tags = tagList(state.items);
-  const collectionTrash = state.view === "trash" ? state.trashedCollections.map((item) => `<article class="bookmark-card collection-trash-card"><span>▱</span><span><strong>${escapeHtml(item.name)}</strong><span class="card-meta">Collection and descendants</span></span><button data-restore-collection="${item.id}" title="Restore collection">↩</button></article>`).join("") : "";
-  const quick = (id, icon, label) => `<button class="quick-filter ${id && state.quickFilter === id ? "active" : ""}" data-quick-filter="${id}"><span>${icon}</span>${label}</button>`;
-  root.innerHTML = `<main class="library"><aside class="sidebar"><div class="sidebar-head"><span class="account-mark"><img src="icons/bookmark.svg" width="18" height="18" alt=""></span><strong>Private Bookmarks</strong><button id="new-collection" class="icon-button" title="New collection" aria-label="New collection">＋</button></div><nav class="nav"><section class="sidebar-section"><button class="nav-item ${state.view === "all" && !state.collectionId ? "active" : ""}" data-view="all"><span>☁</span>All bookmarks</button><button class="nav-item ${state.view === "favorites" ? "active" : ""}" data-view="favorites"><span>★</span>Favorites</button><button class="nav-item ${state.view === "trash" ? "active" : ""}" data-view="trash"><span>⌫</span>Trash</button></section><section class="sidebar-section collections-section"><div class="sidebar-label"><span>Collections</span><button id="new-collection-secondary" title="New collection" aria-label="New collection">＋</button></div>${collectionTree()}</section><section class="sidebar-section filters-section"><div class="sidebar-label">Quick filter</div>${quick("notes", "▤", "Notes")}${quick("highlights", "▰", "Highlights")}${quick("untagged", "#", "No tags")}${quick("", "⌁", "Clear filter")}<button class="quick-filter ${state.view === "broken" ? "active" : ""}" data-view="broken"><span>⌁</span>Broken links</button><button class="quick-filter ${state.view === "unknown" ? "active" : ""}" data-view="unknown"><span>?</span>Needs review</button></section>${tags.length ? `<section class="sidebar-section tag-section"><div class="sidebar-label">Tags <span>${tags.length}</span></div>${tags.map(([tag, count]) => `<button class="tag-filter ${state.tag === tag ? "active" : ""}" data-tag="${escapeHtml(tag)}"><span>#${escapeHtml(tag)}</span><small>${count}</small></button>`).join("")}</section>` : ""}</nav></aside><section class="content"><header class="topbar"><label class="quick-search"><span>⌕</span><input id="search" value="${escapeHtml(state.query)}" placeholder="Search bookmarks" autocomplete="off"><kbd>⌘ K</kbd></label><div class="top-actions"><button id="check-links" title="Check links" aria-label="Check links">⌁</button><button id="theme" title="Theme" aria-label="Change theme">◐</button><button id="import" title="Import" aria-label="Import">↑</button><button id="export" title="Export" aria-label="Export">↓</button><input id="import-file" class="hidden" type="file" accept="application/json,text/html,.json,.html,.htm"></div></header><section class="workspace"><header class="workspace-head"><div><p class="eyebrow">Library</p><h1>${escapeHtml(viewName())}</h1></div><div class="workspace-tools"><button id="add-bookmark" class="primary add-bookmark">＋ Add</button><span class="count">${items.length}</span><div class="view-switcher" role="group" aria-label="View"><button data-layout="list" class="${state.layout === "list" ? "active" : ""}" title="Card view" aria-pressed="${state.layout === "list"}">☷</button><button data-layout="grid" class="${state.layout === "grid" ? "active" : ""}" title="Grid view" aria-pressed="${state.layout === "grid"}">▦</button></div></div></header>${selection.length ? `<div class="batch"><strong>${selection.length} selected</strong><button data-batch="favorite">★</button><button data-batch="unfavorite">☆</button><button data-batch="tags">#</button><select id="move-to"><option value="">Move to…</option>${state.collections.map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("")}</select>${state.view === "trash" ? `<button data-batch="restore">Restore</button>` : `<button class="danger" data-batch="trash">Delete</button>`}</div>` : ""}<section class="cards layout-${state.layout}">${collectionTrash}${items.length ? items.map(card).join("") : collectionTrash || `<p class="empty">No bookmarks match this view.</p>`}</section></section></section></main>`;
+  const total = Object.values(state.collectionCounts).reduce((sum, count) => sum + count, 0);
+  const collectionTrash = state.view === "trash" ? state.trashedCollections.map((item) => `<article class="bookmark-card collection-trash-card"><span>▱</span><span><strong>${escapeHtml(item.name)}</strong><span class="card-meta">收藏夹及其下级项目</span></span><button data-restore-collection="${item.id}" title="恢复收藏夹">↩</button></article>`).join("") : "";
+  const quick = (id, icon, label) => `<button class="quick-filter ${state.quickFilter === id ? "active" : ""}" data-quick-filter="${id}"><span>${icon}</span>${label}</button>`;
+  const nav = (active, icon, label, count, attribute) => `<button class="nav-item ${active ? "active" : ""}" ${attribute}><span>${icon}</span><span>${label}</span><small class="nav-count">${count}</small></button>`;
+  root.innerHTML = `<main class="library"><aside class="sidebar"><div class="sidebar-head"><span class="account-mark"><img src="icons/bookmark.svg" width="18" height="18" alt=""></span><strong>私有书签</strong><button id="new-collection" class="icon-button" title="新建收藏夹" aria-label="新建收藏夹">＋</button></div><nav class="nav"><section class="sidebar-section">${nav(state.view === "all" && !state.collectionId, "☁", "所有书签", total, 'data-view="all"')}${nav(state.collectionId === "unsorted", "▱", "未分类", state.collectionCounts.unsorted || 0, 'data-collection="unsorted"')}${nav(state.view === "favorites", "★", "星标", state.items.filter((item) => item.favorite).length, 'data-view="favorites"')}${nav(state.view === "trash", "⌫", "废纸篓", state.trashCount, 'data-view="trash"')}</section><section class="sidebar-section collections-section"><div class="sidebar-label"><span>收藏夹</span><button id="new-collection-secondary" title="新建收藏夹" aria-label="新建收藏夹">＋</button></div>${collectionTree()}</section><section class="sidebar-section filters-section"><div class="sidebar-label">快速筛选…</div>${quick("notes", "▤", "备注")}${quick("highlights", "▰", "高亮")}${quick("untagged", "#", "没有标签")}<button class="quick-filter ${state.view === "broken" ? "active" : ""}" data-view="broken"><span>⌁</span>失效链接</button><button class="quick-filter ${state.view === "unknown" ? "active" : ""}" data-view="unknown"><span>?</span>待检查</button></section>${tags.length ? `<section class="sidebar-section tag-section"><div class="sidebar-label">标签 (${tags.length})</div>${tags.map(([tag, count]) => `<button class="tag-filter ${state.tag === tag ? "active" : ""}" data-tag="${escapeHtml(tag)}"><span>#${escapeHtml(tag)}</span><small>${count}</small></button>`).join("")}</section>` : ""}</nav></aside><section class="content"><header class="topbar"><label class="quick-search"><span>⌕</span><input id="search" value="${escapeHtml(state.query)}" placeholder="搜索" autocomplete="off"><kbd>⌘ K</kbd></label><div class="top-actions"><button id="check-links" title="检查链接" aria-label="检查链接">⌁</button><button id="theme" title="切换主题" aria-label="切换主题">◐</button><button id="import" title="导入" aria-label="导入">↑</button><button id="export" title="导出" aria-label="导出">↓</button><input id="import-file" class="hidden" type="file" accept="application/json,text/html,.json,.html,.htm"></div></header><section class="workspace"><header class="workspace-head"><div><p class="eyebrow">资料库</p><h1>${escapeHtml(viewName())}</h1></div><div class="workspace-tools"><button id="add-bookmark" class="primary add-bookmark">＋ 添加</button><span class="count">${items.length}</span><div class="view-switcher" role="group" aria-label="视图"><button data-layout="list" class="${state.layout === "list" ? "active" : ""}" title="列表视图" aria-pressed="${state.layout === "list"}">☷</button><button data-layout="grid" class="${state.layout === "grid" ? "active" : ""}" title="网格视图" aria-pressed="${state.layout === "grid"}">▦</button></div></div></header>${selection.length ? `<div class="batch"><strong>已选择 ${selection.length} 项</strong><button title="添加星标" data-batch="favorite">★</button><button title="取消星标" data-batch="unfavorite">☆</button><button title="编辑标签" data-batch="tags">#</button><select id="move-to"><option value="">移动到…</option>${state.collections.map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("")}</select>${state.view === "trash" ? `<button data-batch="restore">恢复</button>` : `<button class="danger" data-batch="trash">移入废纸篓</button>`}</div>` : ""}<section class="cards layout-${state.layout}">${collectionTrash}${items.length ? items.map(card).join("") : collectionTrash || `<p class="empty">此视图中还没有书签。</p>`}</section></section></section></main>`;
   bind();
 }
 
@@ -125,16 +128,17 @@ async function savePreferences(changes) {
 }
 
 function bind() {
+  root.querySelectorAll(".card-cover img").forEach((image) => image.addEventListener("error", () => { image.src = "icons/bookmark.svg"; }, { once: true }));
   root.querySelectorAll("[data-view]").forEach((button) => button.onclick = () => switchView(button.dataset.view));
   root.querySelectorAll("[data-collection]").forEach((button) => button.onclick = () => switchView("all", button.dataset.collection));
   root.querySelectorAll("[data-delete-collection]").forEach((button) => button.onclick = async () => {
     const item = state.collections.find((entry) => entry.id === button.dataset.deleteCollection);
-    if (!window.confirm(`Move ${item.name} and its contents to Trash?`)) return;
+    if (!window.confirm(`要将“${item.name}”及其内容移入废纸篓吗？`)) return;
     await mutate(`/v1/collections/${item.id}?revision=${item.revision}`, { method: "DELETE" });
     switchView("all");
   });
   root.querySelectorAll("[data-quick-filter]").forEach((button) => button.onclick = () => {
-    state.quickFilter = button.dataset.quickFilter;
+    state.quickFilter = button.dataset.quickFilter === state.quickFilter ? "" : button.dataset.quickFilter;
     state.tag = "";
     state.selected.clear();
     render();
@@ -161,11 +165,11 @@ function bind() {
   });
   root.querySelectorAll("[data-edit-collection]").forEach((button) => button.onclick = async () => {
     const item = state.collections.find((entry) => entry.id === button.dataset.editCollection);
-    const name = window.prompt("Collection name", item.name);
+    const name = window.prompt("收藏夹名称", item.name);
     if (!name?.trim()) return;
-    const parentName = window.prompt("Parent collection name (leave blank for top level)", state.collections.find((entry) => entry.id === item.parentId)?.name || "");
+    const parentName = window.prompt("上级收藏夹名称（留空为顶级）", state.collections.find((entry) => entry.id === item.parentId)?.name || "");
     const parent = parentName ? state.collections.find((entry) => entry.name === parentName) : null;
-    if (parentName && !parent) throw new TypeError("No collection has that name");
+    if (parentName && !parent) throw new TypeError("未找到该收藏夹");
     await mutate(`/v1/collections/${item.id}`, { method: "PATCH", body: JSON.stringify({ revision: item.revision, name, parentId: parent?.id || null }) });
     load().catch(showError);
   });
@@ -198,11 +202,11 @@ function bind() {
   });
   root.querySelectorAll("[data-edit]").forEach((button) => button.onclick = async () => {
     const item = state.items.find((entry) => entry.id === button.dataset.edit);
-    const title = window.prompt("Title", item.title);
+    const title = window.prompt("标题", item.title);
     if (title == null) return;
-    const note = window.prompt("Note", item.note);
+    const note = window.prompt("备注", item.note);
     if (note == null) return;
-    const tags = window.prompt("Tags (comma separated)", item.tags.join(", "));
+    const tags = window.prompt("标签（以逗号分隔）", item.tags.join(", "));
     if (tags == null) return;
     const highlights = editHighlights(item);
     await mutate(`/v1/bookmarks/${item.id}`, { method: "PATCH", body: JSON.stringify({ revision: item.revision, title, note, tags: tags.split(","), highlights }) });
@@ -297,25 +301,25 @@ function bindDragDrop() {
 
 function editHighlights(item) {
   if (!item.highlights.length) return item.highlights;
-  const summary = item.highlights.map((highlight, index) => `${index + 1}. “${String(highlight.text || "").slice(0, 80)}” · ${highlight.color || "#ffe920"} · ${highlight.note || "(no note)"}`).join("\n");
-  const choice = window.prompt(`Highlights:\n${summary}\n\nEnter a number to edit, or d<number> to delete. Leave blank to keep all.`, "");
+  const summary = item.highlights.map((highlight, index) => `${index + 1}. “${String(highlight.text || "").slice(0, 80)}” · ${highlight.color || "#ffe920"} · ${highlight.note || "（无备注）"}`).join("\n");
+  const choice = window.prompt(`高亮：\n${summary}\n\n输入编号编辑，或输入 d<编号> 删除；留空则保持不变。`, "");
   if (!choice?.trim()) return item.highlights;
   const remove = choice.trim().match(/^d(\d+)$/i);
   const index = Number(remove?.[1] || choice) - 1;
-  if (!Number.isInteger(index) || !item.highlights[index]) throw new TypeError("Choose a listed highlight number");
+  if (!Number.isInteger(index) || !item.highlights[index]) throw new TypeError("请选择列表中的高亮编号");
   if (remove) return item.highlights.filter((_, current) => current !== index);
   const current = item.highlights[index];
-  const color = window.prompt("Color (#ffe920, #0064ff, #00c564, or #ff4646)", current.color || "#ffe920");
+  const color = window.prompt("颜色（#ffe920、#0064ff、#00c564 或 #ff4646）", current.color || "#ffe920");
   if (color == null) return item.highlights;
-  if (!["#ffe920", "#0064ff", "#00c564", "#ff4646"].includes(color.toLocaleLowerCase())) throw new TypeError("Choose one of the four highlight colors");
-  const note = window.prompt("Note", current.note || "");
+  if (!["#ffe920", "#0064ff", "#00c564", "#ff4646"].includes(color.toLocaleLowerCase())) throw new TypeError("请选择四种预设颜色之一");
+  const note = window.prompt("备注", current.note || "");
   if (note == null) return item.highlights;
   return item.highlights.map((highlight, currentIndex) => currentIndex === index ? { ...highlight, color: color.toLocaleLowerCase(), note: note.trim() } : highlight);
 }
 
 function downloadBackup(backup) {
   const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" }));
-  const link = Object.assign(document.createElement("a"), { href: url, download: `private-bookmarks-${new Date().toISOString().slice(0, 10)}.json` });
+  const link = Object.assign(document.createElement("a"), { href: url, download: `私有书签-${new Date().toISOString().slice(0, 10)}.json` });
   link.click();
   URL.revokeObjectURL(url);
 }
@@ -325,9 +329,9 @@ async function importFile(file) {
   const text = await file.text();
   if (/\.json$/i.test(file.name) || file.type === "application/json") {
     const backup = JSON.parse(text);
-    if (backup.format !== "private-bookmarks/v1") throw new TypeError("This is not a Private Bookmarks backup");
+    if (backup.format !== "private-bookmarks/v1") throw new TypeError("这不是私有书签备份文件");
     downloadBackup(await api("/v1/export"));
-    if (!window.confirm("Replace the entire bookmark library with this backup? A snapshot was downloaded first.")) return;
+    if (!window.confirm("要用此备份替换整个书签资料库吗？已先下载当前快照。")) return;
     await api("/v1/restore", { method: "POST", body: JSON.stringify({ confirm: true, backup }) });
   } else {
     const document = new DOMParser().parseFromString(text, "text/html");
@@ -339,7 +343,7 @@ async function importFile(file) {
 }
 
 async function batch(kind, collectionId) {
-  const action = kind === "move" ? { type: "move", collectionId } : kind === "trash" ? { type: "trash" } : kind === "restore" ? { type: "restore" } : kind === "tags" ? { type: "tags", mode: window.confirm("Add these tags? Cancel removes them.") ? "add" : "remove", tags: (window.prompt("Tags (comma separated)") || "").split(",") } : { type: "favorite", favorite: kind === "favorite" };
+  const action = kind === "move" ? { type: "move", collectionId } : kind === "trash" ? { type: "trash" } : kind === "restore" ? { type: "restore" } : kind === "tags" ? { type: "tags", mode: window.confirm("点击“确定”添加标签，点击“取消”移除标签。") ? "add" : "remove", tags: (window.prompt("标签（以逗号分隔）") || "").split(",") } : { type: "favorite", favorite: kind === "favorite" };
   const items = state.items.filter((item) => state.selected.has(item.id)).map(({ id, revision }) => ({ id, revision }));
   await mutate("/v1/bookmarks/batch", { method: "POST", body: JSON.stringify({ items, action }) });
   state.selected.clear();
@@ -419,10 +423,10 @@ document.addEventListener("keydown", (event) => {
 function showError(error) {
   console.error(error);
   if (error?.code === "editing_conflict") {
-    if (window.confirm("This item changed on another device. Refresh the latest version now? Your unsaved change was not applied.")) load().catch(console.error);
+    if (window.confirm("此项目已在其他设备上更新。现在刷新最新内容吗？未保存的修改不会应用。")) load().catch(console.error);
     return;
   }
-  window.alert(error.message || "Request failed");
+  window.alert(error.message || "请求失败");
 }
 
 window.addEventListener("unhandledrejection", (event) => {

@@ -30,8 +30,8 @@ async function metadata(tab) {
 }
 
 async function saveTab(tab, collectionId = "unsorted") {
-  if (!tab?.id || !/^https?:/.test(tab.url || "")) throw new TypeError("Only HTTP(S) pages can be saved");
-  if (!await requestPagePermission(tab.url)) throw new TypeError("Permission for this website was not granted");
+  if (!tab?.id || !/^https?:/.test(tab.url || "")) throw new TypeError("只能保存 HTTP(S) 页面");
+  if (!await requestPagePermission(tab.url)) throw new TypeError("未获得此网站的访问权限");
   const bookmark = await saveBookmark({ ...(await metadata(tab)), collectionId });
   await chrome.action.setBadgeText({ tabId: tab.id, text: "✓" });
   await chrome.action.setBadgeBackgroundColor({ tabId: tab.id, color: "#0d6efd" });
@@ -47,11 +47,11 @@ async function ensureHighlighter(tabId) {
 }
 
 async function saveHighlight(tab, highlight, bookmarkId, force = false) {
-  if (!await requestPagePermission(tab.url)) throw new TypeError("Permission for this website was not granted");
+  if (!await requestPagePermission(tab.url)) throw new TypeError("未获得此网站的访问权限");
   const matches = await api(`/v1/bookmarks/by-link?link=${encodeURIComponent(tab.url)}`);
   if (!matches.length) return saveTab(tab).then((bookmark) => api(`/v1/bookmarks/${bookmark.id}`, { method: "PATCH", body: JSON.stringify({ revision: bookmark.revision, highlights: [highlight] }) }));
   const existing = bookmarkId ? matches.find((item) => item.id === bookmarkId) : matches.length === 1 ? matches[0] : null;
-  if (!existing) throw new TypeError("Choose which saved bookmark should receive this highlight");
+  if (!existing) throw new TypeError("请选择要添加此高亮的已保存书签");
   const bookmark = await api(`/v1/bookmarks/${existing.id}`, {
     method: "PATCH",
     body: JSON.stringify({ revision: existing.revision, highlights: [...existing.highlights, highlight], force }),
@@ -72,18 +72,18 @@ async function applySavedHighlights(tab) {
     await chrome.action.setBadgeText({ tabId: tab.id, text: "✓" });
     await chrome.action.setBadgeBackgroundColor({ tabId: tab.id, color: "#0d6efd" });
   } catch (error) {
-    console.debug("Could not apply saved highlights", error);
+    console.debug("无法应用已保存的高亮", error);
   }
 }
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.removeAll(() => {
-    chrome.contextMenus.create({ id: "save-page", title: "Save page", contexts: ["page"] });
-    chrome.contextMenus.create({ id: "save-link", title: "Save link", contexts: ["link"] });
-    chrome.contextMenus.create({ id: "save-highlight", title: "Add highlight", contexts: ["selection"] });
-    chrome.contextMenus.create({ id: "save-tabs", title: "Save all tabs in this window", contexts: ["action"] });
-    chrome.contextMenus.create({ id: "open-side-panel", title: "Open side panel", contexts: ["action"] });
-    chrome.contextMenus.create({ id: "open-library", title: "Open Private Bookmarks", contexts: ["action"] });
+    chrome.contextMenus.create({ id: "save-page", title: "保存页面", contexts: ["page"] });
+    chrome.contextMenus.create({ id: "save-link", title: "保存链接", contexts: ["link"] });
+    chrome.contextMenus.create({ id: "save-highlight", title: "添加高亮", contexts: ["selection"] });
+    chrome.contextMenus.create({ id: "save-tabs", title: "保存此窗口的全部标签页", contexts: ["action"] });
+    chrome.contextMenus.create({ id: "open-side-panel", title: "打开侧边栏", contexts: ["action"] });
+    chrome.contextMenus.create({ id: "open-library", title: "打开私有书签", contexts: ["action"] });
   });
 });
 
@@ -93,14 +93,14 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     if (info.menuItemId === "open-side-panel") return chrome.sidePanel.open({ windowId: tab.windowId });
     if (info.menuItemId === "save-tabs") {
       const granted = await chrome.permissions.request({ permissions: ["tabs"] });
-      if (!granted) throw new TypeError("Tab permission was not granted");
+      if (!granted) throw new TypeError("未获得标签页权限");
       const tabs = await chrome.tabs.query({ currentWindow: true });
       return Promise.all(tabs.filter((entry) => /^https?:/.test(entry.url || "")).map((entry) => saveTab(entry)));
     }
     if (info.menuItemId === "save-link") return saveBookmark({ link: info.linkUrl, title: info.linkUrl, collectionId: "unsorted" });
     if (info.menuItemId === "save-page") return saveTab(tab);
     if (info.menuItemId === "save-highlight") {
-      if (!await requestPagePermission(tab.url)) throw new TypeError("Permission for this website was not granted");
+      if (!await requestPagePermission(tab.url)) throw new TypeError("未获得此网站的访问权限");
       await ensureHighlighter(tab.id);
       return chrome.tabs.sendMessage(tab.id, { type: "private-bookmarks-save-selection" });
     }
@@ -156,7 +156,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     if (message.type === "private-bookmarks-save-selection") {
       const tab = await activeTab();
-      if (!await requestPagePermission(tab.url)) throw new TypeError("Permission for this website was not granted");
+      if (!await requestPagePermission(tab.url)) throw new TypeError("未获得此网站的访问权限");
       await ensureHighlighter(tab.id);
       return sendResponse(await chrome.tabs.sendMessage(tab.id, { type: "private-bookmarks-save-selection" }));
     }

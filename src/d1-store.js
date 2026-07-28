@@ -309,6 +309,10 @@ export class D1Store {
     return Object.fromEntries(results.map((row) => [row.collection_id, row.count]));
   }
 
+  async getTrashCount() {
+    return (await this.db.prepare("SELECT COUNT(*) AS count FROM bookmarks WHERE deleted_at IS NOT NULL").first()).count;
+  }
+
   async getCollection(id) {
     return collection(await this.db.prepare("SELECT * FROM collections WHERE id = ?").bind(id).first());
   }

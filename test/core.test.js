@@ -39,6 +39,10 @@ class MemoryStore {
     return Object.fromEntries([...this.collections.keys()].map((id) => [id, [...this.bookmarks.values()].filter((bookmark) => bookmark.collectionId === id).length]));
   }
 
+  async getTrashCount() {
+    return 0;
+  }
+
   async createCollection({ name, parentId = null }) {
     const saved = { id: `collection-${this.collections.size}`, name, parentId, revision: 1 };
     this.collections.set(saved.id, saved);
@@ -149,6 +153,7 @@ test("collection API creates nested collections and bootstrap returns preference
   const data = await bootstrap.json();
   assert.equal(data.preferences.theme, "auto");
   assert.deepEqual(data.collectionCounts, { unsorted: 0, "collection-1": 0 });
+  assert.equal(data.trashCount, 0);
 });
 
 test("batch API changes every bookmark or reports one conflict", async () => {
