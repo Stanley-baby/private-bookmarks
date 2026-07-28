@@ -5,7 +5,7 @@ compatibility_date = "2026-07-27"
 [[d1_databases]]
 binding = "DB"
 database_name = "private-bookmarks"
-database_id = "replace-with-your-d1-database-id"
+database_id = "51db7b1c-4455-4490-88d9-be3f08295923"
 
 [triggers]
 crons = ["0 3 * * 1"]
