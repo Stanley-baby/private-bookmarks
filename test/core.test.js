@@ -21,6 +21,16 @@ class MemoryStore {
     return [...this.bookmarks.values()].filter((bookmark) => bookmark.link === link);
   }
 
+  async listBookmarks(options) {
+    this.lastListBookmarksOptions = options;
+    return [...this.bookmarks.values()];
+  }
+
+  async listTags(options) {
+    this.lastListTagsOptions = options;
+    return [];
+  }
+
   async updateBookmark(id, expectedRevision, changes) {
     const current = await this.getBookmark(id);
     if (!current) return { missing: true };
@@ -172,6 +182,26 @@ test("collection API creates nested collections and bootstrap returns preference
   assert.equal(data.preferences.theme, "auto");
   assert.deepEqual(data.collectionCounts, { unsorted: 0, "collection-1": 0 });
   assert.equal(data.trashCount, 0);
+});
+
+test("bookmark and tag list APIs forward reference sorting options", async () => {
+  const store = new MemoryStore();
+  const api = createApi({ key: "test-key", store });
+
+  const bookmarks = await api.fetch(request("/v1/bookmarks?search=alpha&sort=score"));
+  assert.equal(bookmarks.status, 200);
+  assert.deepEqual(store.lastListBookmarksOptions, { collectionId: null, view: null, search: "alpha", sort: "score" });
+
+  const tags = await api.fetch(request("/v1/tags?tagsSort=-count"));
+  assert.equal(tags.status, 200);
+  assert.deepEqual(await tags.json(), []);
+  assert.deepEqual(store.lastListTagsOptions, { collectionId: null, view: null, search: null, sort: "-count" });
+
+  store.getPreferences = async () => ({ nestedViewLegacy: true });
+  await api.fetch(request("/v1/bookmarks?collection=collection-1"));
+  assert.deepEqual(store.lastListBookmarksOptions, { collectionId: "collection-1", view: null, search: null, sort: null, nestedViewLegacy: true });
+  await api.fetch(request("/v1/tags?collection=collection-1"));
+  assert.deepEqual(store.lastListTagsOptions, { collectionId: "collection-1", view: null, search: null, sort: "_id", nestedViewLegacy: true });
 });
 
 test("batch API changes every bookmark or reports one conflict", async () => {

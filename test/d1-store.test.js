@@ -76,6 +76,18 @@ test("D1 migrations preserve trash sources and restore needed collection paths",
   assert.equal((await store.getBookmark(restoredWithCollection.id)).deletedAt, null);
 });
 
+test("D1 collection scopes include descendants unless legacy view is enabled", async () => {
+  const store = new D1Store(new D1TestDatabase());
+  const parent = await store.createCollection({ name: "Parent" });
+  const child = await store.createCollection({ name: "Child", parentId: parent.id });
+  await store.createBookmark({ link: "https://example.com/parent", title: "Parent bookmark", description: "", note: "", cover: "", media: [], collectionId: parent.id, tags: ["parent"], highlights: [], favorite: false });
+  await store.createBookmark({ link: "https://example.com/child", title: "Child bookmark", description: "", note: "", cover: "", media: [], collectionId: child.id, tags: ["child"], highlights: [], favorite: false });
+
+  assert.deepEqual((await store.listBookmarks({ collectionId: parent.id })).map((item) => item.title).sort(), ["Child bookmark", "Parent bookmark"]);
+  assert.deepEqual((await store.listBookmarks({ collectionId: parent.id, nestedViewLegacy: true })).map((item) => item.title), ["Parent bookmark"]);
+  assert.deepEqual(await store.listTags({ collectionId: parent.id }), [{ name: "child", count: 1 }, { name: "parent", count: 1 }]);
+});
+
 test("D1 updates reject stale bookmark revisions", async () => {
   const store = new D1Store(new D1TestDatabase());
   const bookmark = await store.createBookmark({ link: "https://example.com/conflict", title: "Conflict", description: "", note: "", cover: "", media: [], collectionId: "unsorted", tags: [], highlights: [], favorite: false });
@@ -107,4 +119,21 @@ test("D1 screenshot batch stores the screenshot sentinel for every bookmark", as
 
   assert.equal(result.bookmarks.every((item) => item.cover === "<screenshot>"), true);
   assert.equal(result.bookmarks.every((item) => item.media.includes("<screenshot>")), true);
+});
+
+test("D1 search relevance and tag sorting use server-side order", async () => {
+  const store = new D1Store(new D1TestDatabase());
+  await store.createBookmark({ link: "https://example.com/one", title: "alpha", description: "", note: "", cover: "", media: [], collectionId: "unsorted", tags: ["zeta", "shared"], highlights: [], favorite: false });
+  await store.createBookmark({ link: "https://example.com/two", title: "Other", description: "", note: "contains alpha", cover: "", media: [], collectionId: "unsorted", tags: ["alpha", "shared"], highlights: [], favorite: false });
+  await store.createBookmark({ link: "https://example.com/three", title: "Beta", description: "", note: "", cover: "", media: [], collectionId: "unsorted", tags: ["alpha", "beta"], highlights: [], favorite: false });
+
+  const ranked = await store.listBookmarks({ search: "alpha", sort: "score" });
+  assert.equal(ranked[0].title, "alpha");
+
+  assert.deepEqual(await store.listTags({ sort: "_id" }), [
+    { name: "alpha", count: 2 }, { name: "beta", count: 1 }, { name: "shared", count: 2 }, { name: "zeta", count: 1 },
+  ]);
+  assert.deepEqual(await store.listTags({ sort: "-count" }), [
+    { name: "alpha", count: 2 }, { name: "shared", count: 2 }, { name: "beta", count: 1 }, { name: "zeta", count: 1 },
+  ]);
 });

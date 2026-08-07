@@ -227,11 +227,26 @@ export function createApi({ key, store, healthCheck, mediaBucket = null }) {
           return json(result.collection);
         }
         if (request.method === "GET" && pathname === "/v1/bookmarks") {
-          return json(await store.listBookmarks({
-            collectionId: searchParams.get("collection"),
+          const collectionId = searchParams.get("collection");
+          const options = {
+            collectionId,
             view: searchParams.get("view"),
             search: searchParams.get("search"),
-          }));
+            sort: searchParams.get("sort"),
+          };
+          if (collectionId) options.nestedViewLegacy = (await store.getPreferences()).nestedViewLegacy === true;
+          return json(await store.listBookmarks(options));
+        }
+        if (request.method === "GET" && pathname === "/v1/tags") {
+          const collectionId = searchParams.get("collection");
+          const options = {
+            collectionId,
+            view: searchParams.get("view"),
+            search: searchParams.get("search"),
+            sort: searchParams.get("tagsSort") || "_id",
+          };
+          if (collectionId) options.nestedViewLegacy = (await store.getPreferences()).nestedViewLegacy === true;
+          return json(await store.listTags(options));
         }
         if (request.method === "GET" && pathname === "/v1/bookmarks/by-link") {
           const link = searchParams.get("link");

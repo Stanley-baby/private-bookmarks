@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width">
   <title>私有书签</title>
-  <link rel="stylesheet" href="style.css?v=20260806-settings5">
+  <link rel="stylesheet" href="style.css?v=20260807-buttongroup3">
 </head>
 <body>
   <div id="app"></div>
@@ -172,6 +172,19 @@
     </form>
   </dialog>
 
-  <script type="module" src="library.js?v=20260806-settings5"></script>
+  <dialog id="default-view-dialog" class="default-view-dialog" aria-modal="true" aria-labelledby="default-view-dialog-title">
+    <div class="default-view-dialog-body">
+      <div class="default-view-dialog-content">
+        <div class="default-view-dialog-layout">
+          <div id="default-view-dialog-title" class="default-view-dialog-title" data-is-title="true">⚠ 默认视图已更改</div>
+          <div class="default-view-dialog-description" data-default-view-description></div>
+          <button type="button" class="default-view-dialog-keep" data-default-view-choice="keep">保持不变</button>
+          <button type="button" class="default-view-dialog-all" data-default-view-choice="all">全部更新</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <script type="module" src="library.js?v=20260807-searchsort2"></script>
 </body>
 </html>

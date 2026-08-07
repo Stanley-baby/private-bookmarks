@@ -5,6 +5,10 @@ const DEFAULT_PREFERENCES = {
   sort: "manual",
   layout: "list",
   defaultView: "list",
+  buttonGroup: { select: true, current_tab: false, new_tab: true, preview: false, web: false, copy: false, ask: false, important: false, tags: false, edit: true, remove: true },
+  searchRelevance: true,
+  brokenLevel: "default",
+  nestedViewLegacy: false,
   layoutByScope: {},
 };
 
@@ -62,6 +66,42 @@ function collection(row) {
   };
 }
 
+function bookmarkFilters({ collectionId, view, search, nestedViewLegacy = false } = {}) {
+  const where = [view === "trash" ? "deleted_at IS NOT NULL" : "deleted_at IS NULL"];
+  const bindings = [];
+  let withClause = "";
+  if (view === "favorites") where.push("favorite = 1");
+  if (view === "broken") where.push("health_status = 'broken'");
+  if (view === "unknown") where.push("health_status = 'unknown'");
+  if (collectionId) {
+    if (nestedViewLegacy) where.push("collection_id = ?");
+    else {
+      withClause = `WITH RECURSIVE collection_scope(id) AS (
+        SELECT id FROM collections WHERE id = ? AND deleted_at IS NULL
+        UNION ALL
+        SELECT collections.id FROM collections JOIN collection_scope ON collections.parent_id = collection_scope.id WHERE collections.deleted_at IS NULL
+      )`;
+      where.push("collection_id IN (SELECT id FROM collection_scope)");
+    }
+    bindings.push(collectionId);
+  }
+  if (search) {
+    where.push("(title LIKE ? COLLATE NOCASE OR link LIKE ? COLLATE NOCASE OR description LIKE ? COLLATE NOCASE OR note LIKE ? COLLATE NOCASE OR tags_json LIKE ? COLLATE NOCASE OR highlights_json LIKE ? COLLATE NOCASE)");
+    const term = `%${search.replace(/[%_]/g, "\\$&")}%`;
+    bindings.push(term, term, term, term, term, term);
+  }
+  return { withClause, where, bindings };
+}
+
+function searchScore(item, query) {
+  const fields = [[item.title, 100], [item.tags.join(" "), 60], [item.description, 40], [item.note, 40], [item.link, 20]];
+  return String(query).toLocaleLowerCase().trim().split(/\s+/).filter(Boolean).reduce((total, term) => total + fields.reduce((score, [value, weight]) => {
+    const text = String(value || "").toLocaleLowerCase();
+    if (!text.includes(term)) return score;
+    return score + weight * (text === term ? 4 : text.startsWith(term) ? 3 : 1);
+  }, 0), 0);
+}
+
 function backupCollections(items) {
   const pending = [...items];
   const ordered = [];
@@ -81,24 +121,25 @@ export class D1Store {
     this.db = db;
   }
 
-  async listBookmarks({ collectionId, view, search } = {}) {
-    const where = [view === "trash" ? "deleted_at IS NOT NULL" : "deleted_at IS NULL"];
-    const bindings = [];
-    if (view === "favorites") where.push("favorite = 1");
-    if (view === "broken") where.push("health_status = 'broken'");
-    if (view === "unknown") where.push("health_status = 'unknown'");
-    if (collectionId) {
-      where.push("collection_id = ?");
-      bindings.push(collectionId);
-    }
-    if (search) {
-      // ponytail: LIKE search, replace with D1 FTS only if a large library becomes measurably slow.
-      where.push("(title LIKE ? COLLATE NOCASE OR link LIKE ? COLLATE NOCASE OR description LIKE ? COLLATE NOCASE OR note LIKE ? COLLATE NOCASE OR tags_json LIKE ? COLLATE NOCASE OR highlights_json LIKE ? COLLATE NOCASE)");
-      const term = `%${search.replace(/[%_]/g, "\\$&")}%`;
-      bindings.push(term, term, term, term, term, term);
-    }
-    const { results } = await this.db.prepare(`SELECT * FROM bookmarks WHERE ${where.join(" AND ")} ORDER BY position, created_at DESC`).bind(...bindings).all();
-    return results.map(bookmark);
+  async listBookmarks({ collectionId, view, search, sort, nestedViewLegacy = false } = {}) {
+    const { withClause, where, bindings } = bookmarkFilters({ collectionId, view, search, nestedViewLegacy });
+    const { results } = await this.db.prepare(`${withClause} SELECT * FROM bookmarks WHERE ${where.join(" AND ")} ORDER BY position, created_at DESC`).bind(...bindings).all();
+    const items = results.map(bookmark);
+    if (sort !== "score" || !search) return items;
+    return items.map((item, index) => ({ item, index, score: searchScore(item, search) }))
+      .sort((a, b) => b.score - a.score || a.index - b.index)
+      .map(({ item }) => item);
+  }
+
+  async listTags({ collectionId, view, search, sort = "_id", nestedViewLegacy = false } = {}) {
+    const { withClause, where, bindings } = bookmarkFilters({ collectionId, view, search, nestedViewLegacy });
+    const { results } = await this.db.prepare(`${withClause} SELECT tags_json FROM bookmarks WHERE ${where.join(" AND ")}`).bind(...bindings).all();
+    const counts = new Map();
+    for (const row of results) for (const tag of parse(row.tags_json, [])) counts.set(tag, (counts.get(tag) || 0) + 1);
+    const tags = [...counts].sort(sort === "-count"
+      ? ([tagA, countA], [tagB, countB]) => countB - countA || tagA.localeCompare(tagB, "zh-CN")
+      : ([tagA], [tagB]) => tagA.localeCompare(tagB, "zh-CN"));
+    return tags.map(([name, count]) => ({ name, count }));
   }
 
   async getBookmark(id) {

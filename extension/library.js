@@ -11,8 +11,15 @@ const coverPickerDialog = document.querySelector("#cover-picker-dialog");
 const coverUrlDialog = document.querySelector("#cover-url-dialog");
 const collectionPickerDialog = document.querySelector("#collection-picker-dialog");
 const batchTagDialog = document.querySelector("#batch-tag-dialog");
+const defaultViewDialog = document.querySelector("#default-view-dialog");
 const SEARCH_HISTORY_KEY = "private-bookmarks.search-history";
 const initialSettingsRoute = new URL(location.href).searchParams.get("settings") === "app";
+const DEFAULT_BUTTON_GROUP = Object.freeze({ select: true, current_tab: false, new_tab: true, preview: false, web: false, copy: false, ask: false, important: false, tags: false, edit: true, remove: true });
+const BUTTON_GROUP_OPTIONS = [
+  ["select", "选择", "selectAll"], ["current_tab", "直接在浏览器打开", "click"], ["new_tab", "在新标签页中打开", "open"],
+  ["preview", "预览模式", "show"], ["web", "Web", "web"], ["copy", "将链接复制到剪贴板", "duplicates"], ["ask", "询问", "ai"],
+  ["important", "添加到收藏夹", "like"], ["tags", "标签", "tag"], ["edit", "编辑", "edit"], ["remove", "删除", "trash"],
+];
 
 function readSearchHistory() {
   try {
@@ -24,12 +31,12 @@ function readSearchHistory() {
 }
 
 const state = {
-  view: "all", collectionId: null, query: "", quickFilter: "", tag: "", selected: new Set(), favoriteCount: 0,
+  view: "all", collectionId: null, query: "", quickFilter: "", tag: "", selected: new Set(), favoriteCount: 0, tags: [],
   items: [], allItems: [], collections: [], collectionCounts: {}, trashCount: 0, trashedCollections: [], preferences: null, layout: "list",
   collapsedCollections: new Set(), dragBookmark: null, dragCollection: null, searchTimer: null, sidebarWidth: null, cardMenuId: null, cardActionProxies: null,
   searchMenuOpen: false, sortMenuOpen: false, viewMenuOpen: false, themeMenuOpen: false, recentSearches: readSearchHistory(), groupMenuId: null, collectionMenuId: null, pickerCollectionMenuId: null, pickerGroupMenuId: null, inlineCollectionCreate: null, tagMenuOpen: false, tagItemMenu: null, collectionValueAction: null, collectionValueId: null, collectionSelection: null,
   selectionMoreOpen: false, selectionScreenshotWorking: false, sidebarOpen: false, accountMenuOpen: false, mediaUploadEnabled: false,
-  settingsOpen: initialSettingsRoute, settingsMenu: null,
+  settingsOpen: initialSettingsRoute, settingsMenu: null, settingsNeedsReload: false, settingsSavePromise: null,
 };
 
 function setSettingsRoute(open) {
@@ -39,17 +46,20 @@ function setSettingsRoute(open) {
   history.pushState({ settings: open }, "", `${url.pathname}${url.search}${url.hash}`);
   state.settingsOpen = Boolean(open);
   state.settingsMenu = null;
-  render();
+  if (open) return render();
+  const refresh = () => state.settingsNeedsReload ? (state.settingsNeedsReload = false, load().catch(showError)) : render();
+  if (state.settingsSavePromise) state.settingsSavePromise.then(refresh, refresh);
+  else refresh();
 }
 
 const EN_TEXT = Object.freeze({
   " 个书签": " bookmarks",
-  "默认模式": "Default mode",
+  "默认模式": "Default mode", "基础模式": "Basic mode", "严格模式": "Strict mode",
   "使用此封面": "Use this cover", "此书签还没有可用的候选封面。": "This bookmark has no candidate covers.", "正在创建…": "Creating…", "上传文件（需要配置 R2）": "Upload file (R2 required)", "正在上传封面…": "Uploading cover…", "已保存 ": "Saved ", "删除标签": "Remove tag", "编辑 Markdown": "Edit Markdown",
   "打开所有书签": "Open all bookmarks", "展开所有收藏集": "Expand all collections", "折叠所有收藏集": "Collapse all collections", "按名称排序所有收藏集": "Sort all collections by name", "删除所有空收藏集": "Delete all empty collections", "没有找到收藏集": "No collections found",
   "全部": "All",
   "应用": "App", "帐户": "Account", "订阅": "Subscription", "导入": "Import", "整合方式": "Integrations", "备份": "Backups", "帮助": "Help", "设置": "Settings", "私有书签": "Private Bookmarks", "私有实例": "Private instance",
-  "语言": "Language", "界面样式": "Interface theme", "字体大小": "Font size", "大": "Large", "默认视图模式": "Default view", "列表": "List", "卡片": "Cards", "标题": "Title", "心情看板": "Moodboard", "点击书签时": "When clicking bookmarks", "在新标签页中打开": "Open in new tab", "在当前标签页中打开": "Open in current tab", "按钮组": "Button group", "搜索": "Search", "按相关性排序": "Sort by relevance", "排序标签": "Sort tags", "按名称": "By name", "按书签数量": "By bookmark count", "失效链接": "Broken links", "嵌套收藏": "Nested collections", "旧视图": "Legacy view", "询问 AI": "Ask AI", "推荐的收藏集和标签": "Recommended collections and tags", "仅 Pro 可用。AI 功能暂未接入。": "Only available for Pro. AI is not connected yet.", "AI 功能暂未接入。": "AI is not connected yet.",
+  "语言": "Language", "界面样式": "Interface theme", "字体大小": "Font size", "大": "Large", "默认视图模式": "Default view", "默认视图已更改": "Default view changed", "新收藏夹现在将使用": "New collections will now use", "视图模式。": "view mode.", "是否将此更改应用于所有现有收藏夹？": "Apply this change to all existing collections?", "保持不变": "Keep unchanged", "全部更新": "Update all", "列表": "List", "卡片": "Cards", "标题": "Title", "心情看板": "Moodboard", "点击书签时": "When clicking bookmarks", "在新标签页中打开": "Open in new tab", "在当前标签页中打开": "Open in current tab", "按钮组": "Button group", "搜索": "Search", "按相关性排序": "Sort by relevance", "排序标签": "Sort tags", "按名称": "By name", "按书签数量": "By bookmark count", "失效链接": "Broken links", "嵌套收藏": "Nested collections", "旧视图": "Legacy view", "询问 AI": "Ask AI", "推荐的收藏集和标签": "Recommended collections and tags", "仅 Pro 可用。AI 功能暂未接入。": "Only available for Pro. AI is not connected yet.", "AI 功能暂未接入。": "AI is not connected yet.",
   "所有书签": "All bookmarks", "未分类": "Unsorted", "星标": "Favorites", "待检查": "Pending check", "废纸篓": "Trash", "收藏": "Collections", "快速过滤…": "Quick filters…", "备注": "Notes", "高亮": "Highlights", "没有标签": "Untagged", "标签": "Tags", "建议的": "Suggested", "最近使用的": "Recently used", "删除最近项": "Remove recent item", "搜索帮助": "Search help", "排序": "Sort", "网站": "Website", "视图": "View", "封面": "Cover", "图标": "Icon", "左": "Left", "右": "Right", "书签信息": "Bookmark info", "描述": "Description", "在列表中显示": "Show in list", "在卡片中显示": "Show in cards", "在标题中显示": "Show in titles", "在心情看板中显示": "Show in moodboard", "应用到全部": "Apply to all", "添加": "Add", "导出书签": "Export bookmarks", "检查链接": "Check links", "导入书签": "Import bookmarks", "直接在浏览器打开": "Open in browser", "移动": "Move", "添加标签": "Add tags", "删除": "Delete", "取消": "Cancel", "更多": "More", "选择所有": "Select all", "创建页面截图": "Create page screenshot", "正在创建页面截图…": "Creating page screenshot…", "刷新预览": "Refresh preview", "添加到收藏夹": "Add to favorites", "从收藏夹移除": "Remove from favorites", "移除标签": "Remove tags", "此视图中还没有书签。": "No bookmarks in this view.", "主题：": "Theme: ", "主题": "Theme", "浅色": "Light", "深色": "Dark", "跟随系统": "System", "日落": "Sunset", "Default mode": "Default mode", "中文（汉语）": "中文（汉语）", "新标签": "New tag", "显示": "Show", "隐藏标签": "Hide tags", "按名称排序标签": "Sort tags by name", "按书签数排序标签": "Sort tags by count", "显示侧边栏": "Show sidebar", "关闭侧边栏": "Close sidebar",
   "关闭": "Close", "返回书签": "Back to bookmarks", "显示设置菜单": "Show settings menu", "可选": "Optional", "选项": " options", "书签详情": "Bookmark details", "暂未支持": "Not supported yet", "打开原网页": "Open original page", "更改图标": "Change icon", "添加描述": "Add description", "添加备注": "Add note", "预览 Markdown": "Preview Markdown", "添加标签…": "Add tags…", "最喜爱的": "Favorite", "提醒暂未支持": "Reminders are not supported yet", "添加 URL…": "Add URL…", "上传封面文件": "Upload cover file", "可用封面": "Available covers", "分享收藏夹": "Share collection", "复制": "Copy", "系统分享": "Share", "添加书签": "Add bookmark", "编辑": "Edit", "询问": "Ask", "Web存档": "Web archive", "保存": "Save", "添加 URL": "Add URL", "选择收藏集": "Select collection", "查找或创建新的收藏集…": "Find or create a collection…", "网址": "URL", "收藏夹": "Collection", "封面 URL": "Cover URL", "选择": "Select", "选择全部": "Select all", "恢复": "Restore", "截屏": "Screenshot", "创建嵌套的集合": "Create nested collection", "创建收藏集": "Create collection", "改名": "Rename", "分享": "Share", "显示分组": "Show group", "隐藏分组": "Hide group", "展开": "Expand", "折叠": "Collapse", "收起": "Collapse", "创建群组": "Create group", "删除分组": "Delete group", "新建收藏夹": "New collection", "新收藏": "New collection", "新群组": "New group", "更多操作": "More actions", "复制链接": "Copy link", "将链接复制到剪贴板": "Copy link to clipboard", "列表视图": "List view", "网格视图": "Grid view", "手动排序": "Manual order", "最近添加": "Recently added", "标题 (A-Z)": "Title (A-Z)", "网站 (A-Z)": "Website (A-Z)", "调整侧边栏宽度": "Adjust sidebar width", "当前标签页": "Current tab", "预览模式": "Preview mode", "Web 预览模式": "Web preview mode", "搜索设置 / 筛选": "Search settings / filters", "在条件前添加短横(-) 将其排除在搜索范围之外": "Prefix a condition with a hyphen (-) to exclude it from search", "浏览器扩展": "Browser extension", "下载应用": "Download app", "帮助与支持": "Help and support", "博客": "Blog", "更新内容?": "What's new?", "注销": "Log out", "按日期 ↑": "By date ↑", "按日期 ↓": "By date ↓", "类型": "Type", "创建日期": "Created", "在标题/描述中": "In title/description", "在URL中": "In URL", "移动到…": "Move to…", "移动到": "Move to", "全选": "Select all", "取消星标": "Remove favorite", "添加星标": "Add favorite", "收藏选项": "Collection options", "收藏集选项": "Collection options", "收藏夹名称": "Collection name", "高亮颜色": "Highlight color", "（无备注）": "(No note)"
 });
@@ -168,10 +178,12 @@ const treeIcons = {
 };
 
 treeIcons.check = '<path fill-rule="evenodd" d="m8.126 13.168.686-.058-3-3-.624.78 3 3 .37.297.316-.355 7-8-.748-.664z"></path>';
+treeIcons.blank = '';
+treeIcons.microExpand = '<path d="M1.938 3 5 6.5 8.063 3H9.5L5 8 .5 3z"></path>';
 treeIcons.viewMasonry = treeIcons.viewMasonry.replaceAll("A.999.999 0 0 1 9 14", "A.999 1 0 0 1 9 14").replaceAll("A.999 1 0 0 1 8 17", "A.999 1 0 0 1 2 17");
 
 function treeIcon(name, compact = false) {
-  const small = compact || name === "microArrow";
+  const small = compact || name === "microArrow" || name === "microExpand";
   return `<svg class="tree-svg ${small ? "tree-svg-small" : ""}" viewBox="0 0 ${small ? "10 10" : "20 20"}" aria-hidden="true">${treeIcons[name]}</svg>`;
 }
 
@@ -347,7 +359,17 @@ function queryPath() {
   if (state.collectionId) params.set("collection", state.collectionId);
   else if (state.view !== "all") params.set("view", state.view);
   if (state.query && !searchFilterFor(state.query)) params.set("search", state.query);
+  if (state.query && !searchFilterFor(state.query) && state.preferences?.searchRelevance !== false) params.set("sort", "score");
   return `/v1/bookmarks?${params}`;
+}
+
+function tagQueryPath() {
+  const params = new URLSearchParams();
+  if (state.collectionId) params.set("collection", state.collectionId);
+  else if (state.view !== "all") params.set("view", state.view);
+  if (state.query && !searchFilterFor(state.query)) params.set("search", state.query);
+  params.set("tagsSort", state.preferences?.tagSort === "count" ? "-count" : "_id");
+  return `/v1/tags?${params}`;
 }
 
 function searchSuggestionCount(id) {
@@ -747,11 +769,14 @@ function sortedItems() {
 }
 
 function tagList(items) {
-  const tags = new Map();
-  for (const item of items) for (const tag of item.tags) tags.set(tag, (tags.get(tag) || 0) + 1);
-  return [...tags].sort(state.preferences?.tagSort === "count"
+  const counts = new Map();
+  for (const item of items) for (const tag of item.tags) counts.set(tag, (counts.get(tag) || 0) + 1);
+  const source = items === sidebarItems() && state.tags.length
+    ? state.tags.map(({ name, count }) => [name, count])
+    : [...counts];
+  return source.sort(state.preferences?.tagSort === "count"
     ? ([tagA, countA], [tagB, countB]) => countB - countA || tagA.localeCompare(tagB, "zh-CN")
-    : ([tagA], [tagB]) => tagA.localeCompare(tagB, "zh-CN")).slice(0, 40);
+    : ([tagA], [tagB]) => tagA.localeCompare(tagB, "zh-CN"));
 }
 
 function host(link) {
@@ -1192,13 +1217,31 @@ function card(item, index) {
   const tags = item.tags.map((tag) => `<span class="card-tag"><span class="card-tag-icon">${treeIcon("tag", true)}</span>${escapeHtml(tag)}</span>`).join("");
   const status = item.health.status === "broken" ? `<section><span class="health broken" title="失效链接">⌁</span></section>` : "";
   const source = `<section><a class="card-path" href="#" data-card-collection="${escapeHtml(item.collectionId)}"><span class="card-path-icon">${treeIcon(item.collectionId === "unsorted" ? "inbox" : "folder")}</span>${escapeHtml(masonryView ? collectionName(item.collectionId) : collectionPath(item.collectionId))}</a></section>${item.favorite ? `<section data-inline="true" class="card-important">${treeIcon("importantActive", true)}</section>` : ""}<section>${escapeHtml(host(item.link))}</section>${item.createdAt ? `<section>${dateLabel(item.createdAt)}</section>` : ""}${item.highlights.length ? `<section>${item.highlights.length} 条高亮</section>` : ""}${status}`;
-  const primaryActions = `<a role="button" href="${escapeHtml(item.link)}" title="直接在浏览器打开" aria-label="直接在浏览器打开" data-button="current_tab">${treeIcon("click")}</a><a role="button" href="${escapeHtml(item.link)}" target="_blank" rel="noopener" title="预览模式" aria-label="预览模式" data-button="preview">${treeIcon("show")}</a><button type="button" title="${item.favorite ? "从收藏夹移除" : "添加到收藏夹"}" aria-label="${item.favorite ? "从收藏夹移除" : "添加到收藏夹"}" data-button="important" data-favorite="${item.id}">${treeIcon(item.favorite ? "likeActive" : "like")}</button><button type="button" class="card-action-more" title="更多操作" aria-label="更多操作" aria-haspopup="menu" aria-expanded="${state.cardMenuId === item.id}" data-card-menu="${escapeHtml(item.id)}">${treeIcon("more")}</button>`;
-  const masonryActions = `<a role="button" href="${escapeHtml(item.link)}" title="直接在浏览器打开" aria-label="直接在浏览器打开" data-button="current_tab">${treeIcon("click")}</a><a role="button" href="${escapeHtml(item.link)}" target="_blank" rel="noopener" title="在新标签页中打开" aria-label="在新标签页中打开" data-button="new_tab">${treeIcon("open")}</a><a role="button" href="${escapeHtml(item.link)}" target="_blank" rel="noopener" title="预览模式" aria-label="预览模式" data-button="preview">${treeIcon("show")}</a><a role="button" href="${escapeHtml(item.link)}" target="_blank" rel="noopener" title="Web 预览模式" aria-label="Web 预览模式" data-button="web">${treeIcon("web")}</a><button type="button" title="将链接复制到剪贴板" aria-label="将链接复制到剪贴板" data-button="copy" data-copy-link="${escapeHtml(item.link)}">${treeIcon("duplicates")}</button><button type="button" title="询问" aria-label="询问" data-button="ask">${treeIcon("ai")}</button><button type="button" title="${item.favorite ? "从收藏夹移除" : "添加到收藏夹"}" aria-label="${item.favorite ? "从收藏夹移除" : "添加到收藏夹"}" data-button="important" data-favorite="${item.id}">${treeIcon(item.favorite ? "likeActive" : "like")}</button><button type="button" title="编辑标签" aria-label="编辑标签" data-button="tags" data-edit="${item.id}" data-edit-focus="tags">${treeIcon("tag")}</button><button type="button" title="编辑" aria-label="编辑" data-button="edit" data-edit="${item.id}">编辑</button><button type="button" title="删除" aria-label="删除" data-button="remove" data-delete="${item.id}">${treeIcon("trash")}</button>`;
+  const actionMarkup = bookmarkActionMarkup(item);
+  const selectControl = buttonGroupEnabled("select") ? `<label class="card-select" title="选择"><input aria-label="选择${escapeHtml(item.title || item.link)}" type="checkbox" data-select="${item.id}" ${selected}></label>` : "";
   const menuOpen = state.cardMenuId === item.id ? " card-menu-open" : "";
-  const actionMarkup = masonryView ? masonryActions : primaryActions;
   const coverAttrs = masonryView || gridView ? `width="${masonryGridWidth()}"` : `width="${coverSize}" height="${titleView ? 20 : 48}"`;
   const sourceMarkup = masonryView || gridView ? `<source srcset="${escapeHtml(coverSrc)}" type="image/webp">` : "";
-  return `<article role="listitem" draggable="true" data-drag-bookmark="${item.id}" class="bookmark-card${selected ? " selected" : ""}${state.selected.size ? " selection-mode" : ""}${masonryView ? " masonry-card" : ""}${menuOpen}" style="--stagger:${Math.min(index, 12)}"><picture role="img" class="card-cover">${sourceMarkup}<img src="${escapeHtml(coverSrc)}" alt="" ${coverAttrs} referrerpolicy="no-referrer"></picture><div class="card-copy"><div class="card-title">${escapeHtml(item.title || item.link)}</div><div class="card-details">${note ? `<div class="card-note">${note}</div>` : ""}${description ? `<div class="card-description">${description}</div>` : ""}${tags ? `<div class="card-tags">${tags}</div>` : ""}</div><div class="card-source">${source}</div></div><div class="card-actions">${actionMarkup}</div><label class="card-select" title="选择"><input aria-label="选择${escapeHtml(item.title || item.link)}" type="checkbox" data-select="${item.id}" ${selected}></label><a class="card-permalink" href="${escapeHtml(item.link)}" ${cardLinkTarget} tabindex="0">${escapeHtml(item.title || item.link)}</a></article>`;
+  return `<article role="listitem" draggable="true" data-drag-bookmark="${item.id}" class="bookmark-card${selected ? " selected" : ""}${state.selected.size ? " selection-mode" : ""}${masonryView ? " masonry-card" : ""}${menuOpen}" style="--stagger:${Math.min(index, 12)}"><picture role="img" class="card-cover">${sourceMarkup}<img src="${escapeHtml(coverSrc)}" alt="" ${coverAttrs} referrerpolicy="no-referrer"></picture><div class="card-copy"><div class="card-title">${escapeHtml(item.title || item.link)}</div><div class="card-details">${note ? `<div class="card-note">${note}</div>` : ""}${description ? `<div class="card-description">${description}</div>` : ""}${tags ? `<div class="card-tags">${tags}</div>` : ""}</div><div class="card-source">${source}</div></div><div class="card-actions">${actionMarkup}</div>${selectControl}<a class="card-permalink" href="${escapeHtml(item.link)}" ${cardLinkTarget} tabindex="0">${escapeHtml(item.title || item.link)}</a></article>`;
+}
+
+function bookmarkActionMarkup(item) {
+  const enabled = buttonGroupPreference();
+  const link = escapeHtml(item.link);
+  const id = escapeHtml(item.id);
+  const action = (name, markup) => enabled[name] ? markup : "";
+  return [
+    action("current_tab", `<a role="button" href="${link}" title="直接在浏览器打开" aria-label="直接在浏览器打开" data-button="current_tab">${treeIcon("click")}</a>`),
+    action("new_tab", `<a role="button" href="${link}" target="_blank" rel="noopener" title="在新标签页中打开" aria-label="在新标签页中打开" data-button="new_tab">${treeIcon("open")}</a>`),
+    action("preview", `<a role="button" href="${link}" target="_blank" rel="noopener" title="预览模式" aria-label="预览模式" data-button="preview">${treeIcon("show")}</a>`),
+    action("web", `<a role="button" href="${link}" target="_blank" rel="noopener" title="Web 预览模式" aria-label="Web 预览模式" data-button="web">${treeIcon("web")}</a>`),
+    action("copy", `<button type="button" title="将链接复制到剪贴板" aria-label="将链接复制到剪贴板" data-button="copy" data-copy-link="${link}">${treeIcon("duplicates")}</button>`),
+    action("ask", `<button type="button" title="询问" aria-label="询问" data-button="ask" data-ask="${id}">${treeIcon("ai")}</button>`),
+    action("important", `<button type="button" title="${item.favorite ? "从收藏夹移除" : "添加到收藏夹"}" aria-label="${item.favorite ? "从收藏夹移除" : "添加到收藏夹"}" data-button="important" data-favorite="${id}">${treeIcon(item.favorite ? "likeActive" : "like")}</button>`),
+    action("tags", `<button type="button" title="编辑标签" aria-label="编辑标签" data-button="tags" data-edit="${id}" data-edit-focus="tags">${treeIcon("tag")}</button>`),
+    action("edit", `<button type="button" title="编辑" aria-label="编辑" data-button="edit" data-edit="${id}">${treeIcon("edit")}</button>`),
+    action("remove", `<button type="button" title="删除" aria-label="删除" data-button="remove" data-delete="${id}">${treeIcon("trash")}</button>`),
+  ].join("");
 }
 
 function cardActionMenu(item) {
@@ -1374,11 +1417,33 @@ function settingsPreference(key, fallback) {
   return value == null ? fallback : value;
 }
 
+function buttonGroupPreference() {
+  const value = settingsPreference("buttonGroup", {});
+  return { ...DEFAULT_BUTTON_GROUP, ...(value && typeof value === "object" ? value : {}) };
+}
+
+function buttonGroupEnabled(name) {
+  return buttonGroupPreference()[name] !== false;
+}
+
 function settingsControlMarkup(key, value, options, icon = "") {
-  const current = options.find((option) => option.value === value) || options[0];
+  const selectionOnly = key === "brokenLinks";
+  const currentValue = selectionOnly ? settingsPreference("brokenLevel", "default") : value;
+  const current = options.find((option) => option.value === currentValue) || options[0];
   const open = state.settingsMenu === key;
-  const labelFor = (option) => key === "language" ? option.label : t(option.label);
-  const menu = open ? `<div class="settings-dropdown" role="listbox" data-settings-menu="${key}">${options.map((option) => `<button type="button" role="option" aria-selected="${option.value === current.value}" class="settings-dropdown-option ${key === "language" ? "settings-language-option" : ""} ${option.value === current.value ? "active" : ""}" data-settings-option="${key}" data-settings-value="${escapeHtml(option.value)}">${key === "language" ? `<span class="settings-dropdown-check">${option.value === current.value ? treeIcon("check") : ""}</span>` : ""}${icon ? treeIcon(icon) : ""}<span>${escapeHtml(labelFor(option))}</span></button>`).join("")}</div>` : "";
+  const labelFor = (option) => selectionOnly && option.value === "off"
+    ? languageIsEnglish() ? "Disable" : "关闭"
+    : key === "language" ? option.label : t(option.label);
+  const optionMarkup = (option) => {
+    const selected = option.value === current.value;
+    const prefix = key === "language"
+      ? `<span class="settings-dropdown-check">${selected ? treeIcon("check") : ""}</span>`
+      : selectionOnly
+        ? `<span class="settings-dropdown-selection">${selected ? treeIcon("check") : treeIcon("blank")}</span>`
+      : icon ? `<span class="settings-dropdown-selection">${selected ? treeIcon("check") : treeIcon("blank")}</span>${treeIcon(icon)}` : "";
+    return `<button type="button" role="option" aria-selected="${selected}" class="settings-dropdown-option ${key === "language" ? "settings-language-option" : ""}" data-settings-option="${key}" data-settings-value="${escapeHtml(option.value)}">${prefix}<span>${escapeHtml(labelFor(option))}</span></button>`;
+  };
+  const menu = open ? `<div class="settings-dropdown" role="listbox" data-settings-menu="${key}">${options.map(optionMarkup).join("")}</div>` : "";
   return `<div class="settings-control-wrap"><button type="button" class="settings-outline-button" data-settings-select="${key}" aria-haspopup="listbox" aria-expanded="${open}">${icon ? treeIcon(icon) : ""}<span>${escapeHtml(labelFor(current))}</span><span class="settings-control-arrow">${treeIcon("microArrow")}</span></button>${menu}</div>`;
 }
 
@@ -1386,22 +1451,46 @@ function settingsThemeMarkup(theme) {
   return SETTINGS_THEME_OPTIONS.map((option) => `<button type="button" class="settings-theme-option ${theme === option.value ? "active" : ""}" data-settings-theme="${option.value}" aria-pressed="${theme === option.value}" aria-label="${t(option.label)}" title="${t(option.label)}"><span class="settings-theme-preview" data-sidebar-theme="${option.sidebar}" data-main-theme="${option.main}" aria-hidden="true"><span class="settings-theme-sidebar"></span><span class="settings-theme-main">${Array.from({ length: 5 }, () => "<span></span>").join("")}</span></span></button>`).join("");
 }
 
+function settingsButtonGroupMarkup() {
+  const buttonGroup = buttonGroupPreference();
+  if (state.settingsMenu === "buttonGroup") {
+    const selectedCount = BUTTON_GROUP_OPTIONS.filter(([value]) => buttonGroup[value]).length;
+    return `<div class="settings-button-group-menu" data-settings-menu="buttonGroup">${BUTTON_GROUP_OPTIONS.map(([value, label, icon]) => `<label class="settings-button-option"><input type="checkbox" data-settings-button-option="${value}" ${buttonGroup[value] ? "checked" : ""} ${selectedCount >= 5 && !buttonGroup[value] ? "disabled" : ""}><span class="settings-button-option-icon">${treeIcon(icon)}</span><span>${escapeHtml(t(label))}</span></label>`).join("")}</div>`;
+  }
+  const selected = BUTTON_GROUP_OPTIONS.filter(([value]) => buttonGroup[value]);
+  return `<button type="button" class="settings-outline-button settings-button-group" data-settings-button-group aria-expanded="false" aria-label="按钮组" title="按钮组" style="--button-count:${selected.length}">${selected.map(([, , icon]) => treeIcon(icon)).join("")}${treeIcon("microExpand")}</button>`;
+}
+
 function settingsMarkup() {
   const theme = themeOption().value;
   const defaultView = validLayout(settingsPreference("defaultView", "list")) || "list";
   const bookmarkClick = settingsPreference("bookmarkClick", "new_tab");
   const tagSort = settingsPreference("tagSort", "name");
+  const searchRelevance = settingsPreference("searchRelevance", true);
   const nav = SETTINGS_NAV.map(([id, label, icon, supported]) => `<button type="button" class="settings-nav-item ${id === "app" ? "active" : ""}" data-settings-section="${id}" ${supported ? "" : "disabled"}>${treeIcon(icon)}<span>${t(label)}</span></button>`).join("");
   const viewOptions = VIEW_OPTIONS.map((option) => ({ value: option.value, label: option.label }));
   const clickOptions = [{ value: "new_tab", label: "在新标签页中打开" }, { value: "current_tab", label: "在当前标签页中打开" }];
-  const brokenLinkOptions = [{ value: "default", label: "默认模式" }];
+  const brokenLinkOptions = [
+    { value: "basic", label: "基础模式" },
+    { value: "default", label: "默认模式" },
+    { value: "strict", label: "严格模式" },
+    { value: "off", label: "关闭" },
+  ];
   const language = settingsPreference("language", "zh-Hans");
-  return localizeHtml(`<main class="settings-shell"><aside class="settings-sidebar"><header class="settings-sidebar-head"><button type="button" class="settings-icon-button settings-close" data-settings-close title="关闭" aria-label="关闭">${treeIcon("close")}</button><button type="button" class="settings-icon-button" data-settings-back title="返回书签" aria-label="返回书签">${treeIcon("back")}</button></header><div class="settings-sidebar-content"><div class="settings-profile"><span class="settings-avatar">${treeIcon("user")}</span><div class="settings-profile-copy"><strong>私有书签</strong><span>私有实例</span></div></div><div class="settings-nav-title">设置</div><nav class="settings-nav" aria-label="设置">${nav}</nav><div class="settings-nav-title settings-version">私有书签</div><a class="settings-nav-item settings-help" href="https://help.raindrop.io" target="_blank" rel="noopener">${treeIcon("help")}<span>帮助</span></a></div></aside><section class="settings-main"><div class="settings-main-inner"><header class="settings-main-header"><button type="button" class="settings-mobile-menu" title="显示设置菜单" aria-label="显示设置菜单">${treeIcon("menu")}</button><h1>应用</h1></header><div class="settings-main-scroll"><div class="settings-content"><div class="settings-grid"><div class="settings-label">语言</div><div>${settingsControlMarkup("language", language, LANGUAGE_OPTIONS)}</div><div class="settings-label">界面样式</div><div class="settings-theme-picker" role="group" aria-label="界面样式">${settingsThemeMarkup(theme)}</div><div class="settings-label">字体大小</div><div><label class="settings-check"><input type="checkbox" data-settings-toggle="largeFont" ${settingsPreference("largeFont", false) ? "checked" : ""}>大</label></div><div class="settings-separator"></div><div class="settings-label">默认视图模式</div><div>${settingsControlMarkup("defaultView", defaultView, viewOptions, "viewGrid")}</div><div class="settings-label">点击书签时</div><div>${settingsControlMarkup("bookmarkClick", bookmarkClick, clickOptions)}</div><div class="settings-label">按钮组</div><div><button type="button" class="settings-outline-button settings-button-group" aria-label="按钮组" title="按钮组">${treeIcon("selectAll")}${treeIcon("show")}${treeIcon("edit")}${treeIcon("trash")}<span class="settings-control-arrow">${treeIcon("microArrow")}</span></button></div><div class="settings-label">搜索</div><div><label class="settings-check settings-disabled"><input type="checkbox" disabled>按相关性排序</label></div><div class="settings-separator"></div><div class="settings-label">排序标签</div><div><label class="settings-radio"><input type="radio" name="settings-tag-sort" value="name" data-settings-tag-sort ${tagSort !== "count" ? "checked" : ""}>按名称</label><label class="settings-radio"><input type="radio" name="settings-tag-sort" value="count" data-settings-tag-sort ${tagSort === "count" ? "checked" : ""}>按书签数量</label></div><div class="settings-label">失效链接 <a class="settings-help-link" href="https://help.raindrop.io/broken-links#reducing-false-positives" target="_blank" rel="noopener">[?]</a></div><div>${settingsControlMarkup("brokenLinks", "default", brokenLinkOptions)}</div><div class="settings-label">嵌套收藏</div><div><label class="settings-check settings-disabled"><input type="checkbox" disabled>旧视图</label></div><div class="settings-separator"></div><div class="settings-label">AI</div><div><label class="settings-check settings-disabled"><input type="checkbox" disabled>询问 AI <a class="settings-help-link" href="https://help.raindrop.io/stella" target="_blank" rel="noopener">[?]</a></label><label class="settings-check settings-disabled"><input type="checkbox" disabled>推荐的收藏集和标签</label><p class="settings-sub-label">Only available for <a href="https://app.raindrop.io/settings/pro" target="_blank" rel="noopener">Pro</a>. AI 功能暂未接入。</p></div></div></div></div></div></section></main>`);
+  return localizeHtml(`<main class="settings-shell"><aside class="settings-sidebar"><header class="settings-sidebar-head"><button type="button" class="settings-icon-button settings-close" data-settings-close title="关闭" aria-label="关闭">${treeIcon("close")}</button><button type="button" class="settings-icon-button" data-settings-back title="返回书签" aria-label="返回书签">${treeIcon("back")}</button></header><div class="settings-sidebar-content"><div class="settings-profile"><span class="settings-avatar">${treeIcon("user")}</span><div class="settings-profile-copy"><strong>私有书签</strong><span>私有实例</span></div></div><div class="settings-nav-title">设置</div><nav class="settings-nav" aria-label="设置">${nav}</nav><div class="settings-nav-title settings-version">私有书签</div><a class="settings-nav-item settings-help" href="https://help.raindrop.io" target="_blank" rel="noopener">${treeIcon("help")}<span>帮助</span></a></div></aside><section class="settings-main"><div class="settings-main-inner"><header class="settings-main-header"><button type="button" class="settings-mobile-menu" title="显示设置菜单" aria-label="显示设置菜单">${treeIcon("menu")}</button><h1>应用</h1></header><div class="settings-main-scroll"><div class="settings-content"><div class="settings-grid"><div class="settings-label">语言</div><div>${settingsControlMarkup("language", language, LANGUAGE_OPTIONS)}</div><div class="settings-label">界面样式</div><div class="settings-theme-picker" role="group" aria-label="界面样式">${settingsThemeMarkup(theme)}</div><div class="settings-label">字体大小</div><div><label class="settings-check"><input type="checkbox" data-settings-toggle="largeFont" ${settingsPreference("largeFont", false) ? "checked" : ""}>大</label></div><div class="settings-separator"></div><div class="settings-label">默认视图模式</div><div>${settingsControlMarkup("defaultView", defaultView, viewOptions, "viewGrid")}</div><div class="settings-label">点击书签时</div><div>${settingsControlMarkup("bookmarkClick", bookmarkClick, clickOptions)}</div><div class="settings-label">按钮组</div><div>${settingsButtonGroupMarkup()}</div><div class="settings-label">搜索</div><div><label class="settings-check settings-search-relevance"><input type="checkbox" data-settings-toggle="searchRelevance" ${searchRelevance ? "checked" : ""}>按相关性排序</label></div><div class="settings-separator"></div><div class="settings-label">排序标签</div><div><label class="settings-radio"><input type="radio" name="settings-tag-sort" value="name" data-settings-tag-sort ${tagSort !== "count" ? "checked" : ""}>按名称</label><label class="settings-radio"><input type="radio" name="settings-tag-sort" value="count" data-settings-tag-sort ${tagSort === "count" ? "checked" : ""}>按书签数量</label></div><div class="settings-label">失效链接 <a class="settings-help-link" href="https://help.raindrop.io/broken-links#reducing-false-positives" target="_blank" rel="noopener">[?]</a></div><div>${settingsControlMarkup("brokenLinks", "default", brokenLinkOptions)}</div><div class="settings-label">嵌套收藏</div><div><label class="settings-check settings-disabled"><input type="checkbox" disabled>旧视图</label></div><div class="settings-separator"></div><div class="settings-label">AI</div><div><label class="settings-check settings-disabled"><input type="checkbox" disabled>询问 AI <a class="settings-help-link" href="https://help.raindrop.io/stella" target="_blank" rel="noopener">[?]</a></label><label class="settings-check settings-disabled"><input type="checkbox" disabled>推荐的收藏集和标签</label><p class="settings-sub-label">Only available for <a href="https://app.raindrop.io/settings/pro" target="_blank" rel="noopener">Pro</a>. AI 功能暂未接入。</p></div></div></div></div></div></section></main>`);
 }
 
 function renderSettings() {
   document.title = languageIsEnglish() ? "Private Bookmarks" : "私有书签";
   root.innerHTML = settingsMarkup();
+  const legacyLabel = t("旧视图");
+  const legacyInput = [...root.querySelectorAll(".settings-check input")].find((input) => input.parentElement?.textContent.trim() === legacyLabel);
+  if (legacyInput) {
+    legacyInput.disabled = false;
+    legacyInput.checked = settingsPreference("nestedViewLegacy", false);
+    legacyInput.dataset.settingsToggle = "nestedViewLegacy";
+    legacyInput.parentElement.classList.remove("settings-disabled");
+  }
   const aiNote = root.querySelector(".settings-sub-label");
   if (aiNote) aiNote.innerHTML = languageIsEnglish() ? 'Only available for <a href="https://app.raindrop.io/settings/pro" target="_blank" rel="noopener">Pro</a>. AI is not connected yet.' : '仅 Pro 可用。AI 功能暂未接入。';
   applyTheme();
@@ -1410,18 +1499,82 @@ function renderSettings() {
 }
 
 function setSettingsPreference(key, value) {
+  if (key === "brokenLinks") key = "brokenLevel";
   const previous = state.preferences?.[key];
+  if (key === "defaultView" && previous !== value) return beginDefaultViewChange(value);
+  const keepMenu = key === "buttonGroup";
+  if (previous === value) {
+    state.settingsMenu = keepMenu ? "buttonGroup" : null;
+    renderSettings();
+    return;
+  }
   state.preferences = { ...state.preferences, [key]: value };
-  state.settingsMenu = null;
+  if (key === "nestedViewLegacy") state.settingsNeedsReload = true;
+  state.settingsMenu = keepMenu ? "buttonGroup" : null;
   applyTheme();
   renderSettings();
-  savePreferences({ [key]: value }).catch((error) => {
+  const save = savePreferences({ [key]: value });
+  state.settingsSavePromise = save;
+  save.catch((error) => {
     state.preferences = { ...state.preferences, [key]: previous };
+    if (key === "nestedViewLegacy") state.settingsNeedsReload = false;
+    state.settingsMenu = keepMenu ? "buttonGroup" : null;
     applyTheme();
+    renderSettings();
+    showError(error);
+  }).finally(() => { if (state.settingsSavePromise === save) state.settingsSavePromise = null; });
+}
+
+let pendingDefaultViewChange = null;
+
+function beginDefaultViewChange(value) {
+  const previousPreferences = state.preferences;
+  state.preferences = { ...state.preferences, defaultView: value };
+  state.settingsMenu = null;
+  renderSettings();
+  pendingDefaultViewChange = { value, previousPreferences };
+  const option = viewOption(value);
+  defaultViewDialog.querySelector("#default-view-dialog-title").textContent = `⚠ ${t("默认视图已更改")}`;
+  defaultViewDialog.querySelector("[data-default-view-description]").innerHTML = languageIsEnglish()
+    ? `${t("新收藏夹现在将使用")} ${escapeHtml(t(option.label))} ${t("视图模式。")}` + `<br>${t("是否将此更改应用于所有现有收藏夹？")}`
+    : `新收藏夹现在将使用 ${escapeHtml(t(option.label))} 视图模式。<br>是否将此更改应用于所有现有收藏夹？`;
+  defaultViewDialog.showModal();
+}
+
+function finishDefaultViewChange(applyToAll) {
+  const change = pendingDefaultViewChange;
+  if (!change) return;
+  pendingDefaultViewChange = null;
+  const changes = applyToAll
+    ? { layout: change.value, defaultView: change.value, layoutByScope: allLayoutScopes(change.value) }
+    : { defaultView: change.value };
+  if (applyToAll) state.layout = change.value;
+  state.preferences = { ...state.preferences, ...changes };
+  defaultViewDialog.close();
+  savePreferences(changes).catch((error) => {
+    state.preferences = change.previousPreferences;
+    state.layout = layoutForScope(state.preferences);
     renderSettings();
     showError(error);
   });
 }
+
+defaultViewDialog.querySelector("[data-default-view-choice='keep']").onclick = () => finishDefaultViewChange(false);
+defaultViewDialog.querySelector("[data-default-view-choice='all']").onclick = () => finishDefaultViewChange(true);
+defaultViewDialog.addEventListener("cancel", () => finishDefaultViewChange(false));
+
+function positionSettingsMenu() {
+  const menu = root.querySelector("[data-settings-menu]");
+  const trigger = [...root.querySelectorAll("[data-settings-select]")].find((button) => button.dataset.settingsSelect === state.settingsMenu);
+  if (!menu || !trigger) return;
+  const triggerRect = trigger.getBoundingClientRect();
+  const left = Math.max(8, Math.min(window.innerWidth - menu.offsetWidth - 8, triggerRect.left));
+  const top = Math.max(8, Math.min(window.innerHeight - menu.offsetHeight - 8, triggerRect.bottom));
+  menu.style.setProperty("--left", `${left}px`);
+  menu.style.setProperty("--top", `${top}px`);
+}
+
+let settingsMenuPositionBound = false;
 
 function bindSettings() {
   root.querySelector(".settings-mobile-menu")?.addEventListener("click", () => root.querySelector(".settings-shell")?.classList.toggle("settings-sidebar-open"));
@@ -1434,17 +1587,29 @@ function bindSettings() {
     state.settingsMenu = state.settingsMenu === button.dataset.settingsSelect ? null : button.dataset.settingsSelect;
     renderSettings();
   });
+  root.querySelectorAll("[data-settings-button-group]").forEach((button) => button.onclick = (event) => {
+    event.stopPropagation();
+    state.settingsMenu = state.settingsMenu === "buttonGroup" ? null : "buttonGroup";
+    renderSettings();
+  });
   root.querySelectorAll("[data-settings-option]").forEach((option) => option.onclick = () => setSettingsPreference(option.dataset.settingsOption, option.dataset.settingsValue));
   root.querySelectorAll("[data-settings-toggle]").forEach((input) => input.onchange = () => setSettingsPreference(input.dataset.settingsToggle, input.checked));
+  root.querySelectorAll("[data-settings-button-option]").forEach((input) => input.onchange = () => setSettingsPreference("buttonGroup", { ...buttonGroupPreference(), [input.dataset.settingsButtonOption]: input.checked }));
   root.querySelectorAll("[data-settings-tag-sort]").forEach((input) => input.onchange = () => setSettingsPreference("tagSort", input.value));
   root.querySelectorAll("[data-settings-theme]").forEach((button) => button.onclick = () => setSettingsPreference("theme", button.dataset.settingsTheme));
+  positionSettingsMenu();
+  if (!settingsMenuPositionBound) {
+    window.addEventListener("resize", positionSettingsMenu);
+    document.addEventListener("scroll", positionSettingsMenu, true);
+    settingsMenuPositionBound = true;
+  }
 }
 
 async function load() {
   const path = queryPath();
-  const requests = [api("/v1/bootstrap"), api(path), path === "/v1/bookmarks?" ? null : api("/v1/bookmarks?")];
+  const requests = [api("/v1/bootstrap"), api(path), path === "/v1/bookmarks?" ? null : api("/v1/bookmarks?"), api(tagQueryPath()).catch(() => [])];
   if (state.view === "trash") requests.push(api("/v1/collections?trash=1"));
-  const [boot, items, allItems, trashedCollections = []] = await Promise.all(requests);
+  const [boot, items, allItems, tags, trashedCollections = []] = await Promise.all(requests);
   setCoverUploadEnabled(boot.capabilities?.mediaUpload);
   state.collections = boot.collections;
   state.collectionCounts = boot.collectionCounts || {};
@@ -1454,6 +1619,7 @@ async function load() {
   state.collapsedCollections = new Set(Array.isArray(boot.preferences.collapsedCollectionIds) ? boot.preferences.collapsedCollectionIds : []);
   state.items = items;
   state.allItems = allItems || items;
+  state.tags = Array.isArray(tags) ? tags : [];
   state.favoriteCount = (allItems || items).filter((item) => item.favorite).length;
   state.trashedCollections = trashedCollections;
   applyTheme();
@@ -2187,7 +2353,8 @@ function refreshSelectionUi({ refreshHeader = false } = {}) {
     const selected = state.selected.has(card.dataset.dragBookmark);
     card.classList.toggle("selected", selected);
     card.classList.toggle("selection-mode", selecting);
-    card.querySelector("[data-select]").checked = selected;
+    const input = card.querySelector("[data-select]");
+    if (input) input.checked = selected;
   });
   const header = root.querySelector(".workspace-head");
   if (header && (refreshHeader || header.classList.contains("workspace-selection-head") !== selecting)) {
@@ -3117,7 +3284,7 @@ coverUrlDialog.addEventListener("close", () => {
 
 document.addEventListener("pointerdown", (event) => {
   const settingsShell = event.target.closest(".settings-shell");
-  const insideSettingsControl = event.target.closest("[data-settings-select], [data-settings-menu]");
+  const insideSettingsControl = event.target.closest("[data-settings-select], [data-settings-button-group], [data-settings-menu]");
   if (state.settingsOpen && state.settingsMenu && !insideSettingsControl) {
     state.settingsMenu = null;
     renderSettings();
@@ -3278,7 +3445,11 @@ window.addEventListener("unhandledrejection", (event) => {
 window.addEventListener("popstate", () => {
   state.settingsOpen = new URL(location.href).searchParams.get("settings") === "app";
   state.settingsMenu = null;
-  render();
+  if (state.settingsOpen) render();
+  else if (state.settingsNeedsReload) {
+    state.settingsNeedsReload = false;
+    load().catch(showError);
+  } else render();
 });
 
 if (await connection()) load().catch(showError);
