@@ -31,7 +31,7 @@ class Statement {
 class D1TestDatabase {
   constructor() {
     this.database = new DatabaseSync(":memory:");
-    for (const file of ["0001_initial.sql", "0002_trash_source.sql", "0003_collection_trash_source.sql"]) this.database.exec(readFileSync(new URL(`../migrations/${file}`, import.meta.url), "utf8"));
+    for (const file of ["0001_initial.sql", "0002_trash_source.sql", "0003_collection_trash_source.sql", "0004_reminder.sql", "0005_bookmark_type.sql"]) this.database.exec(readFileSync(new URL(`../migrations/${file}`, import.meta.url), "utf8"));
   }
 
   prepare(sql) {
@@ -93,6 +93,15 @@ test("D1 updates reject stale bookmark revisions", async () => {
   const bookmark = await store.createBookmark({ link: "https://example.com/conflict", title: "Conflict", description: "", note: "", cover: "", media: [], collectionId: "unsorted", tags: [], highlights: [], favorite: false });
   assert.ok((await store.updateBookmark(bookmark.id, bookmark.revision, { note: "new" })).bookmark);
   assert.ok((await store.updateBookmark(bookmark.id, bookmark.revision, { note: "stale" })).conflict);
+});
+
+test("D1 stores and clears bookmark reminders", async () => {
+  const store = new D1Store(new D1TestDatabase());
+  const bookmark = await store.createBookmark({ link: "https://example.com/reminder", type: "article", title: "Reminder", description: "", note: "", reminder: "2026-08-08T09:00:00.000Z", cover: "", media: [], collectionId: "unsorted", tags: [], highlights: [], favorite: false });
+  assert.equal(bookmark.reminder, "2026-08-08T09:00:00.000Z");
+  assert.equal(bookmark.type, "article");
+  const updated = await store.updateBookmark(bookmark.id, bookmark.revision, { reminder: "" });
+  assert.equal(updated.bookmark.reminder, "");
 });
 
 test("D1 collection counts include only live bookmarks", async () => {

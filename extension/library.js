@@ -1,4 +1,5 @@
 import { api, connection, disconnect } from "./api.js";
+import { bookmarkType, duplicateLinks, matchesSearchFilters, parseSearchQuery } from "./filters.js";
 import { renderMarkdown } from "./markdown.js";
 import { collectionOptions, connectionView, escapeHtml } from "./ui.js";
 
@@ -13,7 +14,8 @@ const collectionPickerDialog = document.querySelector("#collection-picker-dialog
 const batchTagDialog = document.querySelector("#batch-tag-dialog");
 const defaultViewDialog = document.querySelector("#default-view-dialog");
 const SEARCH_HISTORY_KEY = "private-bookmarks.search-history";
-const initialSettingsRoute = new URL(location.href).searchParams.get("settings") === "app";
+const initialRoute = new URL(location.href).searchParams;
+const initialSettingsRoute = initialRoute.get("settings") === "app";
 const DEFAULT_BUTTON_GROUP = Object.freeze({ select: true, current_tab: false, new_tab: true, preview: false, web: false, copy: false, ask: false, important: false, tags: false, edit: true, remove: true });
 const BUTTON_GROUP_OPTIONS = [
   ["select", "选择", "selectAll"], ["current_tab", "直接在浏览器打开", "click"], ["new_tab", "在新标签页中打开", "open"],
@@ -31,7 +33,7 @@ function readSearchHistory() {
 }
 
 const state = {
-  view: "all", collectionId: null, query: "", quickFilter: "", tag: "", selected: new Set(), favoriteCount: 0, tags: [],
+  view: initialRoute.get("view") || "all", collectionId: initialRoute.get("collection"), query: initialRoute.get("search") || "", tag: "", selected: new Set(), favoriteCount: 0, tags: [],
   items: [], allItems: [], collections: [], collectionCounts: {}, trashCount: 0, trashedCollections: [], preferences: null, layout: "list",
   collapsedCollections: new Set(), dragBookmark: null, dragCollection: null, searchTimer: null, sidebarWidth: null, cardMenuId: null, cardActionProxies: null,
   searchMenuOpen: false, sortMenuOpen: false, viewMenuOpen: false, themeMenuOpen: false, recentSearches: readSearchHistory(), groupMenuId: null, collectionMenuId: null, pickerCollectionMenuId: null, pickerGroupMenuId: null, inlineCollectionCreate: null, tagMenuOpen: false, tagItemMenu: null, collectionValueAction: null, collectionValueId: null, collectionSelection: null,
@@ -60,8 +62,8 @@ const EN_TEXT = Object.freeze({
   "全部": "All",
   "应用": "App", "帐户": "Account", "订阅": "Subscription", "导入": "Import", "整合方式": "Integrations", "备份": "Backups", "帮助": "Help", "设置": "Settings", "私有书签": "Private Bookmarks", "私有实例": "Private instance",
   "语言": "Language", "界面样式": "Interface theme", "字体大小": "Font size", "大": "Large", "默认视图模式": "Default view", "默认视图已更改": "Default view changed", "新收藏夹现在将使用": "New collections will now use", "视图模式。": "view mode.", "是否将此更改应用于所有现有收藏夹？": "Apply this change to all existing collections?", "保持不变": "Keep unchanged", "全部更新": "Update all", "列表": "List", "卡片": "Cards", "标题": "Title", "心情看板": "Moodboard", "点击书签时": "When clicking bookmarks", "在新标签页中打开": "Open in new tab", "在当前标签页中打开": "Open in current tab", "按钮组": "Button group", "搜索": "Search", "按相关性排序": "Sort by relevance", "排序标签": "Sort tags", "按名称": "By name", "按书签数量": "By bookmark count", "失效链接": "Broken links", "嵌套收藏": "Nested collections", "旧视图": "Legacy view", "询问 AI": "Ask AI", "推荐的收藏集和标签": "Recommended collections and tags", "仅 Pro 可用。AI 功能暂未接入。": "Only available for Pro. AI is not connected yet.", "AI 功能暂未接入。": "AI is not connected yet.",
-  "所有书签": "All bookmarks", "未分类": "Unsorted", "星标": "Favorites", "待检查": "Pending check", "废纸篓": "Trash", "收藏": "Collections", "快速过滤…": "Quick filters…", "备注": "Notes", "高亮": "Highlights", "没有标签": "Untagged", "标签": "Tags", "建议的": "Suggested", "最近使用的": "Recently used", "删除最近项": "Remove recent item", "搜索帮助": "Search help", "排序": "Sort", "网站": "Website", "视图": "View", "封面": "Cover", "图标": "Icon", "左": "Left", "右": "Right", "书签信息": "Bookmark info", "描述": "Description", "在列表中显示": "Show in list", "在卡片中显示": "Show in cards", "在标题中显示": "Show in titles", "在心情看板中显示": "Show in moodboard", "应用到全部": "Apply to all", "添加": "Add", "导出书签": "Export bookmarks", "检查链接": "Check links", "导入书签": "Import bookmarks", "直接在浏览器打开": "Open in browser", "移动": "Move", "添加标签": "Add tags", "删除": "Delete", "取消": "Cancel", "更多": "More", "选择所有": "Select all", "创建页面截图": "Create page screenshot", "正在创建页面截图…": "Creating page screenshot…", "刷新预览": "Refresh preview", "添加到收藏夹": "Add to favorites", "从收藏夹移除": "Remove from favorites", "移除标签": "Remove tags", "此视图中还没有书签。": "No bookmarks in this view.", "主题：": "Theme: ", "主题": "Theme", "浅色": "Light", "深色": "Dark", "跟随系统": "System", "日落": "Sunset", "Default mode": "Default mode", "中文（汉语）": "中文（汉语）", "新标签": "New tag", "显示": "Show", "隐藏标签": "Hide tags", "按名称排序标签": "Sort tags by name", "按书签数排序标签": "Sort tags by count", "显示侧边栏": "Show sidebar", "关闭侧边栏": "Close sidebar",
-  "关闭": "Close", "返回书签": "Back to bookmarks", "显示设置菜单": "Show settings menu", "可选": "Optional", "选项": " options", "书签详情": "Bookmark details", "暂未支持": "Not supported yet", "打开原网页": "Open original page", "更改图标": "Change icon", "添加描述": "Add description", "添加备注": "Add note", "预览 Markdown": "Preview Markdown", "添加标签…": "Add tags…", "最喜爱的": "Favorite", "提醒暂未支持": "Reminders are not supported yet", "添加 URL…": "Add URL…", "上传封面文件": "Upload cover file", "可用封面": "Available covers", "分享收藏夹": "Share collection", "复制": "Copy", "系统分享": "Share", "添加书签": "Add bookmark", "编辑": "Edit", "询问": "Ask", "Web存档": "Web archive", "保存": "Save", "添加 URL": "Add URL", "选择收藏集": "Select collection", "查找或创建新的收藏集…": "Find or create a collection…", "网址": "URL", "收藏夹": "Collection", "封面 URL": "Cover URL", "选择": "Select", "选择全部": "Select all", "恢复": "Restore", "截屏": "Screenshot", "创建嵌套的集合": "Create nested collection", "创建收藏集": "Create collection", "改名": "Rename", "分享": "Share", "显示分组": "Show group", "隐藏分组": "Hide group", "展开": "Expand", "折叠": "Collapse", "收起": "Collapse", "创建群组": "Create group", "删除分组": "Delete group", "新建收藏夹": "New collection", "新收藏": "New collection", "新群组": "New group", "更多操作": "More actions", "复制链接": "Copy link", "将链接复制到剪贴板": "Copy link to clipboard", "列表视图": "List view", "网格视图": "Grid view", "手动排序": "Manual order", "最近添加": "Recently added", "标题 (A-Z)": "Title (A-Z)", "网站 (A-Z)": "Website (A-Z)", "调整侧边栏宽度": "Adjust sidebar width", "当前标签页": "Current tab", "预览模式": "Preview mode", "Web 预览模式": "Web preview mode", "搜索设置 / 筛选": "Search settings / filters", "在条件前添加短横(-) 将其排除在搜索范围之外": "Prefix a condition with a hyphen (-) to exclude it from search", "浏览器扩展": "Browser extension", "下载应用": "Download app", "帮助与支持": "Help and support", "博客": "Blog", "更新内容?": "What's new?", "注销": "Log out", "按日期 ↑": "By date ↑", "按日期 ↓": "By date ↓", "类型": "Type", "创建日期": "Created", "在标题/描述中": "In title/description", "在URL中": "In URL", "移动到…": "Move to…", "移动到": "Move to", "全选": "Select all", "取消星标": "Remove favorite", "添加星标": "Add favorite", "收藏选项": "Collection options", "收藏集选项": "Collection options", "收藏夹名称": "Collection name", "高亮颜色": "Highlight color", "（无备注）": "(No note)"
+  "所有书签": "All bookmarks", "未分类": "Unsorted", "星标": "Favorites", "待检查": "Pending check", "废纸篓": "Trash", "收藏": "Collections", "快速过滤…": "Quick filters…", "备注": "Notes", "高亮": "Highlights", "提醒": "Reminders", "重复书签": "Duplicates", "没有标签": "Untagged", "标签": "Tags", "链接": "Links", "文章": "Articles", "图片": "Images", "视频": "Videos", "音频": "Audio", "文档": "Documents", "建议的": "Suggested", "最近使用的": "Recently used", "删除最近项": "Remove recent item", "搜索帮助": "Search help", "排序": "Sort", "网站": "Website", "视图": "View", "封面": "Cover", "图标": "Icon", "左": "Left", "右": "Right", "书签信息": "Bookmark info", "描述": "Description", "在列表中显示": "Show in list", "在卡片中显示": "Show in cards", "在标题中显示": "Show in titles", "在心情看板中显示": "Show in moodboard", "应用到全部": "Apply to all", "添加": "Add", "导出书签": "Export bookmarks", "检查链接": "Check links", "导入书签": "Import bookmarks", "直接在浏览器打开": "Open in browser", "移动": "Move", "添加标签": "Add tags", "删除": "Delete", "取消": "Cancel", "更多": "More", "选择所有": "Select all", "创建页面截图": "Create page screenshot", "正在创建页面截图…": "Creating page screenshot…", "刷新预览": "Refresh preview", "添加到收藏夹": "Add to favorites", "从收藏夹移除": "Remove from favorites", "移除标签": "Remove tags", "此视图中还没有书签。": "No bookmarks in this view.", "主题：": "Theme: ", "主题": "Theme", "浅色": "Light", "深色": "Dark", "跟随系统": "System", "日落": "Sunset", "Default mode": "Default mode", "中文（汉语）": "中文（汉语）", "新标签": "New tag", "显示": "Show", "隐藏标签": "Hide tags", "按名称排序标签": "Sort tags by name", "按书签数排序标签": "Sort tags by count", "显示侧边栏": "Show sidebar", "关闭侧边栏": "Close sidebar",
+  "关闭": "Close", "返回书签": "Back to bookmarks", "显示设置菜单": "Show settings menu", "可选": "Optional", "选项": " options", "书签详情": "Bookmark details", "暂未支持": "Not supported yet", "打开原网页": "Open original page", "更改图标": "Change icon", "添加描述": "Add description", "添加备注": "Add note", "预览 Markdown": "Preview Markdown", "添加标签…": "Add tags…", "最喜爱的": "Favorite", "添加 URL…": "Add URL…", "上传封面文件": "Upload cover file", "可用封面": "Available covers", "分享收藏夹": "Share collection", "复制": "Copy", "系统分享": "Share", "添加书签": "Add bookmark", "编辑": "Edit", "询问": "Ask", "Web存档": "Web archive", "保存": "Save", "添加 URL": "Add URL", "选择收藏集": "Select collection", "查找或创建新的收藏集…": "Find or create a collection…", "网址": "URL", "收藏夹": "Collection", "封面 URL": "Cover URL", "选择": "Select", "选择全部": "Select all", "恢复": "Restore", "截屏": "Screenshot", "创建嵌套的集合": "Create nested collection", "创建收藏集": "Create collection", "改名": "Rename", "分享": "Share", "显示分组": "Show group", "隐藏分组": "Hide group", "展开": "Expand", "折叠": "Collapse", "收起": "Collapse", "创建群组": "Create group", "删除分组": "Delete group", "新建收藏夹": "New collection", "新收藏": "New collection", "新群组": "New group", "更多操作": "More actions", "复制链接": "Copy link", "将链接复制到剪贴板": "Copy link to clipboard", "列表视图": "List view", "网格视图": "Grid view", "手动排序": "Manual order", "最近添加": "Recently added", "标题 (A-Z)": "Title (A-Z)", "网站 (A-Z)": "Website (A-Z)", "调整侧边栏宽度": "Adjust sidebar width", "当前标签页": "Current tab", "预览模式": "Preview mode", "Web 预览模式": "Web preview mode", "搜索设置 / 筛选": "Search settings / filters", "在条件前添加短横(-) 将其排除在搜索范围之外": "Prefix a condition with a hyphen (-) to exclude it from search", "浏览器扩展": "Browser extension", "下载应用": "Download app", "帮助与支持": "Help and support", "博客": "Blog", "更新内容?": "What's new?", "注销": "Log out", "按日期 ↑": "By date ↑", "按日期 ↓": "By date ↓", "类型": "Type", "创建日期": "Created", "在标题/描述中": "In title/description", "在URL中": "In URL", "移动到…": "Move to…", "移动到": "Move to", "全选": "Select all", "取消星标": "Remove favorite", "添加星标": "Add favorite", "收藏选项": "Collection options", "收藏集选项": "Collection options", "收藏夹名称": "Collection name", "高亮颜色": "Highlight color", "（无备注）": "(No note)"
 });
 
 function languageIsEnglish() {
@@ -313,61 +315,33 @@ const SEARCH_SUGGESTIONS = [
   { id: "favorite", label: "最喜爱的", token: "important:true", icon: "like", className: "favorite" },
   { id: "tags", label: "标签", token: "#", icon: "searchTag", className: "tags" },
   { id: "note", label: "备注", token: "note:true", icon: "note", className: "note" },
-  { id: "type", label: "类型", token: "type:link", icon: "type", className: "type" },
+  { id: "highlights", label: "高亮", token: "highlights:true", icon: "note", className: "highlights" },
+  { id: "reminder", label: "提醒", token: "reminder:true", icon: "calendar", className: "reminder" },
+  { id: "type", label: "类型", token: "type:", icon: "type", className: "type" },
   { id: "created", label: "创建日期", token: "created:", icon: "calendar", className: "created" },
   { id: "info", label: "在标题/描述中", token: "info:", icon: "info", className: "info" },
   { id: "url", label: "在URL中", token: "url:", icon: "link", className: "url" },
+  { id: "broken", label: "失效链接", token: "broken:true", icon: "link", className: "broken" },
+  { id: "duplicate", label: "重复书签", token: "duplicate:true", icon: "duplicates", className: "duplicate" },
+  { id: "untagged", label: "没有标签", token: "notag:true", icon: "tag", className: "untagged" },
 ];
-
-function searchFilterFor(query) {
-  const value = String(query || "").trim();
-  const lower = value.toLocaleLowerCase();
-  if (lower === "important" || lower === "important:true") return { kind: "favorite" };
-  if (lower === "#" || lower === "tags" || lower === "tag:") return { kind: "tags" };
-  if (lower === "notag:true") return { kind: "untagged" };
-  if (lower === "note:true" || lower === "note:") return { kind: "note" };
-  if (lower.startsWith("note:")) return { kind: "note", value: value.slice(5).trim() };
-  if (lower === "type:" || lower === "type:link") return { kind: "type", value: lower.slice(5) };
-  if (lower.startsWith("type:")) return { kind: "type", value: lower.slice(5).trim() };
-  if (lower === "created:" || lower === "created") return { kind: "created", value: "" };
-  if (lower.startsWith("created:")) return { kind: "created", value: value.slice(8).trim() };
-  if (lower === "info:" || lower === "info") return { kind: "info", value: "" };
-  if (lower.startsWith("info:")) return { kind: "info", value: value.slice(5).trim() };
-  if (lower === "url:" || lower === "url") return { kind: "url", value: "" };
-  if (lower.startsWith("url:")) return { kind: "url", value: value.slice(4).trim() };
-  if (value.startsWith("#")) return { kind: "tag", value: value.slice(1).trim().toLocaleLowerCase() };
-  return null;
-}
-
-function matchesSearchFilter(item, filter) {
-  if (!filter) return true;
-  const text = (value) => String(value || "").toLocaleLowerCase();
-  if (filter.kind === "favorite") return Boolean(item.favorite);
-  if (filter.kind === "tags") return item.tags.length > 0;
-  if (filter.kind === "untagged") return item.tags.length === 0;
-  if (filter.kind === "note") return !filter.value ? Boolean(item.note) : text(item.note).includes(text(filter.value));
-  if (filter.kind === "type") return !filter.value || filter.value === "link";
-  if (filter.kind === "created") return Boolean(item.createdAt) && (!filter.value || text(item.createdAt).includes(text(filter.value)));
-  if (filter.kind === "info") return `${item.title || ""} ${item.description || ""}`.toLocaleLowerCase().includes(text(filter.value));
-  if (filter.kind === "url") return text(item.link).includes(text(filter.value));
-  if (filter.kind === "tag") return item.tags.some((tag) => text(tag) === text(filter.value));
-  return true;
-}
 
 function queryPath() {
   const params = new URLSearchParams();
+  const search = parseSearchQuery(state.query).text;
   if (state.collectionId) params.set("collection", state.collectionId);
   else if (state.view !== "all") params.set("view", state.view);
-  if (state.query && !searchFilterFor(state.query)) params.set("search", state.query);
-  if (state.query && !searchFilterFor(state.query) && state.preferences?.searchRelevance !== false) params.set("sort", "score");
+  if (search) params.set("search", search);
+  if (search && state.preferences?.searchRelevance !== false) params.set("sort", "score");
   return `/v1/bookmarks?${params}`;
 }
 
 function tagQueryPath() {
   const params = new URLSearchParams();
+  const search = parseSearchQuery(state.query).text;
   if (state.collectionId) params.set("collection", state.collectionId);
   else if (state.view !== "all") params.set("view", state.view);
-  if (state.query && !searchFilterFor(state.query)) params.set("search", state.query);
+  if (search) params.set("search", search);
   params.set("tagsSort", state.preferences?.tagSort === "count" ? "-count" : "_id");
   return `/v1/tags?${params}`;
 }
@@ -377,10 +351,18 @@ function searchSuggestionCount(id) {
   if (id === "favorite") return items.filter((item) => item.favorite).length;
   if (id === "tags") return items.filter((item) => item.tags.length).length;
   if (id === "note") return items.filter((item) => item.note).length;
+  if (id === "highlights") return items.filter((item) => item.highlights.length).length;
+  if (id === "reminder") return items.filter((item) => item.reminder).length;
   if (id === "type") return items.length;
   if (id === "created") return items.filter((item) => item.createdAt).length;
   if (id === "info") return items.filter((item) => item.title || item.description).length;
   if (id === "url") return items.filter((item) => item.link).length;
+  if (id === "broken") return items.filter((item) => item.health.status === "broken").length;
+  if (id === "duplicate") {
+    const duplicates = duplicateLinks(items);
+    return items.filter((item) => duplicates.has(item.link)).length;
+  }
+  if (id === "untagged") return items.filter((item) => !item.tags.length).length;
   return 0;
 }
 
@@ -421,12 +403,30 @@ function closeSearchMenu() {
   renderSearchMenu();
 }
 
-function commitSearch(value, remember = true) {
+function updateLibraryRoute(mode = "replace") {
+  const url = new URL(location.href);
+  for (const key of ["view", "collection", "search"]) url.searchParams.delete(key);
+  if (state.collectionId) url.searchParams.set("collection", state.collectionId);
+  else if (state.view !== "all") url.searchParams.set("view", state.view);
+  if (state.query) url.searchParams.set("search", state.query);
+  history[`${mode}State`]({}, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
+function readLibraryRoute() {
+  const params = new URL(location.href).searchParams;
+  state.view = params.get("view") || "all";
+  state.collectionId = params.get("collection");
+  state.query = params.get("search") || "";
+  state.tag = "";
+}
+
+function commitSearch(value, remember = true, historyMode = "replace") {
   clearTimeout(state.searchTimer);
   state.query = String(value || "").trim();
   state.selected.clear();
   state.cardMenuId = null;
   if (remember) rememberSearch(state.query);
+  updateLibraryRoute(historyMode);
   load().catch(showError);
 }
 
@@ -437,7 +437,7 @@ function bindSearchMenu() {
     const input = root.querySelector("#search");
     if (input) input.value = query;
     state.searchMenuOpen = false;
-    commitSearch(query);
+    commitSearch(query, true, "push");
   });
   const clear = root.querySelector("[data-search-recent-clear]");
   if (clear) clear.onclick = (event) => {
@@ -523,6 +523,7 @@ function workspaceHref() {
   const params = new URLSearchParams();
   if (state.collectionId) params.set("collection", state.collectionId);
   else if (state.view !== "all") params.set("view", state.view);
+  if (state.query) params.set("search", state.query);
   return `library.html${params.toString() ? `?${params}` : ""}`;
 }
 
@@ -739,13 +740,11 @@ function workspaceHeaderMarkup(items, selection) {
 }
 
 function visibleItems() {
-  const searchFilter = searchFilterFor(state.query);
+  const filters = parseSearchQuery(state.query).filters;
+  const duplicates = duplicateLinks(sidebarItems());
   return state.items.filter((item) => {
-    if (searchFilter && !matchesSearchFilter(item, searchFilter)) return false;
+    if (!matchesSearchFilters(item, filters, duplicates)) return false;
     if (state.tag && !item.tags.some((tag) => tag.toLocaleLowerCase() === state.tag.toLocaleLowerCase())) return false;
-    if (state.quickFilter === "notes" && !item.note) return false;
-    if (state.quickFilter === "highlights" && !item.highlights.length) return false;
-    if (state.quickFilter === "untagged" && item.tags.length) return false;
     return true;
   });
 }
@@ -978,6 +977,11 @@ function dateLabel(value) {
 
 function dateTimeLabel(value) {
   try { return new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(value)); } catch { return ""; }
+}
+
+function dateTimeInputValue(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 }
 
 function faviconUrl(link, size = 20) {
@@ -1216,7 +1220,7 @@ function card(item, index) {
   const description = item.description ? escapeHtml(item.description) : "";
   const tags = item.tags.map((tag) => `<span class="card-tag"><span class="card-tag-icon">${treeIcon("tag", true)}</span>${escapeHtml(tag)}</span>`).join("");
   const status = item.health.status === "broken" ? `<section><span class="health broken" title="失效链接">⌁</span></section>` : "";
-  const source = `<section><a class="card-path" href="#" data-card-collection="${escapeHtml(item.collectionId)}"><span class="card-path-icon">${treeIcon(item.collectionId === "unsorted" ? "inbox" : "folder")}</span>${escapeHtml(masonryView ? collectionName(item.collectionId) : collectionPath(item.collectionId))}</a></section>${item.favorite ? `<section data-inline="true" class="card-important">${treeIcon("importantActive", true)}</section>` : ""}<section>${escapeHtml(host(item.link))}</section>${item.createdAt ? `<section>${dateLabel(item.createdAt)}</section>` : ""}${item.highlights.length ? `<section>${item.highlights.length} 条高亮</section>` : ""}${status}`;
+  const source = `<section><a class="card-path" href="#" data-card-collection="${escapeHtml(item.collectionId)}"><span class="card-path-icon">${treeIcon(item.collectionId === "unsorted" ? "inbox" : "folder")}</span>${escapeHtml(masonryView ? collectionName(item.collectionId) : collectionPath(item.collectionId))}</a></section>${item.favorite ? `<section data-inline="true" class="card-important">${treeIcon("importantActive", true)}</section>` : ""}<section>${escapeHtml(host(item.link))}</section>${item.createdAt ? `<section>${dateLabel(item.createdAt)}</section>` : ""}${item.reminder ? `<section>◷ ${escapeHtml(dateTimeLabel(item.reminder))}</section>` : ""}${item.highlights.length ? `<section>${item.highlights.length} 条高亮</section>` : ""}${status}`;
   const actionMarkup = bookmarkActionMarkup(item);
   const selectControl = buttonGroupEnabled("select") ? `<label class="card-select" title="选择"><input aria-label="选择${escapeHtml(item.title || item.link)}" type="checkbox" data-select="${item.id}" ${selected}></label>` : "";
   const menuOpen = state.cardMenuId === item.id ? " card-menu-open" : "";
@@ -1377,12 +1381,14 @@ function sidebarMarkup() {
   const items = sidebarItems();
   const tags = tagList(items);
   const total = items.length;
-  const quick = (id, icon, label, count, attribute = `data-quick-filter="${id}"`) => count > 0
-    ? `<button class="quick-filter tree-item ${(attribute.startsWith("data-view") ? state.view === id : state.quickFilter === id) ? "active" : ""}" ${attribute}><span class="tree-expand"></span><span class="tree-icon">${icon === "?" ? "?" : treeIcon(icon, icon === "tag")}</span><span class="tree-title">${label}</span>${sidebarCount(count)}</button>`
+  const duplicates = duplicateLinks(items);
+  const typeCounts = items.reduce((counts, item) => counts.set(bookmarkType(item), (counts.get(bookmarkType(item)) || 0) + 1), new Map());
+  const quick = (id, icon, label, count, query) => count > 0
+    ? `<button class="quick-filter tree-item ${state.query.trim() === query ? "active" : ""}" data-search-query="${escapeHtml(query)}"><span class="tree-expand"></span><span class="tree-icon">${icon === "?" ? "?" : treeIcon(icon, icon === "tag")}</span><span class="tree-title">${label}</span>${sidebarCount(count)}</button>`
     : "";
   const nav = (active, icon, label, count, attribute) => `<button class="nav-item tree-item ${active ? "active" : ""}" ${attribute}><span class="tree-expand"></span><span class="tree-icon">${treeIcon(label === "星标" ? "star" : icon)}</span><span class="tree-title">${label}</span>${sidebarCount(count)}</button>`;
-  const favorite = state.favoriteCount ? nav(state.view === "favorites", "tag", "星标", state.favoriteCount, 'data-view="favorites"') : "";
-  return `<aside class="sidebar"><div class="sidebar-head"><div class="account-wrap"><button type="button" class="account-trigger" data-account-trigger aria-haspopup="menu" aria-expanded="${state.accountMenuOpen}" title="私有书签"><span class="account-mark"><img src="icons/bookmark.svg" width="20" height="20" alt=""></span><span class="account-name">私有书签</span><span class="sidebar-caret">${treeIcon("microArrow")}</span></button>${accountMenuMarkup()}</div><button id="new-collection" class="icon-button" title="新建收藏夹" aria-label="新建收藏夹">＋</button></div><nav class="nav"><section class="sidebar-section primary-nav">${nav(state.view === "all" && !state.collectionId, "all", "所有书签", total, 'data-view="all"')}${nav(state.collectionId === "unsorted", "inbox", "未分类", state.collectionCounts.unsorted || 0, 'data-collection="unsorted"')}${favorite}${state.trashCount ? nav(state.view === "trash", "folder", "废纸篓", state.trashCount, 'data-view="trash"') : ""}</section><section class="sidebar-section collections-section"><div class="sidebar-label"><span>收藏</span><button id="new-collection-secondary" title="新建收藏夹" aria-label="新建收藏夹">＋</button></div>${collectionTree()}</section><section class="sidebar-section filters-section"><div class="sidebar-label"><span>快速过滤…</span></div>${quick("notes", "note", "备注", items.filter((item) => item.note).length)}${quick("highlights", "tag", "高亮", items.filter((item) => item.highlights.length).length)}${quick("untagged", "tag", "没有标签", items.filter((item) => !item.tags.length).length)}${quick("broken", "link", "失效链接", items.filter((item) => item.health.status === "broken").length, 'data-view="broken"')}${quick("unknown", "?", "待检查", items.filter((item) => item.health.status === "unknown").length, 'data-view="unknown"')}</section>${tags.length ? `<section class="sidebar-section tag-section"><div class="sidebar-label">标签 (${tags.length})</div>${tags.map(([tag, count]) => `<div class="tag-row"><button class="tag-filter tree-item ${state.tag === tag ? "active" : ""}" data-tag="${escapeHtml(tag)}"><span class="tree-expand"></span><span class="tree-icon">${treeIcon("tag", true)}</span><span class="tree-title">${escapeHtml(tag)}</span>${sidebarCount(count)}</button><button class="tag-item-menu-trigger" data-tag-item-menu="${escapeHtml(tag)}" title="${escapeHtml(tag)}选项" aria-label="${escapeHtml(tag)}选项" aria-expanded="${state.tagItemMenu === tag}">${treeIcon("more")}</button>${state.tagItemMenu === tag ? `<div class="tag-item-menu" role="menu" data-tag-item-menu-panel><button type="button" role="menuitem" data-tag-item-action="rename" data-tag-value="${escapeHtml(tag)}">重命名标签</button><button type="button" role="menuitem" data-tag-item-action="delete" data-tag-value="${escapeHtml(tag)}">删除标签</button></div>` : ""}</div>`).join("")}</section>` : ""}</nav></aside>`;
+  const types = [["link", "链接"], ["article", "文章"], ["image", "图片"], ["video", "视频"], ["audio", "音频"], ["document", "文档"]].map(([type, label]) => quick(type, "type", label, typeCounts.get(type) || 0, `type:${type}`)).join("");
+  return `<aside class="sidebar"><div class="sidebar-head"><div class="account-wrap"><button type="button" class="account-trigger" data-account-trigger aria-haspopup="menu" aria-expanded="${state.accountMenuOpen}" title="私有书签"><span class="account-mark"><img src="icons/bookmark.svg" width="20" height="20" alt=""></span><span class="account-name">私有书签</span><span class="sidebar-caret">${treeIcon("microArrow")}</span></button>${accountMenuMarkup()}</div><button id="new-collection" class="icon-button" title="新建收藏夹" aria-label="新建收藏夹">＋</button></div><nav class="nav"><section class="sidebar-section primary-nav">${nav(state.view === "all" && !state.collectionId, "all", "所有书签", total, 'data-view="all"')}${nav(state.collectionId === "unsorted", "inbox", "未分类", state.collectionCounts.unsorted || 0, 'data-collection="unsorted"')}${state.trashCount ? nav(state.view === "trash", "folder", "废纸篓", state.trashCount, 'data-view="trash"') : ""}</section><section class="sidebar-section collections-section"><div class="sidebar-label"><span>收藏</span><button id="new-collection-secondary" title="新建收藏夹" aria-label="新建收藏夹">＋</button></div>${collectionTree()}</section><section class="sidebar-section filters-section"><div class="sidebar-label"><span>快速过滤…</span></div>${quick("favorite", "like", "星标", state.favoriteCount, "important:true")}${quick("notes", "note", "备注", items.filter((item) => item.note).length, "note:true")}${quick("highlights", "note", "高亮", items.filter((item) => item.highlights.length).length, "highlights:true")}${quick("reminder", "calendar", "提醒", items.filter((item) => item.reminder).length, "reminder:true")}${types}${quick("duplicates", "duplicates", "重复书签", items.filter((item) => duplicates.has(item.link)).length, "duplicate:true")}${quick("untagged", "tag", "没有标签", items.filter((item) => !item.tags.length).length, "notag:true")}${quick("broken", "link", "失效链接", items.filter((item) => item.health.status === "broken").length, "broken:true")}${items.some((item) => item.health.status === "unknown") ? nav(state.view === "unknown", "link", "待检查", items.filter((item) => item.health.status === "unknown").length, 'data-view="unknown"') : ""}</section>${tags.length ? `<section class="sidebar-section tag-section"><div class="sidebar-label">标签 (${tags.length})</div>${tags.map(([tag, count]) => `<div class="tag-row"><button class="tag-filter tree-item ${state.tag === tag ? "active" : ""}" data-tag="${escapeHtml(tag)}"><span class="tree-expand"></span><span class="tree-icon">${treeIcon("tag", true)}</span><span class="tree-title">${escapeHtml(tag)}</span>${sidebarCount(count)}</button><button class="tag-item-menu-trigger" data-tag-item-menu="${escapeHtml(tag)}" title="${escapeHtml(tag)}选项" aria-label="${escapeHtml(tag)}选项" aria-expanded="${state.tagItemMenu === tag}">${treeIcon("more")}</button>${state.tagItemMenu === tag ? `<div class="tag-item-menu" role="menu" data-tag-item-menu-panel><button type="button" role="menuitem" data-tag-item-action="rename" data-tag-value="${escapeHtml(tag)}">重命名标签</button><button type="button" role="menuitem" data-tag-item-action="delete" data-tag-value="${escapeHtml(tag)}">删除标签</button></div>` : ""}</div>`).join("")}</section>` : ""}</nav></aside>`;
 }
 
 function accountMenuMarkup() {
@@ -1774,15 +1780,6 @@ function positionSidebarMenus() {
 }
 
 function enhanceSidebar() {
-  const favoriteFilter = root.querySelector('.primary-nav [data-view="favorites"]');
-  if (state.favoriteCount && favoriteFilter) {
-    favoriteFilter.classList.add("quick-filter", "favorite-filter");
-    favoriteFilter.querySelector(".tree-icon").innerHTML = treeIcon("like");
-    favoriteFilter.querySelector(".tree-count").textContent = state.favoriteCount;
-    root.querySelector(".filters-section .sidebar-label").after(favoriteFilter);
-  } else {
-    favoriteFilter?.remove();
-  }
   const filtersSection = root.querySelector(".filters-section");
   const filtersCollapsed = sidebarSectionCollapsed("filters");
   filtersSection.classList.toggle("section-collapsed", filtersCollapsed);
@@ -1921,10 +1918,11 @@ function switchView(view, collectionId = null) {
   state.cardMenuId = null;
   state.view = view;
   state.collectionId = collectionId;
+  state.query = "";
   state.tag = "";
-  state.quickFilter = "";
   state.selected.clear();
   state.selectionMoreOpen = false;
+  updateLibraryRoute("push");
   load().catch(showError);
 }
 
@@ -2526,16 +2524,14 @@ function bind() {
   });
   root.querySelectorAll("[data-view]").forEach((button) => button.onclick = () => switchView(button.dataset.view));
   root.querySelectorAll("[data-collection]").forEach((button) => button.onclick = () => switchView("all", button.dataset.collection));
-  root.querySelectorAll("[data-quick-filter]").forEach((button) => button.onclick = () => {
-    state.quickFilter = button.dataset.quickFilter === state.quickFilter ? "" : button.dataset.quickFilter;
+  root.querySelectorAll("[data-search-query]").forEach((button) => button.onclick = () => {
     state.tag = "";
     state.selected.clear();
-    render();
+    commitSearch(button.dataset.searchQuery === state.query ? "" : button.dataset.searchQuery, false, "push");
   });
   root.querySelectorAll("[data-tag]").forEach((button) => button.onclick = () => {
     state.tagItemMenu = null;
     state.tag = button.dataset.tag === state.tag ? "" : button.dataset.tag;
-    state.quickFilter = "";
     state.selected.clear();
     render();
   });
@@ -2582,7 +2578,7 @@ function bind() {
   });
   search.addEventListener("keydown", (event) => {
     if (event.key !== "Enter") return;
-    commitSearch(search.value);
+    commitSearch(search.value, true, "push");
   });
   root.querySelectorAll("[data-select]").forEach((input) => input.onchange = () => {
     input.checked ? state.selected.add(input.dataset.select) : state.selected.delete(input.dataset.select);
@@ -2601,6 +2597,7 @@ function bind() {
     form.elements.title.value = item.title;
     form.elements.description.value = item.description;
     form.elements.note.value = item.note;
+    form.elements.reminder.value = dateTimeInputValue(item.reminder);
     form.elements.cover.value = item.cover || "";
     form.elements.media.value = JSON.stringify(Array.isArray(item.media) ? item.media : []);
     form.elements.collectionId.innerHTML = collectionOptions(state.collections, item.collectionId);
@@ -3244,6 +3241,7 @@ editBookmarkDialog.addEventListener("close", async () => {
       title: fields.get("title"),
       description: fields.get("description"),
       note: fields.get("note"),
+      reminder: fields.get("reminder"),
       cover: fields.get("cover") || "",
       media: JSON.parse(fields.get("media") || "[]"),
       collectionId: fields.get("collectionId"),
@@ -3390,6 +3388,7 @@ document.addEventListener("keydown", (event) => {
     search.value = "";
     state.query = "";
     state.selected.clear();
+    updateLibraryRoute();
     load().catch(showError);
   }
 });
@@ -3448,8 +3447,12 @@ window.addEventListener("popstate", () => {
   if (state.settingsOpen) render();
   else if (state.settingsNeedsReload) {
     state.settingsNeedsReload = false;
+    readLibraryRoute();
     load().catch(showError);
-  } else render();
+  } else {
+    readLibraryRoute();
+    load().catch(showError);
+  }
 });
 
 if (await connection()) load().catch(showError);

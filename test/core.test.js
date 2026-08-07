@@ -161,6 +161,23 @@ test("bookmarks by link keeps duplicate URLs distinct", async () => {
   assert.deepEqual((await response.json()).map((bookmark) => bookmark.title), ["First", "Second"]);
 });
 
+test("bookmark reminders are normalized and invalid dates are rejected", async () => {
+  const api = createApi({ key: "test-key", store: new MemoryStore() });
+  const created = await api.fetch(request("/v1/bookmarks", {
+    method: "POST",
+    body: JSON.stringify({ link: "https://example.com/reminder", type: "article", reminder: "2026-08-08T17:00:00+08:00" }),
+  }));
+  const bookmark = await created.json();
+  assert.equal(bookmark.reminder, "2026-08-08T09:00:00.000Z");
+  assert.equal(bookmark.type, "article");
+
+  const invalid = await api.fetch(request("/v1/bookmarks", {
+    method: "POST",
+    body: JSON.stringify({ link: "https://example.com/invalid", reminder: "tomorrow maybe" }),
+  }));
+  assert.equal(invalid.status, 400);
+});
+
 test("collection API creates nested collections and bootstrap returns preferences", async () => {
   const api = createApi({ key: "test-key", store: new MemoryStore() });
   const created = await api.fetch(request("/v1/collections", {

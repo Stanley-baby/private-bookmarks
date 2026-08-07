@@ -2,6 +2,7 @@ const MAX_TITLE = 1_000;
 const MAX_TEXT = 10_000;
 const MAX_MEDIA_BYTES = 5 * 1024 * 1024;
 const MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp", "image/avif"]);
+const BOOKMARK_TYPES = new Set(["link", "article", "image", "video", "audio", "document"]);
 
 export function canonicalizeUrl(value) {
   const url = new URL(value);
@@ -24,6 +25,19 @@ function cleanText(value, limit) {
   return value.trim().slice(0, limit);
 }
 
+function normalizeReminder(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) throw new TypeError("Reminder must be a valid date");
+  return date.toISOString();
+}
+
+function normalizeBookmarkType(value) {
+  if (value == null || value === "") return "link";
+  if (!BOOKMARK_TYPES.has(value)) throw new TypeError("Unsupported bookmark type");
+  return value;
+}
+
 export function normalizeTags(tags = []) {
   if (!Array.isArray(tags)) throw new TypeError("Tags must be an array");
   const seen = new Set();
@@ -42,9 +56,11 @@ function bookmarkInput(input) {
   if (!input || typeof input !== "object") throw new TypeError("A bookmark is required");
   return {
     link: canonicalizeUrl(input.link),
+    type: normalizeBookmarkType(input.type),
     title: cleanText(input.title, MAX_TITLE),
     description: cleanText(input.description, MAX_TEXT),
     note: cleanText(input.note, MAX_TEXT),
+    reminder: normalizeReminder(input.reminder),
     cover: cleanText(input.cover, 2_000),
     media: Array.isArray(input.media) ? input.media.filter((item) => typeof item === "string").slice(0, 9) : [],
     collectionId: cleanText(input.collectionId || "unsorted", 64) || "unsorted",
@@ -61,6 +77,8 @@ function bookmarkChanges(input) {
     if (field in input) changes[field] = cleanText(input[field], limit);
   }
   if ("link" in input) changes.link = canonicalizeUrl(input.link);
+  if ("type" in input) changes.type = normalizeBookmarkType(input.type);
+  if ("reminder" in input) changes.reminder = normalizeReminder(input.reminder);
   if ("tags" in input) changes.tags = normalizeTags(input.tags);
   if ("favorite" in input) changes.favorite = Boolean(input.favorite);
   if ("highlights" in input) changes.highlights = Array.isArray(input.highlights) ? input.highlights : [];
