@@ -21,6 +21,16 @@ class MemoryStore {
     return [...this.bookmarks.values()].filter((bookmark) => bookmark.link === link);
   }
 
+  async listBookmarks(options) {
+    this.lastListBookmarksOptions = options;
+    return [...this.bookmarks.values()];
+  }
+
+  async listTags(options) {
+    this.lastListTagsOptions = options;
+    return [];
+  }
+
   async updateBookmark(id, expectedRevision, changes) {
     const current = await this.getBookmark(id);
     if (!current) return { missing: true };
@@ -63,6 +73,24 @@ class MemoryStore {
 
   async exportData() {
     return { format: "private-bookmarks/v1", bookmarks: [...this.bookmarks.values()] };
+  }
+}
+
+class MemoryBucket {
+  objects = new Map();
+
+  async put(key, value, options) {
+    this.objects.set(key, { bytes: value instanceof ArrayBuffer ? new Uint8Array(value) : new Uint8Array(value), contentType: options.httpMetadata.contentType });
+  }
+
+  async get(key) {
+    const object = this.objects.get(key);
+    if (!object) return null;
+    return {
+      body: object.bytes,
+      httpEtag: '"test-etag"',
+      writeHttpMetadata(headers) { headers.set("content-type", object.contentType); },
+    };
   }
 }
 
@@ -133,6 +161,23 @@ test("bookmarks by link keeps duplicate URLs distinct", async () => {
   assert.deepEqual((await response.json()).map((bookmark) => bookmark.title), ["First", "Second"]);
 });
 
+test("bookmark reminders are normalized and invalid dates are rejected", async () => {
+  const api = createApi({ key: "test-key", store: new MemoryStore() });
+  const created = await api.fetch(request("/v1/bookmarks", {
+    method: "POST",
+    body: JSON.stringify({ link: "https://example.com/reminder", type: "article", reminder: "2026-08-08T17:00:00+08:00" }),
+  }));
+  const bookmark = await created.json();
+  assert.equal(bookmark.reminder, "2026-08-08T09:00:00.000Z");
+  assert.equal(bookmark.type, "article");
+
+  const invalid = await api.fetch(request("/v1/bookmarks", {
+    method: "POST",
+    body: JSON.stringify({ link: "https://example.com/invalid", reminder: "tomorrow maybe" }),
+  }));
+  assert.equal(invalid.status, 400);
+});
+
 test("collection API creates nested collections and bootstrap returns preferences", async () => {
   const api = createApi({ key: "test-key", store: new MemoryStore() });
   const created = await api.fetch(request("/v1/collections", {
@@ -156,6 +201,26 @@ test("collection API creates nested collections and bootstrap returns preference
   assert.equal(data.trashCount, 0);
 });
 
+test("bookmark and tag list APIs forward reference sorting options", async () => {
+  const store = new MemoryStore();
+  const api = createApi({ key: "test-key", store });
+
+  const bookmarks = await api.fetch(request("/v1/bookmarks?search=alpha&sort=score"));
+  assert.equal(bookmarks.status, 200);
+  assert.deepEqual(store.lastListBookmarksOptions, { collectionId: null, view: null, search: "alpha", sort: "score" });
+
+  const tags = await api.fetch(request("/v1/tags?tagsSort=-count"));
+  assert.equal(tags.status, 200);
+  assert.deepEqual(await tags.json(), []);
+  assert.deepEqual(store.lastListTagsOptions, { collectionId: null, view: null, search: null, sort: "-count" });
+
+  store.getPreferences = async () => ({ nestedViewLegacy: true });
+  await api.fetch(request("/v1/bookmarks?collection=collection-1"));
+  assert.deepEqual(store.lastListBookmarksOptions, { collectionId: "collection-1", view: null, search: null, sort: null, nestedViewLegacy: true });
+  await api.fetch(request("/v1/tags?collection=collection-1"));
+  assert.deepEqual(store.lastListTagsOptions, { collectionId: "collection-1", view: null, search: null, sort: "_id", nestedViewLegacy: true });
+});
+
 test("batch API changes every bookmark or reports one conflict", async () => {
   const api = createApi({ key: "test-key", store: new MemoryStore() });
   const create = (link) => api.fetch(request("/v1/bookmarks", { method: "POST", body: JSON.stringify({ link, collectionId: "unsorted" }) }));
@@ -176,4 +241,23 @@ test("export API returns a portable backup", async () => {
   const response = await api.fetch(request("/v1/export"));
   assert.equal(response.status, 200);
   assert.equal((await response.json()).format, "private-bookmarks/v1");
+});
+
+test("media API stores validated images and serves them with a signed URL", async () => {
+  const bucket = new MemoryBucket();
+  const api = createApi({ key: "test-key", store: new MemoryStore(), mediaBucket: bucket });
+  const upload = await api.fetch(request("/v1/media", {
+    method: "POST",
+    headers: { "content-type": "image/png" },
+    body: new Uint8Array([137, 80, 78, 71]),
+  }));
+  assert.equal(upload.status, 201);
+  const uploaded = await upload.json();
+  const image = await api.fetch(new Request(uploaded.url));
+  assert.equal(image.status, 200);
+  assert.equal(image.headers.get("content-type"), "image/png");
+  assert.deepEqual([...new Uint8Array(await image.arrayBuffer())], [137, 80, 78, 71]);
+
+  const invalid = await api.fetch(request("/v1/media", { method: "POST", headers: { "content-type": "text/plain" }, body: "not an image" }));
+  assert.equal(invalid.status, 400);
 });

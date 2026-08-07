@@ -1,5 +1,8 @@
 const MAX_TITLE = 1_000;
 const MAX_TEXT = 10_000;
+const MAX_MEDIA_BYTES = 5 * 1024 * 1024;
+const MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp", "image/avif"]);
+const BOOKMARK_TYPES = new Set(["link", "article", "image", "video", "audio", "document"]);
 
 export function canonicalizeUrl(value) {
   const url = new URL(value);
@@ -22,6 +25,19 @@ function cleanText(value, limit) {
   return value.trim().slice(0, limit);
 }
 
+function normalizeReminder(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) throw new TypeError("Reminder must be a valid date");
+  return date.toISOString();
+}
+
+function normalizeBookmarkType(value) {
+  if (value == null || value === "") return "link";
+  if (!BOOKMARK_TYPES.has(value)) throw new TypeError("Unsupported bookmark type");
+  return value;
+}
+
 export function normalizeTags(tags = []) {
   if (!Array.isArray(tags)) throw new TypeError("Tags must be an array");
   const seen = new Set();
@@ -40,9 +56,11 @@ function bookmarkInput(input) {
   if (!input || typeof input !== "object") throw new TypeError("A bookmark is required");
   return {
     link: canonicalizeUrl(input.link),
+    type: normalizeBookmarkType(input.type),
     title: cleanText(input.title, MAX_TITLE),
     description: cleanText(input.description, MAX_TEXT),
     note: cleanText(input.note, MAX_TEXT),
+    reminder: normalizeReminder(input.reminder),
     cover: cleanText(input.cover, 2_000),
     media: Array.isArray(input.media) ? input.media.filter((item) => typeof item === "string").slice(0, 9) : [],
     collectionId: cleanText(input.collectionId || "unsorted", 64) || "unsorted",
@@ -59,6 +77,8 @@ function bookmarkChanges(input) {
     if (field in input) changes[field] = cleanText(input[field], limit);
   }
   if ("link" in input) changes.link = canonicalizeUrl(input.link);
+  if ("type" in input) changes.type = normalizeBookmarkType(input.type);
+  if ("reminder" in input) changes.reminder = normalizeReminder(input.reminder);
   if ("tags" in input) changes.tags = normalizeTags(input.tags);
   if ("favorite" in input) changes.favorite = Boolean(input.favorite);
   if ("highlights" in input) changes.highlights = Array.isArray(input.highlights) ? input.highlights : [];
@@ -93,7 +113,24 @@ function authorized(request, key) {
   return Boolean(key) && request.headers.get("x-private-bookmarks-key") === key;
 }
 
-export function createApi({ key, store, healthCheck }) {
+function mediaKey(id) {
+  return `covers/${id}`;
+}
+
+async function mediaToken(id, key) {
+  if (!key) return "";
+  const secret = await crypto.subtle.importKey("raw", new TextEncoder().encode(key), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const signature = await crypto.subtle.sign("HMAC", secret, new TextEncoder().encode(mediaKey(id)));
+  return [...new Uint8Array(signature)].map((value) => value.toString(16).padStart(2, "0")).join("");
+}
+
+function mediaType(request) {
+  const value = (request.headers.get("content-type") || "").split(";", 1)[0].trim().toLocaleLowerCase();
+  if (!MEDIA_TYPES.has(value)) throw new TypeError("仅支持 JPG、PNG、GIF、WebP 或 AVIF 图片");
+  return value;
+}
+
+export function createApi({ key, store, healthCheck, mediaBucket = null }) {
   return {
     async fetch(request) {
       if (request.method === "OPTIONS") {
@@ -105,9 +142,23 @@ export function createApi({ key, store, healthCheck }) {
           },
         });
       }
+      const { pathname, searchParams } = new URL(request.url);
+      const mediaMatch = pathname.match(/^\/v1\/media\/([0-9a-f-]{36})$/i);
+      if (request.method === "GET" && mediaMatch) {
+        if (!mediaBucket) return error(501, "not_available", "Media storage is not configured");
+        const id = mediaMatch[1];
+        if (searchParams.get("token") !== await mediaToken(id, key)) return error(401, "unauthorized", "Invalid media token");
+        const object = await mediaBucket.get(mediaKey(id));
+        if (!object) return error(404, "not_found", "Media not found");
+        const headers = new Headers();
+        object.writeHttpMetadata?.(headers);
+        headers.set("cache-control", headers.get("cache-control") || "public, max-age=31536000, immutable");
+        if (object.httpEtag) headers.set("etag", object.httpEtag);
+        headers.set("access-control-allow-origin", "*");
+        return new Response(object.body, { headers });
+      }
       if (!authorized(request, key)) return error(401, "unauthorized", "Invalid access key");
 
-      const { pathname, searchParams } = new URL(request.url);
       try {
         if (request.method === "GET" && pathname === "/v1/health") return json({ ok: true });
         if (request.method === "GET" && pathname === "/v1/export") return json(await store.exportData());
@@ -129,7 +180,24 @@ export function createApi({ key, store, healthCheck }) {
             preferences,
             collectionCounts,
             trashCount,
+            capabilities: { mediaUpload: Boolean(mediaBucket) },
           });
+        }
+        if (request.method === "POST" && pathname === "/v1/media") {
+          if (!mediaBucket) return error(501, "not_available", "Media storage is not configured");
+          const type = mediaType(request);
+          const declaredSize = Number(request.headers.get("content-length"));
+          if (Number.isFinite(declaredSize) && declaredSize > MAX_MEDIA_BYTES) return error(413, "media_too_large", "图片不能超过 5 MB");
+          const bytes = await request.arrayBuffer();
+          if (!bytes.byteLength || bytes.byteLength > MAX_MEDIA_BYTES) return error(413, "media_too_large", "图片不能超过 5 MB");
+          const id = crypto.randomUUID();
+          await mediaBucket.put(mediaKey(id), bytes, {
+            httpMetadata: { contentType: type, cacheControl: "public, max-age=31536000, immutable" },
+          });
+          const url = new URL(request.url);
+          url.pathname = `/v1/media/${id}`;
+          url.search = `?token=${await mediaToken(id, key)}`;
+          return json({ id, url: url.toString(), contentType: type, size: bytes.byteLength }, 201);
         }
         if (request.method === "PATCH" && pathname === "/v1/preferences") {
           const input = await readJson(request);
@@ -177,11 +245,26 @@ export function createApi({ key, store, healthCheck }) {
           return json(result.collection);
         }
         if (request.method === "GET" && pathname === "/v1/bookmarks") {
-          return json(await store.listBookmarks({
-            collectionId: searchParams.get("collection"),
+          const collectionId = searchParams.get("collection");
+          const options = {
+            collectionId,
             view: searchParams.get("view"),
             search: searchParams.get("search"),
-          }));
+            sort: searchParams.get("sort"),
+          };
+          if (collectionId) options.nestedViewLegacy = (await store.getPreferences()).nestedViewLegacy === true;
+          return json(await store.listBookmarks(options));
+        }
+        if (request.method === "GET" && pathname === "/v1/tags") {
+          const collectionId = searchParams.get("collection");
+          const options = {
+            collectionId,
+            view: searchParams.get("view"),
+            search: searchParams.get("search"),
+            sort: searchParams.get("tagsSort") || "_id",
+          };
+          if (collectionId) options.nestedViewLegacy = (await store.getPreferences()).nestedViewLegacy === true;
+          return json(await store.listTags(options));
         }
         if (request.method === "GET" && pathname === "/v1/bookmarks/by-link") {
           const link = searchParams.get("link");
@@ -196,7 +279,7 @@ export function createApi({ key, store, healthCheck }) {
           if (!Array.isArray(input.items) || !input.items.length || new Set(input.items.map((item) => item?.id)).size !== input.items.length || !input.items.every((item) => item && typeof item.id === "string" && Number.isInteger(item.revision))) {
             return error(400, "invalid_batch", "Each selected bookmark needs an id and revision");
           }
-          if (!input.action || !["favorite", "move", "trash", "restore", "tags"].includes(input.action.type)) return error(400, "invalid_batch", "Unsupported batch operation");
+          if (!input.action || !["favorite", "move", "trash", "restore", "tags", "screenshot"].includes(input.action.type)) return error(400, "invalid_batch", "Unsupported batch operation");
           if (input.action.type === "tags") {
             if (!["add", "remove"].includes(input.action.mode)) return error(400, "invalid_batch", "Tag operations need add or remove mode");
             input.action.tags = normalizeTags(input.action.tags);

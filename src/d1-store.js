@@ -1,4 +1,16 @@
-const DEFAULT_PREFERENCES = { theme: "auto", defaultCollectionId: "unsorted", sort: "manual" };
+const DEFAULT_PREFERENCES = {
+  language: "zh-Hans",
+  theme: "auto",
+  defaultCollectionId: "unsorted",
+  sort: "manual",
+  layout: "list",
+  defaultView: "list",
+  buttonGroup: { select: true, current_tab: false, new_tab: true, preview: false, web: false, copy: false, ask: false, important: false, tags: false, edit: true, remove: true },
+  searchRelevance: true,
+  brokenLevel: "default",
+  nestedViewLegacy: false,
+  layoutByScope: {},
+};
 
 function now() {
   return new Date().toISOString();
@@ -17,9 +29,11 @@ function bookmark(row) {
   return {
     id: row.id,
     link: row.link,
+    type: row.type || "link",
     title: row.title,
     description: row.description,
     note: row.note,
+    reminder: row.reminder || "",
     cover: row.cover,
     media: parse(row.media_json, []),
     collectionId: row.collection_id,
@@ -54,6 +68,42 @@ function collection(row) {
   };
 }
 
+function bookmarkFilters({ collectionId, view, search, nestedViewLegacy = false } = {}) {
+  const where = [view === "trash" ? "deleted_at IS NOT NULL" : "deleted_at IS NULL"];
+  const bindings = [];
+  let withClause = "";
+  if (view === "favorites") where.push("favorite = 1");
+  if (view === "broken") where.push("health_status = 'broken'");
+  if (view === "unknown") where.push("health_status = 'unknown'");
+  if (collectionId) {
+    if (nestedViewLegacy) where.push("collection_id = ?");
+    else {
+      withClause = `WITH RECURSIVE collection_scope(id) AS (
+        SELECT id FROM collections WHERE id = ? AND deleted_at IS NULL
+        UNION ALL
+        SELECT collections.id FROM collections JOIN collection_scope ON collections.parent_id = collection_scope.id WHERE collections.deleted_at IS NULL
+      )`;
+      where.push("collection_id IN (SELECT id FROM collection_scope)");
+    }
+    bindings.push(collectionId);
+  }
+  if (search) {
+    where.push("(title LIKE ? COLLATE NOCASE OR link LIKE ? COLLATE NOCASE OR description LIKE ? COLLATE NOCASE OR note LIKE ? COLLATE NOCASE OR tags_json LIKE ? COLLATE NOCASE OR highlights_json LIKE ? COLLATE NOCASE)");
+    const term = `%${search.replace(/[%_]/g, "\\$&")}%`;
+    bindings.push(term, term, term, term, term, term);
+  }
+  return { withClause, where, bindings };
+}
+
+function searchScore(item, query) {
+  const fields = [[item.title, 100], [item.tags.join(" "), 60], [item.description, 40], [item.note, 40], [item.link, 20]];
+  return String(query).toLocaleLowerCase().trim().split(/\s+/).filter(Boolean).reduce((total, term) => total + fields.reduce((score, [value, weight]) => {
+    const text = String(value || "").toLocaleLowerCase();
+    if (!text.includes(term)) return score;
+    return score + weight * (text === term ? 4 : text.startsWith(term) ? 3 : 1);
+  }, 0), 0);
+}
+
 function backupCollections(items) {
   const pending = [...items];
   const ordered = [];
@@ -73,24 +123,25 @@ export class D1Store {
     this.db = db;
   }
 
-  async listBookmarks({ collectionId, view, search } = {}) {
-    const where = [view === "trash" ? "deleted_at IS NOT NULL" : "deleted_at IS NULL"];
-    const bindings = [];
-    if (view === "favorites") where.push("favorite = 1");
-    if (view === "broken") where.push("health_status = 'broken'");
-    if (view === "unknown") where.push("health_status = 'unknown'");
-    if (collectionId) {
-      where.push("collection_id = ?");
-      bindings.push(collectionId);
-    }
-    if (search) {
-      // ponytail: LIKE search, replace with D1 FTS only if a large library becomes measurably slow.
-      where.push("(title LIKE ? COLLATE NOCASE OR link LIKE ? COLLATE NOCASE OR description LIKE ? COLLATE NOCASE OR note LIKE ? COLLATE NOCASE OR tags_json LIKE ? COLLATE NOCASE OR highlights_json LIKE ? COLLATE NOCASE)");
-      const term = `%${search.replace(/[%_]/g, "\\$&")}%`;
-      bindings.push(term, term, term, term, term, term);
-    }
-    const { results } = await this.db.prepare(`SELECT * FROM bookmarks WHERE ${where.join(" AND ")} ORDER BY position, created_at DESC`).bind(...bindings).all();
-    return results.map(bookmark);
+  async listBookmarks({ collectionId, view, search, sort, nestedViewLegacy = false } = {}) {
+    const { withClause, where, bindings } = bookmarkFilters({ collectionId, view, search, nestedViewLegacy });
+    const { results } = await this.db.prepare(`${withClause} SELECT * FROM bookmarks WHERE ${where.join(" AND ")} ORDER BY position, created_at DESC`).bind(...bindings).all();
+    const items = results.map(bookmark);
+    if (sort !== "score" || !search) return items;
+    return items.map((item, index) => ({ item, index, score: searchScore(item, search) }))
+      .sort((a, b) => b.score - a.score || a.index - b.index)
+      .map(({ item }) => item);
+  }
+
+  async listTags({ collectionId, view, search, sort = "_id", nestedViewLegacy = false } = {}) {
+    const { withClause, where, bindings } = bookmarkFilters({ collectionId, view, search, nestedViewLegacy });
+    const { results } = await this.db.prepare(`${withClause} SELECT tags_json FROM bookmarks WHERE ${where.join(" AND ")}`).bind(...bindings).all();
+    const counts = new Map();
+    for (const row of results) for (const tag of parse(row.tags_json, [])) counts.set(tag, (counts.get(tag) || 0) + 1);
+    const tags = [...counts].sort(sort === "-count"
+      ? ([tagA, countA], [tagB, countB]) => countB - countA || tagA.localeCompare(tagB, "zh-CN")
+      : ([tagA], [tagB]) => tagA.localeCompare(tagB, "zh-CN"));
+    return tags.map(([name, count]) => ({ name, count }));
   }
 
   async getBookmark(id) {
@@ -124,9 +175,9 @@ export class D1Store {
     const createdAt = now();
     const tags = await this.canonicalTags(input.tags);
     await this.db.prepare(`INSERT INTO bookmarks
-      (id, link, title, description, note, cover, media_json, collection_id, tags_json, highlights_json, favorite, position, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .bind(id, input.link, input.title, input.description, input.note, input.cover, JSON.stringify(input.media), input.collectionId, JSON.stringify(tags), JSON.stringify(input.highlights), input.favorite ? 1 : 0, await this.nextBookmarkPosition(input.collectionId), createdAt, createdAt)
+      (id, link, type, title, description, note, reminder, cover, media_json, collection_id, tags_json, highlights_json, favorite, position, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .bind(id, input.link, input.type || "link", input.title, input.description, input.note, input.reminder || null, input.cover, JSON.stringify(input.media), input.collectionId, JSON.stringify(tags), JSON.stringify(input.highlights), input.favorite ? 1 : 0, await this.nextBookmarkPosition(input.collectionId), createdAt, createdAt)
       .run();
     return this.getBookmark(id);
   }
@@ -143,9 +194,11 @@ export class D1Store {
 
     const columns = {
       link: "link",
+      type: "type",
       title: "title",
       description: "description",
       note: "note",
+      reminder: "reminder",
       cover: "cover",
       collectionId: "collection_id",
       favorite: "favorite",
@@ -236,6 +289,23 @@ export class D1Store {
       set = [`tags_json = CASE id ${values.map(() => "WHEN ? THEN ?").join(" ")} END`, "revision = revision + 1", "updated_at = ?"];
       setBindings = [...values.flat(), updatedAt];
     }
+    if (action.type === "screenshot") {
+      const current = await Promise.all(ids.map((id) => this.getBookmark(id)));
+      if (current.some((item) => !item)) return { conflict: true };
+      const media = current.map((item) => {
+        const values = Array.isArray(item.media) ? [...item.media] : [];
+        return values.some((value) => value === "<screenshot>" || value?.link === "<screenshot>") ? values : [...values, "<screenshot>"];
+      });
+      const coverValues = current.flatMap((item) => [item.id, "<screenshot>"]);
+      const mediaValues = current.flatMap((item, index) => [item.id, JSON.stringify(media[index])]);
+      set = [
+        `cover = CASE id ${current.map(() => "WHEN ? THEN ?").join(" ")} END`,
+        `media_json = CASE id ${current.map(() => "WHEN ? THEN ?").join(" ")} END`,
+        "revision = revision + 1",
+        "updated_at = ?",
+      ];
+      setBindings = [...coverValues, ...mediaValues, updatedAt];
+    }
     const update = this.db.prepare(`UPDATE bookmarks SET ${set.join(", ")}
       WHERE id IN (${idPlaceholders}) AND ${livePredicate}
       AND (SELECT COUNT(*) FROM bookmarks WHERE id IN (${idPlaceholders}) AND ${livePredicate} AND (${revisions})) = ?`)
@@ -286,9 +356,9 @@ export class D1Store {
       const tags = Array.isArray(item.tags) ? item.tags.map((tag) => String(tag).trim()).filter(Boolean) : [];
       for (const tag of tags) statements.push(this.db.prepare("INSERT OR IGNORE INTO tag_names (key, name) VALUES (?, ?)").bind(tag.toLocaleLowerCase(), tag));
       statements.push(this.db.prepare(`INSERT INTO bookmarks
-        (id, link, title, description, note, cover, media_json, collection_id, tags_json, highlights_json, favorite, position, health_status, health_checked_at, health_final_url, revision, created_at, updated_at, deleted_at, deleted_by_collection_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .bind(item.id || crypto.randomUUID(), item.link, item.title || "", item.description || "", item.note || "", item.cover || "", JSON.stringify(Array.isArray(item.media) ? item.media : []), collectionIds.has(item.collectionId) ? item.collectionId : "unsorted", JSON.stringify(tags), JSON.stringify(Array.isArray(item.highlights) ? item.highlights : []), item.favorite ? 1 : 0, Number(item.position) || 0, item.health?.status || "unknown", item.health?.checkedAt || null, item.health?.finalUrl || null, Number(item.revision) || 1, item.createdAt || timestamp, item.updatedAt || timestamp, item.deletedAt || null, item.deletedByCollectionId || null));
+        (id, link, type, title, description, note, reminder, cover, media_json, collection_id, tags_json, highlights_json, favorite, position, health_status, health_checked_at, health_final_url, revision, created_at, updated_at, deleted_at, deleted_by_collection_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .bind(item.id || crypto.randomUUID(), item.link, ["link", "article", "image", "video", "audio", "document"].includes(item.type) ? item.type : "link", item.title || "", item.description || "", item.note || "", item.reminder || null, item.cover || "", JSON.stringify(Array.isArray(item.media) ? item.media : []), collectionIds.has(item.collectionId) ? item.collectionId : "unsorted", JSON.stringify(tags), JSON.stringify(Array.isArray(item.highlights) ? item.highlights : []), item.favorite ? 1 : 0, Number(item.position) || 0, item.health?.status || "unknown", item.health?.checkedAt || null, item.health?.finalUrl || null, Number(item.revision) || 1, item.createdAt || timestamp, item.updatedAt || timestamp, item.deletedAt || null, item.deletedByCollectionId || null));
     }
     const preferences = { ...DEFAULT_PREFERENCES, ...(backup.preferences || {}) };
     statements.push(this.db.prepare("INSERT INTO preferences (key, value_json, revision, updated_at) VALUES ('ui', ?, ?, ?)")
