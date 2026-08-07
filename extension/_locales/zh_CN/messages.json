@@ -1,0 +1,15 @@
+{
+  "appDesc": { "message": "多功能的书签管理工具", "description": "" },
+  "savePage": { "message": "保存网页", "description": "" },
+  "savePageOrHighlight": { "message": "书签 / 保存高亮", "description": "" },
+  "saveLink": { "message": "保存链接", "description": "" },
+  "saveImage": { "message": "保存图片", "description": "" },
+  "saveVideo": { "message": "保存视频", "description": "" },
+  "saveHighlight": { "message": "添加高亮", "description": "" },
+  "saveTabs": { "message": "保存标签页", "description": "" },
+  "openBookmarks": { "message": "打开Bookmarks网站", "description": "" },
+  "openSidePanel": { "message": "打开侧边栏", "description": "" },
+  "openApp": { "message": "打开应用", "description": "" },
+  "in": { "message": "在Bookmarks中", "description": "" },
+  "settings": { "message": "设置", "description": "" }
+}

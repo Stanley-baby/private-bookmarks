@@ -1,1 +1,177 @@
-<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>私有书签</title><link rel="stylesheet" href="style.css"></head><body><div id="app"></div><dialog id="collection-dialog"><form method="dialog"><h2>新建收藏夹</h2><input name="name" placeholder="收藏夹名称" required autofocus><menu><button value="cancel">取消</button><button class="primary" value="create">创建</button></menu></form></dialog><dialog id="bookmark-dialog"><form method="dialog"><h2>添加书签</h2><label>网址<input name="link" type="url" placeholder="https://example.com" required autofocus></label><label>标题<input name="title" placeholder="可选"></label><label>收藏夹<select name="collectionId"></select></label><menu><button value="cancel">取消</button><button class="primary" value="create">添加</button></menu></form></dialog><script type="module" src="library.js"></script></body></html>
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width">
+  <title>私有书签</title>
+  <link rel="stylesheet" href="style.css?v=20260806-settings5">
+</head>
+<body>
+  <div id="app"></div>
+
+  <dialog id="collection-value-dialog">
+    <form method="dialog">
+      <h2></h2>
+      <input name="value" required autofocus>
+      <menu><button value="cancel" formnovalidate>取消</button><button class="primary" value="save">保存</button></menu>
+    </form>
+  </dialog>
+
+  <dialog id="collection-share-dialog">
+    <form method="dialog">
+      <h2>分享收藏夹</h2>
+      <textarea rows="10" readonly></textarea>
+      <menu><button value="cancel">关闭</button><button type="button" id="copy-collection-share">复制</button><button type="button" class="primary" id="system-collection-share">系统分享</button></menu>
+    </form>
+  </dialog>
+
+  <dialog id="bookmark-dialog">
+    <form method="dialog">
+      <h2>添加书签</h2>
+      <label>网址<input name="link" type="url" placeholder="https://example.com" required autofocus></label>
+      <label>标题<input name="title" placeholder="可选"></label>
+      <label>收藏夹<select name="collectionId"></select></label>
+      <menu><button value="cancel" formnovalidate>取消</button><button class="primary" value="create">添加</button></menu>
+    </form>
+  </dialog>
+
+  <dialog id="edit-bookmark-dialog" class="edit-panel">
+    <form method="dialog">
+      <header class="edit-panel-header">
+        <button class="edit-close" value="cancel" formnovalidate title="关闭" aria-label="关闭">×</button>
+        <div class="edit-tabs" role="tablist" aria-label="书签详情">
+          <button type="button" class="active" role="tab" aria-selected="true">编辑</button>
+          <button type="button" disabled title="暂未支持">询问</button>
+          <button type="button" disabled title="暂未支持">Web</button>
+          <button type="button" disabled title="暂未支持">Web存档</button>
+        </div>
+        <a id="edit-open-link" class="edit-open-link" target="_blank" rel="noopener" title="打开原网页" aria-label="打开原网页">↗</a>
+      </header>
+
+      <div class="edit-panel-scroll">
+        <div class="edit-panel-grid">
+          <button type="button" id="edit-cover-trigger" class="edit-cover" title="更改图标" aria-label="更改图标" aria-haspopup="dialog"><img id="edit-cover" src="icons/bookmark.svg" width="56" height="48" alt=""><span id="edit-cover-more" class="edit-cover-more" aria-hidden="true"></span></button>
+          <div class="edit-heading-fields">
+            <textarea name="title" rows="1" placeholder="标题" required></textarea>
+            <textarea name="description" rows="1" placeholder="添加描述"></textarea>
+          </div>
+          <input id="edit-cover-value" name="cover" type="hidden">
+          <input id="edit-media-value" name="media" type="hidden" value="[]">
+
+          <label class="edit-field-label" for="edit-note">备注</label>
+          <div class="edit-field edit-note-field">
+            <textarea id="edit-note" name="note" rows="3" placeholder="添加备注"></textarea>
+            <div id="edit-note-preview" class="edit-note-preview" hidden></div>
+            <button type="button" id="edit-note-markdown" class="markdown-mark" title="预览 Markdown" aria-label="预览 Markdown" aria-pressed="false">M↓</button>
+          </div>
+
+          <label class="edit-field-label" for="edit-collection-trigger">收藏</label>
+          <div>
+            <button type="button" id="edit-collection-trigger" class="edit-collection-trigger" aria-haspopup="dialog"><span class="edit-collection-icon"></span><span id="edit-collection-name"></span><span class="edit-collection-arrow"></span></button>
+            <select id="edit-collection" name="collectionId" class="hidden"></select>
+          </div>
+
+          <label class="edit-field-label" for="edit-tag-input">标签</label>
+          <div class="edit-tag-control">
+            <div class="edit-field edit-tags-field" role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-controls="edit-tag-menu">
+              <div id="edit-tag-tokens" class="edit-tag-tokens"></div>
+              <input id="edit-tag-input" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="添加标签…">
+              <input id="edit-tags" name="tags" type="hidden" value="[]">
+            </div>
+            <div id="edit-tag-menu" class="edit-tag-menu" role="listbox" hidden></div>
+          </div>
+
+          <label class="edit-field-label" for="edit-link">URL</label>
+          <div class="edit-field"><textarea id="edit-link" name="link" rows="1" type="url" placeholder="https://" required></textarea></div>
+
+          <span></span>
+          <div class="edit-secondary-actions">
+            <label class="edit-favorite" title="最喜爱的"><input name="favorite" type="checkbox"><span class="heart-off">♡</span><span class="heart-on">♥</span></label>
+            <button type="button" disabled title="提醒暂未支持">◷</button>
+          </div>
+
+          <span></span>
+          <p id="edit-saved-at" class="edit-saved-at"></p>
+
+          <span></span>
+          <div class="edit-separator"></div>
+
+          <span></span>
+          <div class="edit-panel-actions">
+            <button type="button" id="edit-delete" class="danger">删除</button>
+            <span></span>
+            <button value="cancel" formnovalidate>取消</button>
+            <button class="primary" value="save">保存</button>
+          </div>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="cover-picker-dialog" class="cover-picker" aria-labelledby="cover-picker-title">
+    <div class="cover-picker-body" role="dialog" aria-modal="true">
+      <header class="cover-picker-header">
+        <button type="button" id="cover-picker-back" title="关闭" aria-label="关闭"></button>
+        <strong id="cover-picker-title">封面</strong>
+        <span class="cover-picker-space"></span>
+        <button type="button" id="cover-add-url" title="添加 URL…" aria-label="添加 URL…"></button>
+        <button type="button" id="cover-upload" title="上传封面文件" aria-label="上传封面文件" disabled></button>
+        <input id="cover-upload-file" class="hidden" type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/avif">
+        <button type="button" id="cover-picker-close" title="关闭" aria-label="关闭"></button>
+      </header>
+      <div class="cover-picker-content">
+        <div id="cover-picker-items" class="cover-picker-items" role="listbox" aria-label="可用封面"></div>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="cover-url-dialog" class="cover-url-dialog">
+    <form method="dialog">
+      <h2>添加 URL</h2>
+      <label>封面 URL<input name="coverUrl" type="url" placeholder="https://example.com/cover.jpg" required autofocus></label>
+      <menu><button value="cancel" formnovalidate>取消</button><button class="primary" value="save">添加</button></menu>
+    </form>
+  </dialog>
+
+  <dialog id="collection-picker-dialog" class="collection-picker">
+    <div class="collection-picker-body">
+      <header>
+        <button type="button" id="collection-picker-back" title="关闭" aria-label="关闭"></button>
+        <strong>选择收藏集</strong>
+        <button type="button" id="collection-picker-close" title="关闭" aria-label="关闭"></button>
+      </header>
+      <label class="collection-picker-search">
+        <span class="collection-picker-search-field"><span class="collection-picker-search-icon"></span><input id="collection-picker-search" type="search" role="searchbox" spellcheck="false" autocomplete="hidden" autocorrect="off" inputmode="search" placeholder="查找或创建新的收藏集…" autofocus></span>
+      </label>
+      <div id="collection-picker-list" class="collection-picker-list" role="listbox"></div>
+    </div>
+  </dialog>
+
+  <dialog id="batch-tag-dialog" class="batch-tag-dialog" aria-labelledby="batch-tag-title">
+    <form>
+      <div class="batch-tag-body" role="dialog" aria-modal="true">
+        <header class="batch-tag-header">
+          <button type="button" id="batch-tag-back" class="batch-tag-back" title="关闭" aria-label="关闭"></button>
+          <strong id="batch-tag-title">添加标签</strong>
+          <span class="batch-tag-space"></span>
+          <button type="submit" id="batch-tag-submit" class="batch-tag-submit" disabled>添加标签</button>
+          <button type="button" id="batch-tag-close" class="batch-tag-close" title="关闭" aria-label="关闭"></button>
+        </header>
+        <div class="batch-tag-content">
+          <div class="batch-tag-layout">
+            <div class="batch-tag-field">
+              <div class="batch-tag-input-wrap" role="combobox" aria-haspopup="listbox" aria-expanded="true" aria-controls="batch-tag-menu">
+                <div id="batch-tag-tokens" class="batch-tag-tokens"></div>
+                <input id="batch-tag-input" autocomplete="off" autocapitalize="none" spellcheck="false" aria-autocomplete="list" aria-controls="batch-tag-menu">
+              </div>
+              <div id="batch-tag-menu" class="batch-tag-menu" role="listbox"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="library.js?v=20260806-settings5"></script>
+</body>
+</html>

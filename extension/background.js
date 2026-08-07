@@ -1,5 +1,13 @@
 import { api, requestPagePermission, saveBookmark } from "./api.js";
 
+function message(key, fallback) {
+  try {
+    return chrome.i18n.getMessage(key) || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 async function activeTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   return tab;
@@ -76,16 +84,20 @@ async function applySavedHighlights(tab) {
   }
 }
 
-chrome.runtime.onInstalled.addListener(() => {
+function setupContextMenus() {
   chrome.contextMenus.removeAll(() => {
-    chrome.contextMenus.create({ id: "save-page", title: "保存页面", contexts: ["page"] });
-    chrome.contextMenus.create({ id: "save-link", title: "保存链接", contexts: ["link"] });
-    chrome.contextMenus.create({ id: "save-highlight", title: "添加高亮", contexts: ["selection"] });
-    chrome.contextMenus.create({ id: "save-tabs", title: "保存此窗口的全部标签页", contexts: ["action"] });
-    chrome.contextMenus.create({ id: "open-side-panel", title: "打开侧边栏", contexts: ["action"] });
-    chrome.contextMenus.create({ id: "open-library", title: "打开私有书签", contexts: ["action"] });
+    chrome.contextMenus.create({ id: "save-page", title: message("savePage", "保存页面"), contexts: ["page"] });
+    chrome.contextMenus.create({ id: "save-link", title: message("saveLink", "保存链接"), contexts: ["link"] });
+    chrome.contextMenus.create({ id: "save-highlight", title: message("saveHighlight", "添加高亮"), contexts: ["selection"] });
+    chrome.contextMenus.create({ id: "save-tabs", title: message("saveTabs", "保存此窗口的全部标签页"), contexts: ["action"] });
+    chrome.contextMenus.create({ id: "open-side-panel", title: message("openSidePanel", "打开侧边栏"), contexts: ["action"] });
+    chrome.contextMenus.create({ id: "open-library", title: message("openBookmarks", "打开私有书签"), contexts: ["action"] });
   });
-});
+}
+
+chrome.runtime.onInstalled.addListener(setupContextMenus);
+chrome.runtime.onStartup.addListener(setupContextMenus);
+setupContextMenus();
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   try {

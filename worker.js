@@ -7,6 +7,7 @@ function app(env) {
   return createApi({
     key: env.ACCESS_KEY,
     store,
+    mediaBucket: env.COVERS,
     healthCheck: (collectionId) => runHealthChecks(store, fetch, collectionId),
   });
 }

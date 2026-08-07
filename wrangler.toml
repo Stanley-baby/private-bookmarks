@@ -7,5 +7,9 @@ binding = "DB"
 database_name = "private-bookmarks"
 database_id = "51db7b1c-4455-4490-88d9-be3f08295923"
 
+[[r2_buckets]]
+binding = "COVERS"
+bucket_name = "private-bookmarks-covers"
+
 [triggers]
 crons = ["0 3 * * 1"]

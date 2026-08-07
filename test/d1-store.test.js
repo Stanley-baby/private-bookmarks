@@ -94,3 +94,17 @@ test("D1 collection counts include only live bookmarks", async () => {
   assert.equal(await store.getTrashCount(), 1);
   assert.equal((await store.getBookmark(live.id)).deletedAt, null);
 });
+
+test("D1 screenshot batch stores the screenshot sentinel for every bookmark", async () => {
+  const store = new D1Store(new D1TestDatabase());
+  const first = await store.createBookmark({ link: "https://example.com/one", title: "One", description: "", note: "", cover: "", media: [], collectionId: "unsorted", tags: [], highlights: [], favorite: false });
+  const second = await store.createBookmark({ link: "https://example.com/two", title: "Two", description: "", note: "", cover: "", media: ["https://example.com/cover"], collectionId: "unsorted", tags: [], highlights: [], favorite: false });
+
+  const result = await store.batchBookmarks([
+    { id: first.id, revision: first.revision },
+    { id: second.id, revision: second.revision },
+  ], { type: "screenshot" });
+
+  assert.equal(result.bookmarks.every((item) => item.cover === "<screenshot>"), true);
+  assert.equal(result.bookmarks.every((item) => item.media.includes("<screenshot>")), true);
+});

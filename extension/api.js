@@ -1,26 +1,41 @@
 const CONNECTION_KEY = "instanceConnection";
+const extensionStorage = globalThis.chrome?.storage?.local;
+
+function storedConnection() {
+  try {
+    return JSON.parse(localStorage.getItem(CONNECTION_KEY) || "null");
+  } catch {
+    return null;
+  }
+}
+
+function localAddress(url) {
+  return ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+}
 
 export async function connection() {
-  return (await chrome.storage.local.get(CONNECTION_KEY))[CONNECTION_KEY] || null;
+  return extensionStorage ? (await extensionStorage.get(CONNECTION_KEY))[CONNECTION_KEY] || null : storedConnection();
 }
 
 export async function connect(endpoint, key) {
   const url = new URL(endpoint);
-  if (url.protocol !== "https:") throw new TypeError("私有实例地址必须使用 HTTPS");
-  const granted = await chrome.permissions.request({ origins: [`${url.origin}/*`] });
-  if (!granted) throw new TypeError("未获得私有实例地址的访问权限");
+  if (url.protocol !== "https:" && (extensionStorage || url.protocol !== "http:" || !localAddress(url))) throw new TypeError("私有实例地址必须使用 HTTPS");
+  if (extensionStorage && !await chrome.permissions.request({ origins: [`${url.origin}/*`] })) throw new TypeError("未获得私有实例地址的访问权限");
   const value = { endpoint: url.origin, key: String(key).trim() };
   if (!value.key) throw new TypeError("需要访问密钥");
-  await chrome.storage.local.set({ [CONNECTION_KEY]: value });
+  if (extensionStorage) await extensionStorage.set({ [CONNECTION_KEY]: value });
+  else localStorage.setItem(CONNECTION_KEY, JSON.stringify(value));
   await api("/v1/health");
   return value;
 }
 
 export async function disconnect() {
-  await chrome.storage.local.remove(CONNECTION_KEY);
+  if (extensionStorage) await extensionStorage.remove(CONNECTION_KEY);
+  else localStorage.removeItem(CONNECTION_KEY);
 }
 
 export async function requestPagePermission(pageUrl) {
+  if (!extensionStorage) return true;
   const origin = new URL(pageUrl).origin;
   if (await chrome.permissions.contains({ origins: [`${origin}/*`] })) return true;
   return chrome.permissions.request({ origins: [`${origin}/*`] });

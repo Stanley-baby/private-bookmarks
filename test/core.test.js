@@ -66,6 +66,24 @@ class MemoryStore {
   }
 }
 
+class MemoryBucket {
+  objects = new Map();
+
+  async put(key, value, options) {
+    this.objects.set(key, { bytes: value instanceof ArrayBuffer ? new Uint8Array(value) : new Uint8Array(value), contentType: options.httpMetadata.contentType });
+  }
+
+  async get(key) {
+    const object = this.objects.get(key);
+    if (!object) return null;
+    return {
+      body: object.bytes,
+      httpEtag: '"test-etag"',
+      writeHttpMetadata(headers) { headers.set("content-type", object.contentType); },
+    };
+  }
+}
+
 function request(path, init = {}) {
   return new Request(`https://private-bookmarks.test${path}`, {
     ...init,
@@ -176,4 +194,23 @@ test("export API returns a portable backup", async () => {
   const response = await api.fetch(request("/v1/export"));
   assert.equal(response.status, 200);
   assert.equal((await response.json()).format, "private-bookmarks/v1");
+});
+
+test("media API stores validated images and serves them with a signed URL", async () => {
+  const bucket = new MemoryBucket();
+  const api = createApi({ key: "test-key", store: new MemoryStore(), mediaBucket: bucket });
+  const upload = await api.fetch(request("/v1/media", {
+    method: "POST",
+    headers: { "content-type": "image/png" },
+    body: new Uint8Array([137, 80, 78, 71]),
+  }));
+  assert.equal(upload.status, 201);
+  const uploaded = await upload.json();
+  const image = await api.fetch(new Request(uploaded.url));
+  assert.equal(image.status, 200);
+  assert.equal(image.headers.get("content-type"), "image/png");
+  assert.deepEqual([...new Uint8Array(await image.arrayBuffer())], [137, 80, 78, 71]);
+
+  const invalid = await api.fetch(request("/v1/media", { method: "POST", headers: { "content-type": "text/plain" }, body: "not an image" }));
+  assert.equal(invalid.status, 400);
 });

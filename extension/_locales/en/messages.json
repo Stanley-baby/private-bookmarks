@@ -1,0 +1,15 @@
+{
+  "appDesc": { "message": "All-in-one bookmark manager", "description": "" },
+  "savePage": { "message": "Save page", "description": "" },
+  "savePageOrHighlight": { "message": "Bookmark / Save highlights", "description": "" },
+  "saveLink": { "message": "Save link", "description": "" },
+  "saveImage": { "message": "Save image", "description": "" },
+  "saveVideo": { "message": "Save video", "description": "" },
+  "saveHighlight": { "message": "Add highlights", "description": "" },
+  "saveTabs": { "message": "Save tabs", "description": "" },
+  "openBookmarks": { "message": "Open Bookmarks website", "description": "" },
+  "openSidePanel": { "message": "Open sidebar", "description": "" },
+  "openApp": { "message": "Open app", "description": "" },
+  "in": { "message": "in Bookmarks", "description": "" },
+  "settings": { "message": "Settings", "description": "" }
+}

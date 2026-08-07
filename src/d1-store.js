@@ -1,4 +1,12 @@
-const DEFAULT_PREFERENCES = { theme: "auto", defaultCollectionId: "unsorted", sort: "manual" };
+const DEFAULT_PREFERENCES = {
+  language: "zh-Hans",
+  theme: "auto",
+  defaultCollectionId: "unsorted",
+  sort: "manual",
+  layout: "list",
+  defaultView: "list",
+  layoutByScope: {},
+};
 
 function now() {
   return new Date().toISOString();
@@ -235,6 +243,23 @@ export class D1Store {
       });
       set = [`tags_json = CASE id ${values.map(() => "WHEN ? THEN ?").join(" ")} END`, "revision = revision + 1", "updated_at = ?"];
       setBindings = [...values.flat(), updatedAt];
+    }
+    if (action.type === "screenshot") {
+      const current = await Promise.all(ids.map((id) => this.getBookmark(id)));
+      if (current.some((item) => !item)) return { conflict: true };
+      const media = current.map((item) => {
+        const values = Array.isArray(item.media) ? [...item.media] : [];
+        return values.some((value) => value === "<screenshot>" || value?.link === "<screenshot>") ? values : [...values, "<screenshot>"];
+      });
+      const coverValues = current.flatMap((item) => [item.id, "<screenshot>"]);
+      const mediaValues = current.flatMap((item, index) => [item.id, JSON.stringify(media[index])]);
+      set = [
+        `cover = CASE id ${current.map(() => "WHEN ? THEN ?").join(" ")} END`,
+        `media_json = CASE id ${current.map(() => "WHEN ? THEN ?").join(" ")} END`,
+        "revision = revision + 1",
+        "updated_at = ?",
+      ];
+      setBindings = [...coverValues, ...mediaValues, updatedAt];
     }
     const update = this.db.prepare(`UPDATE bookmarks SET ${set.join(", ")}
       WHERE id IN (${idPlaceholders}) AND ${livePredicate}
