@@ -54,6 +54,33 @@ test("settings text keeps readable colors in dark mode", () => {
   ]) assert.match(declarations(selector), /color: light-dark\(#1a1a1a, #ececee\)/);
 });
 
+test("account settings route exposes self-hosted instance fields", () => {
+  assert.match(library, /initialSettingsSection = \["app", "account", "import"\]/);
+  assert.match(library, /\["account", "帐户", "user", true\]/);
+  assert.match(library, /function accountSettingsMarkup\(\)/);
+  assert.match(library, /data-account-instance-name/);
+  assert.match(library, /data-account-settings-action="disconnect"/);
+  assert.match(library, /state\.settingsSection = state\.settingsOpen \? section : "app"/);
+  for (const selector of [
+    ".settings-account-input-wrap",
+    ".settings-account-value",
+    ".settings-account-stat",
+    ".settings-account-action",
+  ]) assert.match(declarations(selector), /display:/);
+});
+
+test("import settings route matches the reference upload surface", () => {
+  assert.match(library, /\["import", "导入", "upload", true\]/);
+  assert.match(library, /function importSettingsMarkup\(\)/);
+  assert.match(library, /data-import-file/);
+  assert.match(library, /\.enex/);
+  assert.match(library, /parseImportText\(text/);
+  assert.match(library, /data-import-submit/);
+  assert.match(declarations(".settings-import-grid"), /grid-template-columns: 26px/);
+  assert.match(declarations(".settings-import-alert"), /background: var\(--sidebar\)/);
+  for (const selector of [".settings-import-upload", ".settings-import-preview"]) assert.match(declarations(selector), /display:/);
+});
+
 test("primary font sizes match the reference plugin", () => {
   assert.match(declarations(":root"), /font: 14px\/1\.4 /);
   assert.match(declarations('[data-font-size="large"]'), /font-size: 15\.75px/);

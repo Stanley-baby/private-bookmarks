@@ -80,7 +80,7 @@ class MemoryBucket {
   objects = new Map();
 
   async put(key, value, options) {
-    this.objects.set(key, { bytes: value instanceof ArrayBuffer ? new Uint8Array(value) : new Uint8Array(value), contentType: options.httpMetadata.contentType });
+    this.objects.set(key, { bytes: value instanceof ArrayBuffer ? new Uint8Array(value) : new Uint8Array(value), ...options.httpMetadata });
   }
 
   async get(key) {
@@ -89,7 +89,10 @@ class MemoryBucket {
     return {
       body: object.bytes,
       httpEtag: '"test-etag"',
-      writeHttpMetadata(headers) { headers.set("content-type", object.contentType); },
+      writeHttpMetadata(headers) {
+        headers.set("content-type", object.contentType);
+        if (object.contentDisposition) headers.set("content-disposition", object.contentDisposition);
+      },
     };
   }
 }
@@ -262,4 +265,31 @@ test("media API stores validated images and serves them with a signed URL", asyn
 
   const invalid = await api.fetch(request("/v1/media", { method: "POST", headers: { "content-type": "text/plain" }, body: "not an image" }));
   assert.equal(invalid.status, 400);
+});
+
+test("media API accepts ENEX attachments and stable IDs for retries", async () => {
+  const bucket = new MemoryBucket();
+  const api = createApi({ key: "test-key", store: new MemoryStore(), mediaBucket: bucket });
+  const id = "22222222-2222-4222-8222-222222222222";
+  const headers = {
+    "content-type": "text/plain",
+    "x-private-bookmarks-kind": "attachment",
+    "x-private-bookmarks-name": encodeURIComponent("说明.txt"),
+    "x-private-bookmarks-id": id,
+  };
+  const first = await api.fetch(request("/v1/media", { method: "POST", headers, body: "first" }));
+  assert.equal(first.status, 201);
+  assert.equal((await first.json()).id, id);
+  const second = await api.fetch(request("/v1/media", { method: "POST", headers, body: "second" }));
+  assert.equal(second.status, 201);
+  const uploaded = await second.json();
+  assert.equal(uploaded.id, id);
+  assert.equal(bucket.objects.size, 1);
+  const served = await api.fetch(new Request(uploaded.url));
+  assert.equal(served.status, 200);
+  assert.equal(served.headers.get("content-disposition"), "attachment; filename*=UTF-8''%E8%AF%B4%E6%98%8E.txt");
+  assert.equal(await served.text(), "second");
+
+  const options = await api.fetch(new Request("https://private-bookmarks.test/v1/media", { method: "OPTIONS" }));
+  assert.match(options.headers.get("access-control-allow-headers"), /x-private-bookmarks-id/);
 });

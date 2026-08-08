@@ -131,6 +131,48 @@ test("D1 screenshot batch stores the screenshot sentinel for every bookmark", as
   assert.equal(result.bookmarks.every((item) => item.media.includes("<screenshot>")), true);
 });
 
+test("D1 bulk import assigns collection positions and canonical tag names", async () => {
+  const store = new D1Store(new D1TestDatabase());
+  const collection = await store.createCollection({ name: "Imported" });
+  const result = await store.importBookmarks([
+    { link: "https://example.com/import-one", type: "link", language: "", title: "One", description: "", note: "", reminder: "", cover: "", media: [], collectionId: collection.id, tags: ["Read", "Shared"], highlights: [], favorite: false, createdAt: "2024-01-02T03:04:05.000Z" },
+    { link: "https://example.com/import-two", type: "link", language: "", title: "Two", description: "", note: "", reminder: "", cover: "", media: [], collectionId: collection.id, tags: ["read", "Other"], highlights: [], favorite: false },
+  ]);
+
+  assert.equal(result.count, 2);
+  const imported = await store.listBookmarks({ collectionId: collection.id });
+  assert.equal(imported[0].createdAt, "2024-01-02T03:04:05.000Z");
+  assert.deepEqual(imported.map((item) => item.position), [0, 1]);
+  assert.deepEqual(imported.map((item) => item.tags), [["Read", "Shared"], ["Read", "Other"]]);
+  assert.deepEqual((await store.db.prepare("SELECT key, name FROM tag_names ORDER BY key").all()).results.map(({ key, name }) => ({ key, name })), [
+    { key: "other", name: "Other" }, { key: "read", name: "Read" }, { key: "shared", name: "Shared" },
+  ]);
+});
+
+test("D1 bulk import is idempotent for stable import IDs", async () => {
+  const store = new D1Store(new D1TestDatabase());
+  const items = [{
+    id: "11111111-1111-4111-8111-111111111111",
+    link: "https://example.com/idempotent",
+    type: "link",
+    language: "",
+    title: "Idempotent",
+    description: "",
+    note: "",
+    reminder: "",
+    cover: "",
+    media: [],
+    collectionId: "unsorted",
+    tags: [],
+    highlights: [],
+    favorite: false,
+  }];
+
+  assert.equal((await store.importBookmarks(items)).count, 1);
+  assert.equal((await store.importBookmarks(items)).count, 0);
+  assert.equal((await store.listBookmarks({ collectionId: "unsorted" })).filter((item) => item.link === items[0].link).length, 1);
+});
+
 test("D1 search relevance and tag sorting use server-side order", async () => {
   const store = new D1Store(new D1TestDatabase());
   await store.createBookmark({ link: "https://example.com/one", title: "alpha", description: "", note: "", cover: "", media: [], collectionId: "unsorted", tags: ["zeta", "shared"], highlights: [], favorite: false });
