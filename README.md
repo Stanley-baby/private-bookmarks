@@ -24,6 +24,8 @@ OAUTH_ENCRYPTION_KEY (recommended separate random secret; ACCESS_KEY is the fall
 
 If a redirect URI is not set, use `https://<worker-host>/v1/cloud/<provider>/callback` in the provider console. OAuth refresh/access tokens are encrypted before they are stored in D1; they are never returned by the connection-status API.
 
+The GitHub Actions deploy workflow reads these optional repository Secrets and syncs only non-empty values to the Worker: `DROPBOX_CLIENT_ID`, `DROPBOX_CLIENT_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `ONEDRIVE_CLIENT_ID`, `ONEDRIVE_CLIENT_SECRET`, and `OAUTH_ENCRYPTION_KEY`. Add them under **Settings → Secrets and variables → Actions** (or with `gh secret set NAME`); never commit them to this repository or paste them into source files.
+
 The Worker URL and access key are entered once in each browser installation. The key is stored only in that browser's local extension storage.
 
 ## Load the extension
