@@ -1,0 +1,1 @@
+ALTER TABLE bookmarks ADD COLUMN language TEXT NOT NULL DEFAULT '';

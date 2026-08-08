@@ -118,6 +118,7 @@ test("bookmark API creates a bookmark and rejects stale updates", async () => {
     method: "POST",
     body: JSON.stringify({
       link: "https://example.com/?utm_campaign=spring",
+      language: "zh-CN",
       title: "Example",
       collectionId: "unsorted",
     }),
@@ -126,6 +127,7 @@ test("bookmark API creates a bookmark and rejects stale updates", async () => {
   assert.equal(created.status, 201);
   const bookmark = await created.json();
   assert.equal(bookmark.link, "https://example.com/");
+  assert.equal(bookmark.language, "zh");
   assert.equal(bookmark.revision, 1);
 
   const updated = await api.fetch(request(`/v1/bookmarks/${bookmark.id}`, {

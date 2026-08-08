@@ -31,6 +31,7 @@ async function metadata(tab) {
       return {
         link: location.href,
         type,
+        language: document.documentElement.lang || meta("language", "content-language") || "",
         title: meta("og:title", "twitter:title") || structured.headline || structured.name || document.title,
         description: meta("og:description", "twitter:description", "description") || structured.description || "",
         cover: cover ? new URL(cover, location.href).href : structuredImage ? new URL(structuredImage, location.href).href : images[0] || "",

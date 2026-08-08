@@ -38,6 +38,12 @@ function normalizeBookmarkType(value) {
   return value;
 }
 
+function normalizeLanguage(value) {
+  if (typeof value !== "string") return "";
+  const language = value.trim().replaceAll("_", "-").split("-", 1)[0].toLocaleLowerCase();
+  return /^[a-z]{2,3}$/.test(language) ? language : "";
+}
+
 export function normalizeTags(tags = []) {
   if (!Array.isArray(tags)) throw new TypeError("Tags must be an array");
   const seen = new Set();
@@ -57,6 +63,7 @@ function bookmarkInput(input) {
   return {
     link: canonicalizeUrl(input.link),
     type: normalizeBookmarkType(input.type),
+    language: normalizeLanguage(input.language),
     title: cleanText(input.title, MAX_TITLE),
     description: cleanText(input.description, MAX_TEXT),
     note: cleanText(input.note, MAX_TEXT),
@@ -78,6 +85,7 @@ function bookmarkChanges(input) {
   }
   if ("link" in input) changes.link = canonicalizeUrl(input.link);
   if ("type" in input) changes.type = normalizeBookmarkType(input.type);
+  if ("language" in input) changes.language = normalizeLanguage(input.language);
   if ("reminder" in input) changes.reminder = normalizeReminder(input.reminder);
   if ("tags" in input) changes.tags = normalizeTags(input.tags);
   if ("favorite" in input) changes.favorite = Boolean(input.favorite);

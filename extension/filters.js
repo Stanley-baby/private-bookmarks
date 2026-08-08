@@ -29,7 +29,7 @@ export function parseSearchQuery(query) {
       filters.push({ kind: "tag", value: token.slice(1).toLocaleLowerCase(), excluded });
       continue;
     }
-    const match = token.match(/^(important|note|highlights|notag|reminder|broken|duplicate|type|created|info|url|link):(.*)$/i);
+    const match = token.match(/^(important|note|highlights|notag|reminder|broken|duplicate|type|created|lang|info|url|link):(.*)$/i);
     if (!match) {
       text.push(raw.replace(/^"|"$/g, ""));
       continue;
@@ -51,11 +51,43 @@ export function matchesSearchFilters(item, filters, duplicates = new Set()) {
     if (kind === "broken") return item.health?.status === "broken";
     if (kind === "duplicate") return duplicates.has(item.link);
     if (kind === "type") return !expected || bookmarkType(item) === expected;
-    if (kind === "created") return Boolean(item.createdAt) && (!expected || lower(item.createdAt).includes(expected));
+    if (kind === "created") {
+      const created = lower(item.createdAt);
+      if (!created) return false;
+      if (expected.startsWith("<") || expected.startsWith(">")) {
+        const boundary = expected.slice(1);
+        const comparable = created.slice(0, boundary.length);
+        return expected[0] === "<" ? comparable < boundary : comparable > boundary;
+      }
+      return !expected || created.startsWith(expected);
+    }
+    if (kind === "lang") return Boolean(expected) && lower(item.language).split("-", 1)[0] === expected.split("-", 1)[0];
     if (kind === "info") return lower(`${item.title || ""} ${item.description || ""}`).includes(expected);
     if (kind === "url") return lower(item.link).includes(expected);
     if (kind === "tag") return expected ? item.tags?.some((tag) => lower(tag) === expected) : Boolean(item.tags?.length);
     return true;
   };
   return filters.every((filter) => filter.excluded ? !matches(filter) : matches(filter));
+}
+
+export function dateFilterSuggestions(items, value = "") {
+  const raw = String(value);
+  const prefix = /^[<>]/.test(raw) ? "" : raw;
+  const counts = new Map();
+  for (const item of items) {
+    const created = String(item.createdAt || "");
+    if (!/^\d{4}-\d{2}-\d{2}/.test(created)) continue;
+    const date = created.slice(0, 7);
+    if (!prefix || date.startsWith(prefix.slice(0, 7))) counts.set(date, (counts.get(date) || 0) + 1);
+  }
+  return [...counts].sort(([a], [b]) => b.localeCompare(a)).map(([date, count]) => ({ value: date, count }));
+}
+
+export function languageFilterSuggestions(items) {
+  const counts = new Map();
+  for (const item of items) {
+    const language = String(item.language || "").toLocaleLowerCase().split("-", 1)[0];
+    if (language) counts.set(language, (counts.get(language) || 0) + 1);
+  }
+  return [...counts].sort(([, a], [, b]) => b - a).map(([language, count]) => ({ value: language, count }));
 }
