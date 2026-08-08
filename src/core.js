@@ -1,7 +1,19 @@
 const MAX_TITLE = 1_000;
 const MAX_TEXT = 10_000;
 const MAX_MEDIA_BYTES = 5 * 1024 * 1024;
-const MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp", "image/avif"]);
+// Keep imports small enough for one D1 batch and predictable request sizes.
+export const MAX_IMPORT_ITEMS = 100;
+const MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp", "image/avif", "image/svg+xml"]);
+const ATTACHMENT_TYPES = new Set([
+  ...MEDIA_TYPES,
+  "application/pdf", "application/zip", "application/octet-stream", "text/plain", "text/csv",
+  "audio/mpeg", "audio/mp4", "audio/ogg", "audio/wav", "audio/webm",
+  "video/mp4", "video/quicktime", "video/webm", "video/ogg",
+  "application/msword", "application/rtf", "application/vnd.ms-excel", "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+]);
 const BOOKMARK_TYPES = new Set(["link", "article", "image", "video", "audio", "document"]);
 
 export function canonicalizeUrl(value) {
@@ -32,10 +44,28 @@ function normalizeReminder(value) {
   return date.toISOString();
 }
 
+function normalizeCreatedAt(value) {
+  if (!value) return "";
+  if (typeof value !== "string") throw new TypeError("Created date must be a string");
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) throw new TypeError("Created date must be valid");
+  return date.toISOString();
+}
+
+function normalizeImportId(value) {
+  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value) ? value : "";
+}
+
 function normalizeBookmarkType(value) {
   if (value == null || value === "") return "link";
   if (!BOOKMARK_TYPES.has(value)) throw new TypeError("Unsupported bookmark type");
   return value;
+}
+
+function normalizeLanguage(value) {
+  if (typeof value !== "string") return "";
+  const language = value.trim().replaceAll("_", "-").split("-", 1)[0].toLocaleLowerCase();
+  return /^[a-z]{2,3}$/.test(language) ? language : "";
 }
 
 export function normalizeTags(tags = []) {
@@ -57,6 +87,7 @@ function bookmarkInput(input) {
   return {
     link: canonicalizeUrl(input.link),
     type: normalizeBookmarkType(input.type),
+    language: normalizeLanguage(input.language),
     title: cleanText(input.title, MAX_TITLE),
     description: cleanText(input.description, MAX_TEXT),
     note: cleanText(input.note, MAX_TEXT),
@@ -67,6 +98,8 @@ function bookmarkInput(input) {
     tags: normalizeTags(input.tags),
     favorite: Boolean(input.favorite),
     highlights: Array.isArray(input.highlights) ? input.highlights : [],
+    createdAt: normalizeCreatedAt(input.createdAt),
+    id: normalizeImportId(input.id),
   };
 }
 
@@ -78,6 +111,7 @@ function bookmarkChanges(input) {
   }
   if ("link" in input) changes.link = canonicalizeUrl(input.link);
   if ("type" in input) changes.type = normalizeBookmarkType(input.type);
+  if ("language" in input) changes.language = normalizeLanguage(input.language);
   if ("reminder" in input) changes.reminder = normalizeReminder(input.reminder);
   if ("tags" in input) changes.tags = normalizeTags(input.tags);
   if ("favorite" in input) changes.favorite = Boolean(input.favorite);
@@ -126,8 +160,10 @@ async function mediaToken(id, key) {
 
 function mediaType(request) {
   const value = (request.headers.get("content-type") || "").split(";", 1)[0].trim().toLocaleLowerCase();
-  if (!MEDIA_TYPES.has(value)) throw new TypeError("仅支持 JPG、PNG、GIF、WebP 或 AVIF 图片");
-  return value;
+  const kind = request.headers.get("x-private-bookmarks-kind") || "cover";
+  const allowed = kind === "attachment" ? ATTACHMENT_TYPES : MEDIA_TYPES;
+  if (!allowed.has(value)) throw new TypeError(kind === "attachment" ? "不支持此附件类型" : "仅支持 JPG、PNG、GIF、WebP、AVIF 或 SVG 图片");
+  return { value, kind };
 }
 
 export function createApi({ key, store, healthCheck, mediaBucket = null }) {
@@ -137,7 +173,7 @@ export function createApi({ key, store, healthCheck, mediaBucket = null }) {
         return new Response(null, {
           headers: {
             "access-control-allow-origin": "*",
-            "access-control-allow-headers": "content-type, x-private-bookmarks-key",
+            "access-control-allow-headers": "content-type, x-private-bookmarks-key, x-private-bookmarks-kind, x-private-bookmarks-name, x-private-bookmarks-id",
             "access-control-allow-methods": "GET, POST, PATCH, DELETE, OPTIONS",
           },
         });
@@ -168,6 +204,14 @@ export function createApi({ key, store, healthCheck, mediaBucket = null }) {
           await store.replaceData(input.backup);
           return json({ ok: true });
         }
+        if (request.method === "POST" && pathname === "/v1/import") {
+          const input = await readJson(request);
+          if (!Array.isArray(input?.items) || !input.items.length) return error(400, "invalid_import", "At least one bookmark is required");
+          if (input.items.length > MAX_IMPORT_ITEMS) return error(413, "import_too_large", `Import batches cannot exceed ${MAX_IMPORT_ITEMS} bookmarks`);
+          const items = input.items.map(bookmarkInput);
+          const result = await store.importBookmarks(items);
+          return json({ count: result.count ?? result.bookmarks?.length ?? items.length });
+        }
         if (request.method === "GET" && pathname === "/v1/bootstrap") {
           const [collections, preferences, collectionCounts, trashCount] = await Promise.all([
             store.listCollections(),
@@ -185,19 +229,30 @@ export function createApi({ key, store, healthCheck, mediaBucket = null }) {
         }
         if (request.method === "POST" && pathname === "/v1/media") {
           if (!mediaBucket) return error(501, "not_available", "Media storage is not configured");
-          const type = mediaType(request);
+          const { value: type, kind } = mediaType(request);
           const declaredSize = Number(request.headers.get("content-length"));
-          if (Number.isFinite(declaredSize) && declaredSize > MAX_MEDIA_BYTES) return error(413, "media_too_large", "图片不能超过 5 MB");
+          if (Number.isFinite(declaredSize) && declaredSize > MAX_MEDIA_BYTES) return error(413, "media_too_large", "文件不能超过 5 MB");
           const bytes = await request.arrayBuffer();
-          if (!bytes.byteLength || bytes.byteLength > MAX_MEDIA_BYTES) return error(413, "media_too_large", "图片不能超过 5 MB");
-          const id = crypto.randomUUID();
+          if (!bytes.byteLength || bytes.byteLength > MAX_MEDIA_BYTES) return error(413, "media_too_large", "文件不能超过 5 MB");
+          const requestedId = request.headers.get("x-private-bookmarks-id");
+          if (requestedId && !normalizeImportId(requestedId)) throw new TypeError("媒体 ID 必须是 UUID");
+          const id = requestedId || crypto.randomUUID();
+          const rawName = request.headers.get("x-private-bookmarks-name")?.trim();
+          let name = rawName || "";
+          if (rawName) {
+            try { name = decodeURIComponent(rawName); } catch { /* keep the encoded fallback */ }
+          }
           await mediaBucket.put(mediaKey(id), bytes, {
-            httpMetadata: { contentType: type, cacheControl: "public, max-age=31536000, immutable" },
+            httpMetadata: {
+              contentType: type,
+              cacheControl: "public, max-age=31536000, immutable",
+              ...(kind === "attachment" ? { contentDisposition: `attachment${name ? `; filename*=UTF-8''${encodeURIComponent(name)}` : ""}` } : {}),
+            },
           });
           const url = new URL(request.url);
           url.pathname = `/v1/media/${id}`;
           url.search = `?token=${await mediaToken(id, key)}`;
-          return json({ id, url: url.toString(), contentType: type, size: bytes.byteLength }, 201);
+          return json({ id, url: url.toString(), contentType: type, size: bytes.byteLength, kind, name: name || "" }, 201);
         }
         if (request.method === "PATCH" && pathname === "/v1/preferences") {
           const input = await readJson(request);

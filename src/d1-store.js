@@ -1,5 +1,6 @@
 const DEFAULT_PREFERENCES = {
   language: "zh-Hans",
+  instanceName: "私有书签",
   theme: "auto",
   defaultCollectionId: "unsorted",
   sort: "manual",
@@ -30,6 +31,7 @@ function bookmark(row) {
     id: row.id,
     link: row.link,
     type: row.type || "link",
+    language: row.language || "",
     title: row.title,
     description: row.description,
     note: row.note,
@@ -175,11 +177,68 @@ export class D1Store {
     const createdAt = now();
     const tags = await this.canonicalTags(input.tags);
     await this.db.prepare(`INSERT INTO bookmarks
-      (id, link, type, title, description, note, reminder, cover, media_json, collection_id, tags_json, highlights_json, favorite, position, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .bind(id, input.link, input.type || "link", input.title, input.description, input.note, input.reminder || null, input.cover, JSON.stringify(input.media), input.collectionId, JSON.stringify(tags), JSON.stringify(input.highlights), input.favorite ? 1 : 0, await this.nextBookmarkPosition(input.collectionId), createdAt, createdAt)
+      (id, link, type, language, title, description, note, reminder, cover, media_json, collection_id, tags_json, highlights_json, favorite, position, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .bind(id, input.link, input.type || "link", input.language || "", input.title, input.description, input.note, input.reminder || null, input.cover, JSON.stringify(input.media), input.collectionId, JSON.stringify(tags), JSON.stringify(input.highlights), input.favorite ? 1 : 0, await this.nextBookmarkPosition(input.collectionId), createdAt, createdAt)
       .run();
     return this.getBookmark(id);
+  }
+
+  async importBookmarks(items) {
+    if (!Array.isArray(items) || !items.length) throw new TypeError("At least one bookmark is required");
+    const stableIds = items.filter((item) => item.id).map((item) => item.id);
+    const existingIds = new Set();
+    if (stableIds.length) {
+      const rows = (await this.db.prepare(`SELECT id FROM bookmarks WHERE id IN (${stableIds.map(() => "?").join(", ")})`).bind(...stableIds).all()).results;
+      for (const row of rows) existingIds.add(row.id);
+    }
+    const pending = items.filter((item) => !item.id || !existingIds.has(item.id));
+    if (!pending.length) return { count: 0 };
+
+    const collectionIds = [...new Set(pending.map((item) => item.collectionId))];
+    const collections = await Promise.all(collectionIds.map((id) => this.getCollection(id)));
+    if (collections.some((item) => !item || item.deletedAt)) throw new TypeError("Collection not found");
+
+    const positions = new Map(collectionIds.map((id) => [id, -1]));
+    const positionRows = (await this.db.prepare(`SELECT collection_id, COALESCE(MAX(position), -1) AS position
+      FROM bookmarks WHERE deleted_at IS NULL AND collection_id IN (${collectionIds.map(() => "?").join(", ")}) GROUP BY collection_id`).bind(...collectionIds).all()).results;
+    for (const row of positionRows) positions.set(row.collection_id, Number(row.position));
+
+    const tagKeys = [...new Set(pending.flatMap((item) => (item.tags || []).map((tag) => tag.toLocaleLowerCase())))];
+    const tagNames = new Map();
+    if (tagKeys.length) {
+      const existing = (await this.db.prepare(`SELECT key, name FROM tag_names WHERE key IN (${tagKeys.map(() => "?").join(", ")})`).bind(...tagKeys).all()).results;
+      for (const row of existing) tagNames.set(row.key, row.name);
+    }
+
+    const statements = [];
+    for (const item of pending) {
+      for (const tag of item.tags || []) {
+        const key = tag.toLocaleLowerCase();
+        if (!tagNames.has(key)) {
+          tagNames.set(key, tag);
+          statements.push(this.db.prepare("INSERT OR IGNORE INTO tag_names (key, name) VALUES (?, ?)").bind(key, tag));
+        }
+      }
+    }
+
+    const timestamp = now();
+    const bookmarkIndexes = [];
+    for (const item of pending) {
+      const id = item.id || crypto.randomUUID();
+      const collectionId = item.collectionId;
+      const position = positions.get(collectionId) + 1;
+      positions.set(collectionId, position);
+      const createdAt = item.createdAt || timestamp;
+      const tags = (item.tags || []).map((tag) => tagNames.get(tag.toLocaleLowerCase()) || tag);
+      bookmarkIndexes.push(statements.length);
+      statements.push(this.db.prepare(`INSERT OR IGNORE INTO bookmarks
+        (id, link, type, language, title, description, note, reminder, cover, media_json, collection_id, tags_json, highlights_json, favorite, position, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .bind(id, item.link, item.type || "link", item.language || "", item.title || "", item.description || "", item.note || "", item.reminder || null, item.cover || "", JSON.stringify(Array.isArray(item.media) ? item.media : []), collectionId, JSON.stringify(tags), JSON.stringify(Array.isArray(item.highlights) ? item.highlights : []), item.favorite ? 1 : 0, position, createdAt, timestamp));
+    }
+    const results = await this.db.batch(statements);
+    return { count: bookmarkIndexes.reduce((count, index) => count + Number(results[index]?.meta?.changes || 0), 0) };
   }
 
   async updateBookmark(id, expectedRevision, changes) {
@@ -195,6 +254,7 @@ export class D1Store {
     const columns = {
       link: "link",
       type: "type",
+      language: "language",
       title: "title",
       description: "description",
       note: "note",
@@ -356,9 +416,9 @@ export class D1Store {
       const tags = Array.isArray(item.tags) ? item.tags.map((tag) => String(tag).trim()).filter(Boolean) : [];
       for (const tag of tags) statements.push(this.db.prepare("INSERT OR IGNORE INTO tag_names (key, name) VALUES (?, ?)").bind(tag.toLocaleLowerCase(), tag));
       statements.push(this.db.prepare(`INSERT INTO bookmarks
-        (id, link, type, title, description, note, reminder, cover, media_json, collection_id, tags_json, highlights_json, favorite, position, health_status, health_checked_at, health_final_url, revision, created_at, updated_at, deleted_at, deleted_by_collection_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .bind(item.id || crypto.randomUUID(), item.link, ["link", "article", "image", "video", "audio", "document"].includes(item.type) ? item.type : "link", item.title || "", item.description || "", item.note || "", item.reminder || null, item.cover || "", JSON.stringify(Array.isArray(item.media) ? item.media : []), collectionIds.has(item.collectionId) ? item.collectionId : "unsorted", JSON.stringify(tags), JSON.stringify(Array.isArray(item.highlights) ? item.highlights : []), item.favorite ? 1 : 0, Number(item.position) || 0, item.health?.status || "unknown", item.health?.checkedAt || null, item.health?.finalUrl || null, Number(item.revision) || 1, item.createdAt || timestamp, item.updatedAt || timestamp, item.deletedAt || null, item.deletedByCollectionId || null));
+        (id, link, type, language, title, description, note, reminder, cover, media_json, collection_id, tags_json, highlights_json, favorite, position, health_status, health_checked_at, health_final_url, revision, created_at, updated_at, deleted_at, deleted_by_collection_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .bind(item.id || crypto.randomUUID(), item.link, ["link", "article", "image", "video", "audio", "document"].includes(item.type) ? item.type : "link", item.language || "", item.title || "", item.description || "", item.note || "", item.reminder || null, item.cover || "", JSON.stringify(Array.isArray(item.media) ? item.media : []), collectionIds.has(item.collectionId) ? item.collectionId : "unsorted", JSON.stringify(tags), JSON.stringify(Array.isArray(item.highlights) ? item.highlights : []), item.favorite ? 1 : 0, Number(item.position) || 0, item.health?.status || "unknown", item.health?.checkedAt || null, item.health?.finalUrl || null, Number(item.revision) || 1, item.createdAt || timestamp, item.updatedAt || timestamp, item.deletedAt || null, item.deletedByCollectionId || null));
     }
     const preferences = { ...DEFAULT_PREFERENCES, ...(backup.preferences || {}) };
     statements.push(this.db.prepare("INSERT INTO preferences (key, value_json, revision, updated_at) VALUES ('ui', ?, ?, ?)")
