@@ -1,4 +1,4 @@
-import { api, requestPagePermission, saveBookmark } from "./api.js";
+import { api, requestPagePermission, saveBookmark } from "./api.js?v=20260808-pin2";
 
 function message(key, fallback) {
   try {

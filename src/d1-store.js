@@ -70,6 +70,37 @@ function collection(row) {
   };
 }
 
+function cloudBackup(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    kind: row.kind || "manual",
+    includeMedia: Boolean(row.include_media),
+    mediaCopied: Boolean(row.media_copied),
+    mediaCount: Number(row.media_count) || 0,
+    libraryBytes: Number(row.library_bytes) || 0,
+    librarySha256: row.library_sha256 || "",
+    manifestSha256: row.manifest_sha256 || "",
+    createdAt: row.created_at,
+  };
+}
+
+function cloudConnection(row) {
+  if (!row) return null;
+  return {
+    provider: row.provider,
+    accessToken: row.access_token || "",
+    refreshToken: row.refresh_token || "",
+    expiresAt: row.expires_at || "",
+    scope: row.scope || "",
+    accountId: row.account_id || "",
+    accountName: row.account_name || "",
+    accountEmail: row.account_email || "",
+    connectedAt: row.connected_at || "",
+    updatedAt: row.updated_at || "",
+  };
+}
+
 function bookmarkFilters({ collectionId, view, search, nestedViewLegacy = false } = {}) {
   const where = [view === "trash" ? "deleted_at IS NOT NULL" : "deleted_at IS NULL"];
   const bindings = [];
@@ -118,6 +149,16 @@ function backupCollections(items) {
     known.add(item.id);
   }
   return ordered;
+}
+
+// Cloudflare D1 batches have a finite statement budget; leave headroom for restore metadata.
+export const MAX_RESTORE_STATEMENTS = 90;
+
+export function restoreStatementCount(backup) {
+  if (!Array.isArray(backup?.collections) || !Array.isArray(backup?.bookmarks)) return Infinity;
+  const collections = backup.collections.some((item) => item.id === "unsorted") ? backup.collections : [{ id: "unsorted" }, ...backup.collections];
+  const tags = new Set(backup.bookmarks.flatMap((item) => Array.isArray(item.tags) ? item.tags.map((tag) => String(tag).trim().toLocaleLowerCase()).filter(Boolean) : []));
+  return 5 + collections.length + tags.size + backup.bookmarks.length;
 }
 
 export class D1Store {
@@ -389,12 +430,74 @@ export class D1Store {
     ]);
   }
 
+  async createBackup({ id = crypto.randomUUID(), kind = "manual", includeMedia = false, mediaCopied = false, mediaCount = 0, libraryBytes = 0, librarySha256 = "", manifestSha256 = "", createdAt = now() } = {}) {
+    await this.db.prepare(`INSERT INTO backups
+      (id, kind, include_media, media_copied, media_count, library_bytes, library_sha256, manifest_sha256, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(
+      id,
+      kind,
+      includeMedia ? 1 : 0,
+      mediaCopied ? 1 : 0,
+      Number(mediaCount) || 0,
+      Number(libraryBytes) || 0,
+      librarySha256,
+      manifestSha256,
+      createdAt,
+    ).run();
+    return this.getBackup(id);
+  }
+
+  async getBackup(id) {
+    return cloudBackup(await this.db.prepare("SELECT * FROM backups WHERE id = ?").bind(id).first());
+  }
+
+  async listBackups({ kind = null } = {}) {
+    const query = kind ? "SELECT * FROM backups WHERE kind = ? ORDER BY created_at DESC" : "SELECT * FROM backups ORDER BY created_at DESC";
+    const rows = (kind ? await this.db.prepare(query).bind(kind).all() : await this.db.prepare(query).all()).results;
+    return rows.map(cloudBackup);
+  }
+
+  async deleteBackup(id) {
+    const result = await this.db.prepare("DELETE FROM backups WHERE id = ?").bind(id).run();
+    return Boolean(result.meta.changes);
+  }
+
+  async saveCloudConnection({ provider, accessToken, refreshToken = "", expiresAt = "", scope = "", accountId = "", accountName = "", accountEmail = "" } = {}) {
+    const timestamp = now();
+    await this.db.prepare(`INSERT INTO cloud_connections
+      (provider, access_token, refresh_token, expires_at, scope, account_id, account_name, account_email, connected_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(provider) DO UPDATE SET access_token = excluded.access_token, refresh_token = excluded.refresh_token,
+      expires_at = excluded.expires_at, scope = excluded.scope, account_id = excluded.account_id,
+      account_name = excluded.account_name, account_email = excluded.account_email, updated_at = excluded.updated_at`)
+      .bind(provider, accessToken, refreshToken, expiresAt, scope, accountId, accountName, accountEmail, timestamp, timestamp).run();
+    return this.getCloudConnection(provider);
+  }
+
+  async getCloudConnection(provider) {
+    return cloudConnection(await this.db.prepare("SELECT * FROM cloud_connections WHERE provider = ?").bind(provider).first());
+  }
+
+  async listCloudConnections() {
+    const { results } = await this.db.prepare("SELECT * FROM cloud_connections ORDER BY provider").all();
+    return results.map(cloudConnection);
+  }
+
+  async deleteCloudConnection(provider) {
+    const result = await this.db.prepare("DELETE FROM cloud_connections WHERE provider = ?").bind(provider).run();
+    return Boolean(result.meta.changes);
+  }
+
   async exportData() {
-    const [collections, bookmarks, preferences] = await Promise.all([
-      (await this.db.prepare("SELECT * FROM collections ORDER BY created_at").all()).results.map(collection),
-      (await this.db.prepare("SELECT * FROM bookmarks ORDER BY created_at").all()).results.map(bookmark),
-      this.getPreferences(),
+    const [collectionResult, bookmarkResult, preferenceResult] = await this.db.batch([
+      this.db.prepare("SELECT * FROM collections ORDER BY created_at"),
+      this.db.prepare("SELECT * FROM bookmarks ORDER BY created_at"),
+      this.db.prepare("SELECT * FROM preferences WHERE key = 'ui'"),
     ]);
+    const preferenceRow = preferenceResult?.results?.[0] || null;
+    const preferences = preferenceRow ? { ...DEFAULT_PREFERENCES, ...parse(preferenceRow.value_json, {}), revision: preferenceRow.revision } : { ...DEFAULT_PREFERENCES, revision: 0 };
+    const collections = (collectionResult?.results || []).map(collection);
+    const bookmarks = (bookmarkResult?.results || []).map(bookmark);
     return { format: "private-bookmarks/v1", exportedAt: now(), collections, bookmarks, preferences };
   }
 
@@ -402,6 +505,11 @@ export class D1Store {
     if (!Array.isArray(backup.collections) || !Array.isArray(backup.bookmarks)) throw new TypeError("Backup is incomplete");
     const collections = backup.collections.some((item) => item.id === "unsorted") ? backup.collections : [{ id: "unsorted", name: "Unsorted", parentId: null, position: 0, revision: 1 }, ...backup.collections];
     const ordered = backupCollections(collections);
+    if (restoreStatementCount(backup) > MAX_RESTORE_STATEMENTS) {
+      const reason = new TypeError(`Backup is too large to restore in one D1 batch (maximum ${MAX_RESTORE_STATEMENTS} statements)`);
+      reason.code = "backup_too_large";
+      throw reason;
+    }
     const timestamp = now();
     const statements = [
       this.db.prepare("DELETE FROM bookmarks"),

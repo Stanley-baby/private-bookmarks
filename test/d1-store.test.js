@@ -16,6 +16,7 @@ class Statement {
   }
 
   async run() {
+    if (/^\s*SELECT\b/i.test(this.sql)) return { results: this.database.prepare(this.sql).all(), meta: { changes: 0 } };
     return { meta: { changes: this.database.prepare(this.sql).run(...this.values).changes } };
   }
 
@@ -31,7 +32,7 @@ class Statement {
 class D1TestDatabase {
   constructor() {
     this.database = new DatabaseSync(":memory:");
-    for (const file of ["0001_initial.sql", "0002_trash_source.sql", "0003_collection_trash_source.sql", "0004_reminder.sql", "0005_bookmark_type.sql", "0006_bookmark_language.sql"]) this.database.exec(readFileSync(new URL(`../migrations/${file}`, import.meta.url), "utf8"));
+    for (const file of ["0001_initial.sql", "0002_trash_source.sql", "0003_collection_trash_source.sql", "0004_reminder.sql", "0005_bookmark_type.sql", "0006_bookmark_language.sql", "0007_backups.sql", "0008_cloud_connections.sql"]) this.database.exec(readFileSync(new URL(`../migrations/${file}`, import.meta.url), "utf8"));
   }
 
   prepare(sql) {
@@ -74,6 +75,45 @@ test("D1 migrations preserve trash sources and restore needed collection paths",
   await store.restoreCollection(secondParent.id, (await store.getCollection(secondParent.id)).revision);
   assert.notEqual((await store.getBookmark(individuallyDeleted.id)).deletedAt, null);
   assert.equal((await store.getBookmark(restoredWithCollection.id)).deletedAt, null);
+});
+
+test("D1 stores cloud backup metadata and supports retention queries", async () => {
+  const store = new D1Store(new D1TestDatabase());
+  const created = await store.createBackup({
+    id: "33333333-3333-4333-8333-333333333333",
+    kind: "automatic",
+    includeMedia: true,
+    libraryBytes: 42,
+    librarySha256: "library",
+    manifestSha256: "manifest",
+    createdAt: "2026-08-08T03:00:00.000Z",
+  });
+  assert.equal(created.includeMedia, true);
+  assert.equal(created.libraryBytes, 42);
+  assert.deepEqual((await store.listBackups({ kind: "automatic" })).map((item) => item.id), [created.id]);
+  assert.equal(await store.deleteBackup(created.id), true);
+  assert.equal(await store.getBackup(created.id), null);
+});
+
+test("D1 stores encrypted cloud connection metadata without exposing plaintext fields", async () => {
+  const store = new D1Store(new D1TestDatabase());
+  await store.saveCloudConnection({ provider: "dropbox", accessToken: "cipher-access", refreshToken: "cipher-refresh", expiresAt: "2026-08-08T04:00:00.000Z", accountName: "Tester", accountEmail: "tester@example.com" });
+  const connection = await store.getCloudConnection("dropbox");
+  assert.equal(connection.accessToken, "cipher-access");
+  assert.equal(connection.accountEmail, "tester@example.com");
+  assert.deepEqual((await store.listCloudConnections()).map((item) => item.provider), ["dropbox"]);
+  assert.equal(await store.deleteCloudConnection("dropbox"), true);
+  assert.equal(await store.getCloudConnection("dropbox"), null);
+});
+
+test("D1 export reads the library tables from one batch snapshot", async () => {
+  const store = new D1Store(new D1TestDatabase());
+  const bookmark = await store.createBookmark({ link: "https://example.com/snapshot", title: "Snapshot", description: "", note: "", cover: "", media: [], collectionId: "unsorted", tags: [], highlights: [], favorite: false });
+  const backup = await store.exportData();
+  assert.equal(backup.format, "private-bookmarks/v1");
+  assert.equal(backup.bookmarks.some((item) => item.id === bookmark.id), true);
+  assert.equal(backup.collections.some((item) => item.id === "unsorted"), true);
+  assert.equal(backup.preferences.revision, 0);
 });
 
 test("D1 collection scopes include descendants unless legacy view is enabled", async () => {

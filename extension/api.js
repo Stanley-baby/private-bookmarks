@@ -1,23 +1,19 @@
+import { activeConnection, forgetPin, lockConfig, lockState } from "./lock.js?v=20260808-pin2";
+
 const CONNECTION_KEY = "instanceConnection";
 const extensionStorage = globalThis.chrome?.storage?.local;
-
-function storedConnection() {
-  try {
-    return JSON.parse(localStorage.getItem(CONNECTION_KEY) || "null");
-  } catch {
-    return null;
-  }
-}
 
 function localAddress(url) {
   return ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
 }
 
 export async function connection() {
-  return extensionStorage ? (await extensionStorage.get(CONNECTION_KEY))[CONNECTION_KEY] || null : storedConnection();
+  return activeConnection();
 }
 
 export async function connect(endpoint, key) {
+  const configuredLock = await lockConfig();
+  if (configuredLock && (await lockState()).locked) throw Object.assign(new TypeError("请先解锁应用"), { code: "locked" });
   const url = new URL(endpoint);
   if (url.protocol !== "https:" && (extensionStorage || url.protocol !== "http:" || !localAddress(url))) throw new TypeError("私有实例地址必须使用 HTTPS");
   if (extensionStorage && !await chrome.permissions.request({ origins: [`${url.origin}/*`] })) throw new TypeError("未获得私有实例地址的访问权限");
@@ -30,6 +26,7 @@ export async function connect(endpoint, key) {
 }
 
 export async function disconnect() {
+  if (await lockConfig()) return forgetPin();
   if (extensionStorage) await extensionStorage.remove(CONNECTION_KEY);
   else localStorage.removeItem(CONNECTION_KEY);
 }
@@ -42,7 +39,9 @@ export async function requestPagePermission(pageUrl) {
 }
 
 export async function api(path, init = {}) {
-  const config = await connection();
+  const status = await lockState();
+  if (status.enabled && status.locked) throw Object.assign(new TypeError("应用已锁定，请输入 PIN 码"), { code: "locked" });
+  const config = await activeConnection();
   if (!config) throw new TypeError("请先连接私有实例");
   const response = await fetch(`${config.endpoint}${path}`, {
     ...init,

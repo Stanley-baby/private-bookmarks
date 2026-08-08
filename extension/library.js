@@ -1,8 +1,9 @@
-import { api, connection, disconnect } from "./api.js";
+import { api, connection, disconnect } from "./api.js?v=20260808-pin2";
 import { bookmarkType, dateFilterSuggestions, duplicateLinks, languageFilterSuggestions, matchesSearchFilters, parseSearchQuery } from "./filters.js";
 import { canonicalImportLink, parseImportText } from "./import.js";
+import { disablePin, enablePin, lockNow, lockState, prepareLock, setAutoLock, startLockMonitor } from "./lock.js?v=20260808-pin2";
 import { renderMarkdown } from "./markdown.js";
-import { collectionOptions, connectionView, escapeHtml } from "./ui.js";
+import { collectionOptions, connectionView, escapeHtml, lockView } from "./ui.js?v=20260808-pin2";
 
 const root = document.querySelector("#app");
 const collectionValueDialog = document.querySelector("#collection-value-dialog");
@@ -16,8 +17,10 @@ const batchTagDialog = document.querySelector("#batch-tag-dialog");
 const defaultViewDialog = document.querySelector("#default-view-dialog");
 const SEARCH_HISTORY_KEY = "private-bookmarks.search-history";
 const IMPORT_PROGRESS_KEY = "private-bookmarks.import-progress";
+const BACKUP_HISTORY_KEY = "private-bookmarks.backup-history";
 const initialRoute = new URL(location.href).searchParams;
-const initialSettingsSection = ["app", "account", "import"].includes(initialRoute.get("settings")) ? initialRoute.get("settings") : "";
+const initialSetting = initialRoute.get("settings");
+const initialSettingsSection = ["app", "account", "import"].includes(initialSetting) ? initialSetting : initialSetting === "backups" ? "backups" : initialSetting === "pin" ? "pin" : "";
 const initialSettingsRoute = Boolean(initialSettingsSection);
 const DEFAULT_BUTTON_GROUP = Object.freeze({ select: true, current_tab: false, new_tab: true, preview: false, web: false, copy: false, ask: false, important: false, tags: false, edit: true, remove: true });
 const BUTTON_GROUP_OPTIONS = [
@@ -53,6 +56,25 @@ function persistImportProgress(preview) {
   }
 }
 
+function readBackupHistory() {
+  try {
+    const history = JSON.parse(localStorage.getItem(BACKUP_HISTORY_KEY) || "[]");
+    return Array.isArray(history) ? history.filter((item) => item && item.backup?.format === "private-bookmarks/v1").slice(0, 5) : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistBackupHistory(history) {
+  try {
+    const serialized = JSON.stringify(history.slice(0, 5));
+    localStorage.setItem(BACKUP_HISTORY_KEY, serialized);
+    return localStorage.getItem(BACKUP_HISTORY_KEY) === serialized;
+  } catch {
+    return false;
+  }
+}
+
 const state = {
   view: initialRoute.get("view") || "all", collectionId: initialRoute.get("collection"), query: initialRoute.get("search") || "", tag: "", selected: new Set(), favoriteCount: 0, tags: [],
   items: [], allItems: [], collections: [], collectionCounts: {}, trashCount: 0, trashedCollections: [], preferences: null, layout: "list",
@@ -60,12 +82,12 @@ const state = {
   searchMenuOpen: false, searchFilterGroup: null, sortMenuOpen: false, viewMenuOpen: false, themeMenuOpen: false, recentSearches: readSearchHistory(), groupMenuId: null, collectionMenuId: null, pickerCollectionMenuId: null, pickerGroupMenuId: null, inlineCollectionCreate: null, tagMenuOpen: false, tagItemMenu: null, collectionValueAction: null, collectionValueId: null, collectionSelection: null,
   selectionMoreOpen: false, selectionScreenshotWorking: false, sidebarOpen: false, accountMenuOpen: false, mediaUploadEnabled: false,
   settingsOpen: initialSettingsRoute, settingsSection: initialSettingsSection || "app", settingsMenu: null, settingsNeedsReload: false, settingsSavePromise: null, connectionInfo: null,
-  importPreview: readImportProgress(), importBusy: false,
+  importPreview: readImportProgress(), importBusy: false, backups: readBackupHistory(), backupSource: "local", backupBusy: false, backupLoading: false, backupIncludeMedia: false, cloudConnections: [], cloudBusy: false, lock: { enabled: false, locked: false, autoLock: "15" },
 };
 
 function setSettingsRoute(open, section = state.settingsSection || "app") {
   const url = new URL(location.href);
-  const nextSection = ["app", "account", "import"].includes(section) ? section : "app";
+  const nextSection = ["app", "account", "import", "backups", "pin"].includes(section) ? section : "app";
   if (open) url.searchParams.set("settings", nextSection);
   else url.searchParams.delete("settings");
   history.pushState({ settings: open }, "", `${url.pathname}${url.search}${url.hash}`);
@@ -87,7 +109,7 @@ const EN_TEXT = Object.freeze({
   "应用": "App", "帐户": "Account", "订阅": "Subscription", "导入": "Import", "整合方式": "Integrations", "备份": "Backups", "帮助": "Help", "设置": "Settings", "私有书签": "Private Bookmarks", "私有实例": "Private instance", "实例名称": "Instance name", "实例地址": "Instance address", "访问密钥": "Access key", "已配置（仅存储在此设备）": "Configured (stored on this device only)", "头像": "Avatar", "固定实例图标": "Fixed instance icon", "认证方式": "Authentication", "访问密钥认证": "Access key authentication", "实例类型": "Instance type", "自托管实例": "Self-hosted instance", "数据统计": "Data", "书签数量": "Bookmarks", "收藏夹数量": "Collections", "废纸篓项目数": "Trash items", "媒体上传": "Media uploads", "已启用": "Enabled", "未配置": "Not configured", "断开当前设备": "Disconnect this device", "确认断开当前设备吗？": "Disconnect this device?", "档案": "File", "上传书签文件 (html、csv 或 txt)": "Upload bookmark file (html, csv, or txt)", "上传书签文件 (html、csv、txt 或 enex)": "Upload bookmark file (html, csv, txt, or enex)", "你可以从浏览器或服务的“导出书签”部分得到这个文件": "You can get this file from the browser or service's bookmark export section", "如何使用？": "How to use?", "上传文件…": "Upload file…", "导入预览": "Import preview", "文件": "File", "格式": "Format", "有效书签": "Valid bookmarks", "重复书签": "Duplicate bookmarks", "无效项目": "Invalid items", "跳过重复项目": "Skip duplicates", "导入这些书签": "Import these bookmarks", "恢复私有书签备份": "Restore Private Bookmarks backup", "备份会替换整个资料库": "This backup replaces the entire library", "当前快照已下载": "The current snapshot was downloaded", "正在解析…": "Parsing…", "正在导入…": "Importing…", "导入完成": "Import complete", "没有可导入的书签": "No bookmarks to import", "清除": "Clear", "条": " items", "个": " ",
   "语言": "Language", "界面样式": "Interface theme", "字体大小": "Font size", "大": "Large", "默认视图模式": "Default view", "默认视图已更改": "Default view changed", "新收藏夹现在将使用": "New collections will now use", "视图模式。": "view mode.", "是否将此更改应用于所有现有收藏夹？": "Apply this change to all existing collections?", "保持不变": "Keep unchanged", "全部更新": "Update all", "列表": "List", "卡片": "Cards", "标题": "Title", "心情看板": "Moodboard", "点击书签时": "When clicking bookmarks", "在新标签页中打开": "Open in new tab", "在当前标签页中打开": "Open in current tab", "按钮组": "Button group", "搜索": "Search", "按相关性排序": "Sort by relevance", "排序标签": "Sort tags", "按名称": "By name", "按书签数量": "By bookmark count", "失效链接": "Broken links", "嵌套收藏": "Nested collections", "旧视图": "Legacy view", "询问 AI": "Ask AI", "推荐的收藏集和标签": "Recommended collections and tags", "仅 Pro 可用。AI 功能暂未接入。": "Only available for Pro. AI is not connected yet.", "AI 功能暂未接入。": "AI is not connected yet.",
   "所有书签": "All bookmarks", "未分类": "Unsorted", "星标": "Favorites", "待检查": "Pending check", "废纸篓": "Trash", "收藏": "Collections", "快速过滤…": "Quick filters…", "备注": "Notes", "高亮": "Highlights", "提醒": "Reminders", "重复书签": "Duplicates", "没有标签": "Untagged", "标签": "Tags", "链接": "Links", "文章": "Articles", "图片": "Images", "视频": "Videos", "音频": "Audio", "文档": "Documents", "建议的": "Suggested", "最近使用的": "Recently used", "删除最近项": "Remove recent item", "搜索帮助": "Search help", "排序": "Sort", "网站": "Website", "视图": "View", "封面": "Cover", "图标": "Icon", "左": "Left", "右": "Right", "书签信息": "Bookmark info", "描述": "Description", "在列表中显示": "Show in list", "在卡片中显示": "Show in cards", "在标题中显示": "Show in titles", "在心情看板中显示": "Show in moodboard", "应用到全部": "Apply to all", "添加": "Add", "导出书签": "Export bookmarks", "检查链接": "Check links", "导入书签": "Import bookmarks", "直接在浏览器打开": "Open in browser", "移动": "Move", "添加标签": "Add tags", "删除": "Delete", "取消": "Cancel", "更多": "More", "选择所有": "Select all", "创建页面截图": "Create page screenshot", "正在创建页面截图…": "Creating page screenshot…", "刷新预览": "Refresh preview", "添加到收藏夹": "Add to favorites", "从收藏夹移除": "Remove from favorites", "移除标签": "Remove tags", "此视图中还没有书签。": "No bookmarks in this view.", "主题：": "Theme: ", "主题": "Theme", "浅色": "Light", "深色": "Dark", "跟随系统": "System", "日落": "Sunset", "Default mode": "Default mode", "中文（汉语）": "中文（汉语）", "新标签": "New tag", "显示": "Show", "隐藏标签": "Hide tags", "按名称排序标签": "Sort tags by name", "按书签数排序标签": "Sort tags by count", "显示侧边栏": "Show sidebar", "关闭侧边栏": "Close sidebar",
-  "关闭": "Close", "返回书签": "Back to bookmarks", "显示设置菜单": "Show settings menu", "可选": "Optional", "选项": " options", "书签详情": "Bookmark details", "暂未支持": "Not supported yet", "打开原网页": "Open original page", "更改图标": "Change icon", "添加描述": "Add description", "添加备注": "Add note", "预览 Markdown": "Preview Markdown", "添加标签…": "Add tags…", "最喜爱的": "Favorite", "添加 URL…": "Add URL…", "上传封面文件": "Upload cover file", "可用封面": "Available covers", "分享收藏夹": "Share collection", "复制": "Copy", "系统分享": "Share", "添加书签": "Add bookmark", "编辑": "Edit", "询问": "Ask", "Web存档": "Web archive", "保存": "Save", "添加 URL": "Add URL", "选择收藏集": "Select collection", "查找或创建新的收藏集…": "Find or create a collection…", "网址": "URL", "收藏夹": "Collection", "封面 URL": "Cover URL", "选择": "Select", "选择全部": "Select all", "恢复": "Restore", "截屏": "Screenshot", "创建嵌套的集合": "Create nested collection", "创建收藏集": "Create collection", "改名": "Rename", "分享": "Share", "显示分组": "Show group", "隐藏分组": "Hide group", "展开": "Expand", "折叠": "Collapse", "收起": "Collapse", "创建群组": "Create group", "删除分组": "Delete group", "新建收藏夹": "New collection", "新收藏": "New collection", "新群组": "New group", "更多操作": "More actions", "复制链接": "Copy link", "将链接复制到剪贴板": "Copy link to clipboard", "列表视图": "List view", "网格视图": "Grid view", "手动排序": "Manual order", "最近添加": "Recently added", "标题 (A-Z)": "Title (A-Z)", "网站 (A-Z)": "Website (A-Z)", "调整侧边栏宽度": "Adjust sidebar width", "当前标签页": "Current tab", "预览模式": "Preview mode", "Web 预览模式": "Web preview mode", "搜索设置 / 筛选": "Search settings / filters", "缩小搜索范围": "Narrow your search", "在条件前添加短横(-) 将其排除在搜索范围之外": "Prefix a condition with a hyphen (-) to exclude it from search", "浏览器扩展": "Browser extension", "下载应用": "Download app", "帮助与支持": "Help and support", "博客": "Blog", "更新内容?": "What's new?", "注销": "Log out", "按日期 ↑": "By date ↑", "按日期 ↓": "By date ↓", "类型": "Type", "创建日期": "Created", "在标题/描述中": "In title/description", "在URL中": "In URL", "移动到…": "Move to…", "移动到": "Move to", "全选": "Select all", "取消星标": "Remove favorite", "添加星标": "Add favorite", "收藏选项": "Collection options", "收藏集选项": "Collection options", "收藏夹名称": "Collection name", "高亮颜色": "Highlight color", "（无备注）": "(No note)"
+  "关闭": "Close", "返回书签": "Back to bookmarks", "显示设置菜单": "Show settings menu", "可选": "Optional", "选项": " options", "书签详情": "Bookmark details", "暂未支持": "Not supported yet", "打开原网页": "Open original page", "更改图标": "Change icon", "添加描述": "Add description", "添加备注": "Add note", "预览 Markdown": "Preview Markdown", "添加标签…": "Add tags…", "最喜爱的": "Favorite", "添加 URL…": "Add URL…", "上传封面文件": "Upload cover file", "可用封面": "Available covers", "分享收藏夹": "Share collection", "复制": "Copy", "系统分享": "Share", "添加书签": "Add bookmark", "编辑": "Edit", "询问": "Ask", "Web存档": "Web archive", "保存": "Save", "添加 URL": "Add URL", "选择收藏集": "Select collection", "查找或创建新的收藏集…": "Find or create a collection…", "网址": "URL", "收藏夹": "Collection", "封面 URL": "Cover URL", "选择": "Select", "选择全部": "Select all", "恢复": "Restore", "截屏": "Screenshot", "创建嵌套的集合": "Create nested collection", "创建收藏集": "Create collection", "改名": "Rename", "分享": "Share", "显示分组": "Show group", "隐藏分组": "Hide group", "展开": "Expand", "折叠": "Collapse", "收起": "Collapse", "创建群组": "Create group", "删除分组": "Delete group", "新建收藏夹": "New collection", "新收藏": "New collection", "新群组": "New group", "更多操作": "More actions", "复制链接": "Copy link", "将链接复制到剪贴板": "Copy link to clipboard", "列表视图": "List view", "网格视图": "Grid view", "手动排序": "Manual order", "最近添加": "Recently added", "标题 (A-Z)": "Title (A-Z)", "网站 (A-Z)": "Website (A-Z)", "调整侧边栏宽度": "Adjust sidebar width", "当前标签页": "Current tab", "预览模式": "Preview mode", "Web 预览模式": "Web preview mode", "搜索设置 / 筛选": "Search settings / filters", "缩小搜索范围": "Narrow your search", "在条件前添加短横(-) 将其排除在搜索范围之外": "Prefix a condition with a hyphen (-) to exclude it from search", "浏览器扩展": "Browser extension", "下载应用": "Download app", "帮助与支持": "Help and support", "博客": "Blog", "更新内容?": "What's new?", "注销": "Log out", "按日期 ↑": "By date ↑", "按日期 ↓": "By date ↓", "类型": "Type", "创建日期": "Created", "在标题/描述中": "In title/description", "在URL中": "In URL", "移动到…": "Move to…", "移动到": "Move to", "全选": "Select all", "取消星标": "Remove favorite", "添加星标": "Add favorite", "收藏选项": "Collection options", "收藏集选项": "Collection options", "收藏夹名称": "Collection name", "高亮颜色": "Highlight color", "（无备注）": "(No note)", "应用锁": "App lock", "定时锁定": "Auto-lock", "每次打开": "Every time opened", "1 分钟": "1 minute", "5 分钟": "5 minutes", "15 分钟": "15 minutes", "30 分钟": "30 minutes", "1 小时": "1 hour", "从不": "Never", "启用应用锁": "Enable app lock", "关闭应用锁": "Disable app lock", "立即锁定": "Lock now", "当前已启用": "Enabled on this device", "永远不用担心数据丢失。创建本地快照，保存收藏夹、书签、标签和高亮。": "Never worry about losing your data. Create a local snapshot of collections, bookmarks, tags and highlights.", "创建的快照只保存在此浏览器，完整内容仍可随时下载到本地。": "Snapshots are stored only in this browser and can be downloaded locally at any time.", "创建新的备份": "Create new backup", "备份正在创建": "Your new backup is being created. You can leave this page and come back later.", "下载完整备份": "Get backup", "下载上传文件": "Download uploaded files", "恢复备份": "Restore backup", "历史备份": "Backup history", "云备份": "Cloud backup", "云备份在自托管实例中暂不可用。": "Cloud backup is not available for this self-hosted instance.", "没有历史备份": "No backups created on this device yet.", "下载 JSON": "JSON", "备份创建于": "Created", "云端": "Cloud", "返回导入": "Go to import"
 });
 
 function languageIsEnglish() {
@@ -145,6 +167,11 @@ const treeIcons = {
   diamond: '<path fill-rule="evenodd" d="m10 1 8 9-8 9-8-9 8-9Zm0 1.5L3.34 10 10 17.5 16.66 10 10 2.5Z"></path>',
   integrations: '<g fill-rule="evenodd"><path d="M10 1a9 9 0 1 1 0 18 9 9 0 0 1 0-18Zm0 1a8 8 0 1 0 0 16 8 8 0 0 0 0-16Z"></path><path d="M2 9h16v1H2V9Zm7.5-7.5h1v17h-1v-17Z"></path></g>',
   backup: '<g fill-rule="evenodd"><path d="M10 2a6 6 0 0 1 5.92 5H16a3 3 0 1 1 0 6h-1v-1h1a2 2 0 1 0 0-4h-1v-.5A5 5 0 1 0 5.5 9H5a5 5 0 0 1 5-7Z"></path><path d="M10 8v7.293l2.146-2.147.708.708L10 16.707l-2.854-2.853.708-.708L9 15.293V8h1Z"></path></g>',
+  export: '<g fill-rule="evenodd"><path d="M16.25 8.25V9.5A3.755 3.755 0 0 1 20 13.25 3.755 3.755 0 0 1 16.25 17H5c-2.758 0-5-2.242-5-5 0-2.364 1.654-4.339 3.862-4.858C4.388 4.225 6.932 2 10 2a6.257 6.257 0 0 1 6.25 6.25Z" opacity=".12" /><path d="M16.25 8.25V9.5A3.755 3.755 0 0 1 20 13.25 3.755 3.755 0 0 1 16.25 17H5c-2.758 0-5-2.242-5-5 0-2.364 1.654-4.339 3.862-4.858C4.388 4.225 6.932 2 10 2a6.257 6.257 0 0 1 6.25 6.25Zm-1 0A5.257 5.257 0 0 0 10 3a5.249 5.249 0 0 0-5.153 4.32l-.117.646-.639.15A4.001 4.001 0 0 0 1 12c0 2.205 1.795 4 4 4h11.25A2.755 2.755 0 0 0 19 13.25a2.755 2.755 0 0 0-2.75-2.75h-1V8.25Z" /><path d="M10 12.929 11.688 11H13l-3.5 4L6 11h1.313L9 12.929V6h1v6.929Z" /></g>',
+  backupReady: '<g fill-rule="evenodd"><path d="M5 18a5 5 0 0 1-.949-9.91C4.433 4.653 6.951 2 10 2c3.314 0 6 3.134 6 7 .34 0 .676-.02 1.004-.061L16 10a4 4 0 1 1 0 8H5Z" opacity=".15"></path><path d="m17.27 3.626.748.665a.5.5 0 0 1 .044.703l-7.002 9.003-.316.354a.5.5 0 0 1-.686.059l-.412-.334-3-3a.5.5 0 0 1-.036-.666l.624-.78a.5.5 0 0 1 .744-.042l2.284 2.284 6.3-8.201a.5.5 0 0 1 .709-.045Z"></path></g>',
+  dropbox: '<path fill-rule="evenodd" d="M19 4.485 13.705 1 10 4.117l5.339 3.323L19 4.485Zm-8.99 6.948-3.715 3.108-1.59-1.046v1.173l5.306 3.207 5.306-3.207v-1.173l-1.59 1.046-3.716-3.108ZM6.296 1 1 4.485 4.661 7.44l5.34-3.323L6.294 1ZM10 10.762 6.295 13.88 1 10.395 4.661 7.44 10 10.762l5.339-3.323 3.66 2.956-5.294 3.485L10 10.762Z"></path>',
+  gdrive: '<path d="m4.142 17.467 11.802.03L19 12.648 7.04 12.45l-2.898 5.017ZM12.948 2H6.992l5.462 10.045 6.3.085L12.948 2ZM1 12.14l2.524 5.281L9.44 7.465 6.63 2.163 1 12.141Z"></path>',
+  onedrive: '<g fill-rule="evenodd"><path d="m4.99 5.861-.042.072h-.015l-.222.429c-.241.464-.515 1.002-.832 1.633l-.08.16c-.067.132-2.272 4.357-2.458 4.713.136-2.68 1.734-5.118 3.98-5.679ZM10.38 4l.221.005c1.171.054 2.386.528 3.363 1.293.512.414.963.914 1.331 1.48l.078.124c.057.1.11.201.16.305a8.595 8.595 0 0 0-.671-.033c-1.052 0-2.025.347-2.806.933A6.013 6.013 0 0 0 6.4 6.934C7.456 5.127 8.806 4 10.38 4Zm2.393 6.01c.284-.263.67-.424 1.094-.424.45 0 .857.18 1.145.47a2.79 2.79 0 0 1 .768-.107c1.227 0 2.22.994 2.22 2.22a2.22 2.22 0 0 1-2.22 2.22H6.23a4.23 4.23 0 0 1 0-8.46c.148 0 .294.008.438.023A6.018 6.018 0 0 1 12.773 10.01Z"></path></g>',
   lock: '<path fill-rule="evenodd" d="M6 8V6a4 4 0 1 1 8 0v2h1a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1h1Zm1 0h6V6a3 3 0 1 0-6 0v2Zm-2 1v8h10V9H5Z"></path>',
   selectAll: '<path fill-rule="evenodd" d="M2 3.5c0-.276.232-.5.5-.5H3v1H2v-.5ZM2 5h1v1H2V5Zm0 2h1v1H2V7Zm0 2h1v1H2V9Zm0 2h1v1H2v-1Zm0 2h1v1H2v-1Zm0 2h1v1H2v-1Zm0 2h1v1h-.5a.505.505 0 0 1-.5-.5V17ZM16 5h1v1h-1V5Zm0 2h1v1h-1V7Zm0 2h1v1h-1V9Zm0 2h1v1h-1v-1Zm0 2h1v1h-1v-1Zm0 2h1v1h-1v-1ZM4 3h1v1H4V3Zm2 0h1v1H6V3Zm2 0h1v1H8V3Zm2 0h1v1h-1V3Zm2 0h1v1h-1V3Zm2 0h1v1h-1V3Zm2 0h.5c.276 0 .5.232.5.5V4h-1V3ZM4 17h1v1H4v-1Zm2 0h1v1H6v-1Zm2 0h1v1H8v-1Zm2 0h1v1h-1v-1Zm2 0h1v1h-1v-1Zm2 0h1v1h-1v-1Zm2 0h1v.5c0 .276-.232.5-.5.5H16v-1Zm-8.747-2.664 1.372-.117L4.5 10.321v1.46l3.617 3.593 7.383-8.71V4.97z"></path>',
   edit: '<path d="m11.653 2.903-8.75 8.75a1.375 1.375 0 0 0-.403.972v3.5c0 .76.616 1.375 1.375 1.375h3.5c.365 0 .714-.145.972-.403l8.75-8.75a1.375 1.375 0 0 0 0-1.944l-3.5-3.5a1.375 1.375 0 0 0-1.944 0Zm1.237.707 3.5 3.5a.375.375 0 0 1 0 .53l-8.75 8.75a.375.375 0 0 1-.265.11h-3.5a.375.375 0 0 1-.375-.375v-3.5c0-.1.04-.195.11-.265l8.75-8.75a.375.375 0 0 1 .53 0Z"></path>',
@@ -1536,8 +1563,8 @@ const SETTINGS_NAV = [
   ["subscription", "订阅", "diamond", false],
   ["import", "导入", "upload", true],
   ["integrations", "整合方式", "integrations", false],
-  ["backups", "备份", "backup", false],
-  ["tfa", "2FA", "lock", false],
+  ["backups", "备份", "export", true],
+  ["pin", "应用锁", "lock", true],
 ];
 
 const SETTINGS_THEME_OPTIONS = [
@@ -1665,6 +1692,265 @@ function importPreviewMarkup(preview) {
 
 function importSettingsMarkup() {
   return `<div class="settings-content settings-import-content"><div class="settings-grid settings-import-grid"><div class="settings-label">档案</div><div><div class="settings-import-alert"><strong>上传书签文件 (html、csv、txt 或 enex)</strong>.<br>你可以从浏览器或服务的“导出书签”部分得到这个文件<br><br><a href="https://help.raindrop.io/import#supported-formats" target="_blank" rel="noopener">帮助 ${microIcon("microOpen")}</a></div><label class="settings-import-upload button primary" data-import-upload role="button" tabindex="0" aria-label="上传文件…">${treeIcon("upload")}<span>上传文件…</span><input type="file" class="hidden" data-import-file accept="application/json,text/html,text/csv,text/plain,application/enex+xml,application/xml,text/xml,.json,.html,.htm,.csv,.txt,.enex"></label>${importPreviewMarkup(state.importPreview)}</div></div></div>`;
+}
+
+function backupFileName(item, format) {
+  const date = new Date(item.createdAt || Date.now()).toISOString().slice(0, 10);
+  return `私有书签-${date}.${format}`;
+}
+
+function csvCell(value) {
+  return `"${String(value ?? "").replaceAll('"', '""')}"`;
+}
+
+function backupCsv(backup) {
+  const rows = [["标题", "网址", "收藏夹", "标签", "备注", "创建日期"]];
+  const collections = new Map((backup.collections || []).map((item) => [item.id, item.name]));
+  for (const item of backup.bookmarks || []) rows.push([item.title || item.link, item.link, collections.get(item.collectionId) || "未分类", (item.tags || []).join(", "), item.note || "", item.createdAt || ""]);
+  return `\uFEFF${rows.map((row) => row.map(csvCell).join(",")).join("\r\n")}\r\n`;
+}
+
+function backupHtml(backup) {
+  const collections = new Map((backup.collections || []).map((item) => [item.id, item.name]));
+  const groups = [...new Set((backup.bookmarks || []).map((item) => collections.get(item.collectionId) || "未分类"))];
+  const body = groups.map((name) => `<DT><H3>${escapeHtml(name)}</H3>\n<DL><p>\n${(backup.bookmarks || []).filter((item) => (collections.get(item.collectionId) || "未分类") === name).map((item) => `<DT><A HREF="${escapeHtml(item.link)}">${escapeHtml(item.title || item.link)}</A>`).join("\n")}\n</DL><p>`).join("\n");
+  return `<!DOCTYPE NETSCAPE-Bookmark-file-1>\n<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">\n<TITLE>私有书签备份</TITLE>\n<H1>私有书签备份</H1>\n<DL><p>\n${body}\n</DL><p>\n`;
+}
+
+function downloadBackupFile(item, format = "json") {
+  const content = format === "csv" ? backupCsv(item.backup) : format === "html" ? backupHtml(item.backup) : JSON.stringify(item.backup, null, 2);
+  const type = format === "csv" ? "text/csv;charset=utf-8" : format === "html" ? "text/html;charset=utf-8" : "application/json";
+  const url = URL.createObjectURL(new Blob([content], { type }));
+  const link = Object.assign(document.createElement("a"), { href: url, download: backupFileName(item, format) });
+  document.body.append(link);
+  link.click();
+  window.setTimeout(() => { URL.revokeObjectURL(url); link.remove(); }, 1000);
+}
+
+function backupMeta(item) {
+  const backup = item?.backup?.format === "private-bookmarks/v1" ? item.backup : null;
+  return {
+    ...item,
+    backup,
+    createdAt: item?.createdAt || item?.created_at || backup?.exportedAt || "",
+    status: item?.status || "ready",
+    source: item?.source || "manual",
+    size: Number(item?.size ?? item?.libraryBytes ?? 0),
+    includeMedia: Boolean(item?.includeMedia ?? item?.include_media),
+    mediaCopied: Boolean(item?.mediaCopied ?? item?.media_copied),
+    mediaCount: Number(item?.mediaCount ?? item?.media_count ?? 0),
+  };
+}
+
+function formatBackupSize(value) {
+  const size = Number(value) || 0;
+  if (!size) return "";
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function backupStatusLabel(item) {
+  const status = backupMeta(item).status;
+  return status === "ready" ? "已完成" : status === "failed" ? "失败" : "处理中";
+}
+
+function backupHistoryMarkup() {
+  if (state.backupLoading) return `<p class="settings-backup-empty">正在加载备份历史…</p>`;
+  if (!state.backups.length) return `<p class="settings-backup-empty">${t("没有历史备份")}</p>`;
+  return state.backups.map((raw) => {
+    const item = backupMeta(raw);
+    const server = state.backupSource === "server" && !item.backup;
+    const mediaLabel = item.includeMedia ? (item.mediaCopied ? `媒体 ${item.mediaCount || "已包含"}` : "媒体清单") : "不含媒体";
+    const details = [backupStatusLabel(item), formatBackupSize(item.size), mediaLabel].filter(Boolean).join(" · ");
+    return `<div class="settings-backup-row"><span class="settings-backup-row-icon">${treeIcon(item.status === "ready" ? "backupReady" : "backup")}</span><span class="settings-backup-date"><strong>${escapeHtml(dateTimeLabel(item.createdAt))}</strong><small>${escapeHtml(details)}</small></span><span class="settings-backup-row-actions"><button type="button" data-backup-download="${escapeHtml(item.id)}" data-backup-format="json">${t("下载 JSON")}</button><button type="button" data-backup-download="${escapeHtml(item.id)}" data-backup-format="html">HTML</button><button type="button" data-backup-download="${escapeHtml(item.id)}" data-backup-format="csv">CSV</button>${server ? `<button type="button" data-backup-archive="${escapeHtml(item.id)}">ZIP</button><button type="button" data-backup-restore-server="${escapeHtml(item.id)}">恢复</button><button type="button" class="danger" data-backup-delete="${escapeHtml(item.id)}">删除</button>` : ""}</span></div>`;
+  }).join("");
+}
+
+function backupSettingsMarkup() {
+  const disabled = state.backupBusy || state.backupLoading ? "disabled" : "";
+  const cloudMessage = state.backupSource === "server"
+    ? "本实例 R2 云备份已启用。备份历史保存在私有实例，不依赖当前浏览器。"
+    : state.backupSource === "error"
+      ? `服务端备份暂时失败：${state.backupError?.message || "请稍后重试"}`
+      : "服务端备份接口暂不可用，当前显示的是此浏览器中的本地快照。";
+  const archiveDisabled = disabled || state.backupSource !== "server" || !state.backups.length ? "disabled" : "";
+  const mediaDisabled = disabled || state.backupSource !== "server" ? "disabled" : "";
+  const cloudOption = (provider, label, icon) => {
+    const item = state.cloudConnections.find((entry) => entry.provider === provider) || {};
+    const status = !item.configured ? "待配置" : item.connected ? "上传备份" : "连接";
+    const actionDisabled = disabled || state.cloudBusy || !item.configured ? "disabled" : "";
+    return `<div class="settings-cloud-option-row"><button type="button" class="settings-cloud-option" data-cloud-action="${provider}" ${actionDisabled} title="${item.connected ? "创建并上传备份" : item.configured ? "连接云盘" : "需要配置 OAuth 客户端凭据"}">${treeIcon(icon)}<span>${label}</span><small>${status}</small></button>${item.connected ? `<button type="button" class="settings-cloud-disconnect" data-cloud-disconnect="${provider}" ${disabled}>断开</button>` : ""}</div>`;
+  };
+  return `<div class="settings-content settings-backup-content"><div class="settings-grid settings-backup-grid"><div class="settings-label">备份</div><div><div class="settings-backup-alert"><strong>永远不用担心数据丢失。创建服务端快照，保存收藏夹、书签、标签和高亮。</strong><p>${cloudMessage}</p></div><p class="settings-backup-muted settings-backup-media-note">勾选后会把本实例已上传的媒体文件一并复制到备份，外部网址媒体不会被下载。</p><label class="settings-backup-media-toggle"><input type="checkbox" data-backup-include-media ${state.backupIncludeMedia ? "checked" : ""} ${mediaDisabled}>包含已上传媒体文件</label><div class="settings-backup-actions"><button type="button" class="primary" data-backup-create ${disabled}>${treeIcon("add")}<span>${state.backupBusy ? "备份正在创建" : t("创建新的备份")}</span></button><button type="button" class="settings-outline-button" data-backup-download-current ${disabled}>${treeIcon("download")}<span>${t("下载完整备份")}</span></button><button type="button" class="settings-outline-button" data-backup-download-archive ${archiveDisabled} title="下载包含媒体文件的 ZIP 备份">${treeIcon("download")}<span>${t("下载上传文件")}</span></button><button type="button" class="settings-outline-button" data-backup-restore>${treeIcon("upload")}<span>${t("恢复备份")}</span></button></div><section class="settings-backup-section"><h2>${t("历史备份")}</h2><div class="settings-backup-list">${backupHistoryMarkup()}</div></section><section class="settings-backup-section settings-backup-cloud"><h2>${t("云备份")}</h2><p class="settings-backup-muted">${cloudMessage}</p><div class="settings-cloud-options">${cloudOption("dropbox", "Dropbox", "dropbox")}${cloudOption("google", "Google Drive", "gdrive")}${cloudOption("onedrive", "OneDrive", "onedrive")}</div></section></div></div></div>`;
+}
+
+async function refreshBackups({ silent = false } = {}) {
+  state.backupLoading = true;
+  try {
+    const response = await api("/v1/backups");
+    const list = Array.isArray(response) ? response : response?.backups;
+    if (!Array.isArray(list)) throw new TypeError("备份历史响应格式无效");
+    state.backups = list;
+    state.backupSource = "server";
+    state.backupError = null;
+    return list;
+  } catch (error) {
+    if (![404, 501].includes(error?.status)) {
+      state.backupError = error;
+      if (!silent) throw error;
+      state.backupSource = "error";
+      return state.backups;
+    }
+    state.backupSource = "local";
+    state.backups = readBackupHistory();
+    return state.backups;
+  } finally {
+    state.backupLoading = false;
+  }
+}
+
+async function refreshCloudConnections({ silent = true } = {}) {
+  try {
+    const response = await api("/v1/cloud/connections");
+    state.cloudConnections = Array.isArray(response) ? response : [];
+  } catch (error) {
+    state.cloudConnections = [];
+    if (!silent) throw error;
+  }
+  return state.cloudConnections;
+}
+
+function localBackupSnapshot(backup) {
+  return { id: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`, createdAt: new Date().toISOString(), backup };
+}
+
+async function createBackup() {
+  if (state.backupBusy) return;
+  state.backupBusy = true;
+  renderSettings();
+  try {
+    try {
+      await api("/v1/backups", { method: "POST", body: JSON.stringify({ includeMedia: state.backupIncludeMedia }) });
+      state.backupSource = "server";
+      await refreshBackups({ silent: true });
+    } catch (error) {
+      if (![404, 501].includes(error?.status)) throw error;
+      state.backupIncludeMedia = false;
+      const backup = await api("/v1/export");
+      const item = localBackupSnapshot(backup);
+      const next = [item, ...readBackupHistory().filter((entry) => entry.id !== item.id)].slice(0, 5);
+      if (!persistBackupHistory(next)) {
+        downloadBackupFile(item, "json");
+        throw new TypeError("浏览器存储空间不足，备份已下载到本地");
+      }
+      state.backups = next;
+      state.backupSource = "local";
+    }
+  } catch (error) {
+    showError(error);
+  } finally {
+    state.backupBusy = false;
+    renderSettings();
+  }
+}
+
+async function downloadServerBackup(item, format) {
+  const payload = await api(`/v1/backups/${encodeURIComponent(item.id)}/download`);
+  const backup = payload?.backup || payload?.library || payload;
+  if (backup?.format !== "private-bookmarks/v1") throw new TypeError("服务端备份内容无效");
+  downloadBackupFile({ ...item, backup }, format);
+}
+
+async function downloadServerBackupArchive(item) {
+  const config = await connection();
+  if (!config) throw new TypeError("请先连接私有实例");
+  const response = await fetch(`${config.endpoint}/v1/backups/${encodeURIComponent(item.id)}/download?format=zip`, { headers: { "x-private-bookmarks-key": config.key } });
+  if (!response.ok) {
+    let payload = {};
+    try { payload = await response.json(); } catch { /* keep generic error */ }
+    throw Object.assign(new Error(payload.message || "备份下载失败"), { status: response.status, code: payload.code });
+  }
+  const url = URL.createObjectURL(await response.blob());
+  const link = Object.assign(document.createElement("a"), { href: url, download: `私有书签-${new Date(item.createdAt || Date.now()).toISOString().slice(0, 10)}.zip` });
+  document.body.append(link); link.click();
+  window.setTimeout(() => { URL.revokeObjectURL(url); link.remove(); }, 1000);
+}
+
+async function downloadBackupItem(item, format) {
+  if (item.backup?.format === "private-bookmarks/v1") return downloadBackupFile(item, format);
+  return downloadServerBackup(item, format);
+}
+
+async function restoreServerBackup(id) {
+  if (!window.confirm("要用此云端备份替换整个书签资料库吗？服务端会先创建当前快照。")) return;
+  state.backupBusy = true;
+  renderSettings();
+  try {
+    await api(`/v1/backups/${encodeURIComponent(id)}/restore`, { method: "POST", body: JSON.stringify({ confirm: true }) });
+    window.alert("备份已恢复，页面将刷新。");
+    await load();
+  } finally {
+    state.backupBusy = false;
+    renderSettings();
+  }
+}
+
+async function deleteServerBackup(id) {
+  if (!window.confirm("确定删除这份云端备份吗？删除后无法恢复。")) return;
+  state.backupBusy = true;
+  renderSettings();
+  try {
+    await api(`/v1/backups/${encodeURIComponent(id)}`, { method: "DELETE" });
+    await refreshBackups({ silent: true });
+  } finally {
+    state.backupBusy = false;
+    renderSettings();
+  }
+}
+
+async function cloudAction(provider) {
+  if (state.cloudBusy) return;
+  const item = state.cloudConnections.find((entry) => entry.provider === provider);
+  state.cloudBusy = true;
+  renderSettings();
+  try {
+    if (!item?.connected) {
+      const result = await api(`/v1/cloud/${provider}/authorize`);
+      if (!result.authorizationUrl) throw new TypeError("OAuth 授权地址不可用");
+      window.open(result.authorizationUrl, "_blank", "noopener");
+      return;
+    }
+    await api(`/v1/cloud/${provider}/backups`, { method: "POST", body: JSON.stringify({ includeMedia: state.backupIncludeMedia }) });
+    window.alert(`${provider} 云备份已上传`);
+  } finally {
+    state.cloudBusy = false;
+    await Promise.all([refreshCloudConnections(), refreshBackups({ silent: true })]);
+    renderSettings();
+  }
+}
+
+async function disconnectCloud(provider) {
+  if (!window.confirm("断开此云盘连接吗？已上传的备份不会删除。")) return;
+  state.cloudBusy = true;
+  renderSettings();
+  try { await api(`/v1/cloud/${provider}/disconnect`, { method: "POST", body: "{}" }); }
+  finally { state.cloudBusy = false; await refreshCloudConnections(); renderSettings(); }
+}
+
+async function downloadCurrentBackup() {
+  if (state.backupBusy) return;
+  state.backupBusy = true;
+  renderSettings();
+  try {
+    const backup = await api("/v1/export");
+    downloadBackupFile({ createdAt: new Date().toISOString(), backup }, "json");
+  } catch (error) {
+    showError(error);
+  } finally {
+    state.backupBusy = false;
+    renderSettings();
+  }
 }
 
 function importLinkKey(value) {
@@ -1882,12 +2168,29 @@ function settingsAppMarkup() {
   return `<div class="settings-content"><div class="settings-grid"><div class="settings-label">语言</div><div>${settingsControlMarkup("language", language, LANGUAGE_OPTIONS)}</div><div class="settings-label">界面样式</div><div class="settings-theme-picker" role="group" aria-label="界面样式">${settingsThemeMarkup(theme)}</div><div class="settings-label">字体大小</div><div><label class="settings-check"><input type="checkbox" data-settings-toggle="largeFont" ${settingsPreference("largeFont", false) ? "checked" : ""}>大</label></div><div class="settings-separator"></div><div class="settings-label">默认视图模式</div><div>${settingsControlMarkup("defaultView", defaultView, viewOptions, "viewGrid")}</div><div class="settings-label">点击书签时</div><div>${settingsControlMarkup("bookmarkClick", bookmarkClick, clickOptions)}</div><div class="settings-label">按钮组</div><div>${settingsButtonGroupMarkup()}</div><div class="settings-label">搜索</div><div><label class="settings-check settings-search-relevance"><input type="checkbox" data-settings-toggle="searchRelevance" ${searchRelevance ? "checked" : ""}>按相关性排序</label></div><div class="settings-separator"></div><div class="settings-label">排序标签</div><div><label class="settings-radio"><input type="radio" name="settings-tag-sort" value="name" data-settings-tag-sort ${tagSort !== "count" ? "checked" : ""}>按名称</label><label class="settings-radio"><input type="radio" name="settings-tag-sort" value="count" data-settings-tag-sort ${tagSort === "count" ? "checked" : ""}>按书签数量</label></div><div class="settings-label">失效链接 <a class="settings-help-link" href="https://help.raindrop.io/broken-links#reducing-false-positives" target="_blank" rel="noopener">[?]</a></div><div>${settingsControlMarkup("brokenLinks", "default", brokenLinkOptions)}</div><div class="settings-label">嵌套收藏</div><div><label class="settings-check settings-disabled"><input type="checkbox" disabled>旧视图</label></div><div class="settings-separator"></div><div class="settings-label">AI</div><div><label class="settings-check settings-disabled"><input type="checkbox" disabled>询问 AI <a class="settings-help-link" href="https://help.raindrop.io/stella" target="_blank" rel="noopener">[?]</a></label><label class="settings-check settings-disabled"><input type="checkbox" disabled>推荐的收藏集和标签</label><p class="settings-sub-label">Only available for <a href="https://app.raindrop.io/settings/pro" target="_blank" rel="noopener">Pro</a>. AI 功能暂未接入。</p></div></div></div>`;
 }
 
+const AUTO_LOCK_OPTIONS = [
+  ["open", "每次打开"], ["1", "1 分钟"], ["5", "5 分钟"], ["15", "15 分钟"], ["30", "30 分钟"], ["60", "1 小时"], ["never", "从不"],
+];
+
+function autoLockSelect(value) {
+  return `<select data-pin-auto-lock aria-label="${t("定时锁定")}">${AUTO_LOCK_OPTIONS.map(([option, label]) => `<option value="${option}" ${option === value ? "selected" : ""}>${escapeHtml(t(label))}</option>`).join("")}</select>`;
+}
+
+function pinSettingsMarkup() {
+  const enabled = Boolean(state.lock?.enabled);
+  const autoLock = state.lock?.autoLock || "15";
+  const form = enabled
+    ? `<div class="settings-pin-status"><span class="settings-pin-status-dot"></span><strong>${t("当前已启用")}</strong><span class="settings-account-muted">PIN 仅保存在此设备</span></div><div class="settings-pin-row"><span>${t("定时锁定")}</span>${autoLockSelect(autoLock)}</div><div class="settings-pin-actions"><button type="button" data-lock-now>${treeIcon("lock")}<span>${t("立即锁定")}</span></button><form data-pin-disable><label>当前 PIN<input name="pin" type="password" inputmode="numeric" autocomplete="current-password" minlength="6" maxlength="12" required></label><button class="danger" type="submit">${t("关闭应用锁")}</button><p class="error hidden" role="alert"></p></form></div>`
+    : `<p class="muted">PIN 应用锁会在查看书签前要求输入本地 PIN。它不是服务器双因素认证，不会改变 Worker 访问密钥。</p><form data-pin-enable><label>设置 PIN（6–12 位数字）<input name="pin" type="password" inputmode="numeric" autocomplete="new-password" minlength="6" maxlength="12" pattern="[0-9]{6,12}" required></label><label>再次输入 PIN<input name="confirm" type="password" inputmode="numeric" autocomplete="new-password" minlength="6" maxlength="12" pattern="[0-9]{6,12}" required></label><label>${t("定时锁定")}${autoLockSelect(autoLock)}</label><button class="primary" type="submit">${t("启用应用锁")}</button><p class="error hidden" role="alert"></p></form>`;
+  return `<div class="settings-content"><div class="settings-grid settings-pin-grid"><div class="settings-label">${t("应用锁")}</div><div class="settings-pin-panel">${form}</div></div></div>`;
+}
+
 function settingsMarkup() {
-  const section = ["account", "import"].includes(state.settingsSection) ? state.settingsSection : "app";
-  const title = section === "account" ? "帐户" : section === "import" ? "导入" : "应用";
+  const section = ["account", "import", "backups", "pin"].includes(state.settingsSection) ? state.settingsSection : "app";
+  const title = section === "account" ? "帐户" : section === "import" ? "导入" : section === "backups" ? "备份" : section === "pin" ? "应用锁" : "应用";
   const instanceName = escapeHtml(settingsPreference("instanceName", "私有书签"));
   const nav = SETTINGS_NAV.map(([id, label, icon, supported]) => `<button type="button" class="settings-nav-item ${id === section ? "active" : ""}" data-settings-section="${id}" ${supported ? "" : "disabled"}>${treeIcon(icon)}<span>${t(label)}</span></button>`).join("");
-  const body = section === "account" ? accountSettingsMarkup() : section === "import" ? importSettingsMarkup() : settingsAppMarkup();
+  const body = section === "account" ? accountSettingsMarkup() : section === "import" ? importSettingsMarkup() : section === "backups" ? backupSettingsMarkup() : section === "pin" ? pinSettingsMarkup() : settingsAppMarkup();
   const headerAction = section === "import" ? `<a class="settings-icon-button settings-header-help" href="https://help.raindrop.io/import" target="_blank" rel="noopener" title="如何使用？" aria-label="如何使用？">${treeIcon("help")}</a>` : "";
   return localizeHtml(`<main class="settings-shell"><aside class="settings-sidebar"><header class="settings-sidebar-head"><button type="button" class="settings-icon-button settings-close" data-settings-close title="关闭" aria-label="关闭">${treeIcon("close")}</button><button type="button" class="settings-icon-button" data-settings-back title="返回书签" aria-label="返回书签">${treeIcon("back")}</button></header><div class="settings-sidebar-content"><div class="settings-profile"><span class="settings-avatar">${treeIcon("user")}</span><div class="settings-profile-copy"><strong>${instanceName}</strong><span>私有实例</span></div></div><div class="settings-nav-title">设置</div><nav class="settings-nav" aria-label="设置">${nav}</nav><div class="settings-nav-title settings-version">私有书签</div><a class="settings-nav-item settings-help" href="https://help.raindrop.io" target="_blank" rel="noopener">${treeIcon("help")}<span>帮助</span></a></div></aside><section class="settings-main"><div class="settings-main-inner"><header class="settings-main-header"><button type="button" class="settings-mobile-menu" title="显示设置菜单" aria-label="显示设置菜单">${treeIcon("menu")}</button><h1>${title}</h1><span class="settings-header-space"></span>${headerAction}</header><div class="settings-main-scroll">${body}</div></div></section></main>`);
 }
@@ -1990,11 +2293,36 @@ let settingsMenuPositionBound = false;
 
 function setSettingsSection(section) {
   const supported = SETTINGS_NAV.some(([id, , , enabled]) => id === section && enabled);
-  if (supported && section !== state.settingsSection) setSettingsRoute(true, section);
+  if (supported && section !== state.settingsSection) {
+    setSettingsRoute(true, section);
+    if (section === "backups") Promise.all([refreshBackups(), refreshCloudConnections()]).then(() => renderSettings()).catch(showError);
+  }
 }
 
 async function accountSettingsAction(action) {
   if (action === "disconnect") await disconnectCurrentDevice(true);
+}
+
+function showLockScreen() {
+  lockView(root, async () => {
+    state.lock = await lockState();
+    startLockMonitor(showLockScreen);
+    load().catch(showError);
+  }, () => {
+    state.settingsOpen = false;
+    state.settingsSection = "app";
+    const url = new URL(location.href);
+    url.searchParams.delete("settings");
+    history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+    connectionView(root, () => load().catch(showError));
+  });
+}
+
+function formError(form, message) {
+  const error = form.querySelector(".error");
+  if (!error) return;
+  error.textContent = message || "请求失败";
+  error.classList.remove("hidden");
 }
 
 function bindSettings() {
@@ -2021,11 +2349,75 @@ function bindSettings() {
   root.querySelector("[data-import-submit]")?.addEventListener("click", () => submitImport());
   root.querySelector("[data-import-restore]")?.addEventListener("click", () => restoreImportBackup());
   root.querySelector("[data-import-clear]")?.addEventListener("click", clearImportPreview);
+  root.querySelector("[data-backup-create]")?.addEventListener("click", () => createBackup());
+  root.querySelector("[data-backup-download-current]")?.addEventListener("click", () => downloadCurrentBackup());
+  root.querySelector("[data-backup-include-media]")?.addEventListener("change", (event) => { state.backupIncludeMedia = event.currentTarget.checked; });
+  root.querySelector("[data-backup-download-archive]")?.addEventListener("click", () => {
+    const item = state.backups.map(backupMeta).find((entry) => entry.id === state.backups[0]?.id);
+    if (item) downloadServerBackupArchive(item).catch(showError);
+  });
+  root.querySelector("[data-backup-restore]")?.addEventListener("click", () => setSettingsRoute(true, "import"));
+  root.querySelectorAll("[data-backup-download]").forEach((button) => button.addEventListener("click", () => {
+    const item = state.backups.map(backupMeta).find((entry) => entry.id === button.dataset.backupDownload);
+    if (item) downloadBackupItem(item, button.dataset.backupFormat).catch(showError);
+  }));
+  root.querySelectorAll("[data-backup-restore-server]").forEach((button) => button.addEventListener("click", () => restoreServerBackup(button.dataset.backupRestoreServer).catch(showError)));
+  root.querySelectorAll("[data-backup-archive]").forEach((button) => button.addEventListener("click", () => {
+    const item = state.backups.map(backupMeta).find((entry) => entry.id === button.dataset.backupArchive);
+    if (item) downloadServerBackupArchive(item).catch(showError);
+  }));
+  root.querySelectorAll("[data-backup-delete]").forEach((button) => button.addEventListener("click", () => deleteServerBackup(button.dataset.backupDelete).catch(showError)));
+  root.querySelectorAll("[data-cloud-action]").forEach((button) => button.addEventListener("click", () => cloudAction(button.dataset.cloudAction).catch(showError)));
+  root.querySelectorAll("[data-cloud-disconnect]").forEach((button) => button.addEventListener("click", () => disconnectCloud(button.dataset.cloudDisconnect).catch(showError)));
   root.querySelector("[data-account-instance-name]")?.addEventListener("change", (event) => {
     const value = event.currentTarget.value.trim() || "私有书签";
     setSettingsPreference("instanceName", value.slice(0, 200));
   });
   root.querySelectorAll("[data-account-settings-action]").forEach((button) => button.onclick = () => accountSettingsAction(button.dataset.accountSettingsAction).catch(showError));
+  root.querySelector("[data-pin-enable]")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const pin = String(data.get("pin") || "");
+    if (pin !== String(data.get("confirm") || "")) return formError(form, "两次输入的 PIN 不一致");
+    const button = form.querySelector("button[type=submit]");
+    button.disabled = true;
+    try {
+      await enablePin(pin, form.querySelector("[data-pin-auto-lock]").value, state.connectionInfo);
+      state.lock = await lockState();
+      startLockMonitor(showLockScreen);
+      renderSettings();
+    } catch (error) {
+      formError(form, error.message);
+      button.disabled = false;
+    }
+  });
+  root.querySelector("[data-pin-disable]")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const button = form.querySelector("button[type=submit]");
+    button.disabled = true;
+    try {
+      await disablePin(new FormData(form).get("pin"));
+      state.lock = await lockState();
+      renderSettings();
+    } catch (error) {
+      formError(form, error.message);
+      button.disabled = false;
+    }
+  });
+  root.querySelector("[data-lock-now]")?.addEventListener("click", async () => {
+    await lockNow();
+    showLockScreen();
+  });
+  root.querySelector("[data-pin-auto-lock]")?.addEventListener("change", async (event) => {
+    if (!state.lock.enabled) return;
+    try {
+      await setAutoLock(event.currentTarget.value);
+      state.lock = await lockState();
+      renderSettings();
+    } catch (error) { showError(error); }
+  });
   root.querySelectorAll("[data-settings-select]").forEach((button) => button.onclick = (event) => {
     event.stopPropagation();
     state.settingsMenu = state.settingsMenu === button.dataset.settingsSelect ? null : button.dataset.settingsSelect;
@@ -2055,6 +2447,7 @@ async function load() {
   if (state.view === "trash") requests.push(api("/v1/collections?trash=1"));
   const [connectionInfo, boot, items, allItems, tags, trashedCollections = []] = await Promise.all([connection(), ...requests]);
   state.connectionInfo = connectionInfo;
+  state.lock = await lockState();
   setCoverUploadEnabled(boot.capabilities?.mediaUpload);
   state.collections = boot.collections;
   state.collectionCounts = boot.collectionCounts || {};
@@ -2067,6 +2460,7 @@ async function load() {
   state.tags = Array.isArray(tags) ? tags : [];
   state.favoriteCount = (allItems || items).filter((item) => item.favorite).length;
   state.trashedCollections = trashedCollections;
+  if (state.settingsOpen && state.settingsSection === "backups") await Promise.all([refreshBackups({ silent: true }), refreshCloudConnections()]);
   applyTheme();
   render();
 }
@@ -3862,6 +4256,7 @@ document.addEventListener("click", (event) => {
 
 function showError(error) {
   console.error(error);
+  if (error?.code === "locked") return showLockScreen();
   if (error?.code === "editing_conflict") {
     if (window.confirm("此项目已在其他设备上更新。现在刷新最新内容吗？未保存的修改不会应用。")) load().catch(console.error);
     return;
@@ -3876,10 +4271,13 @@ window.addEventListener("unhandledrejection", (event) => {
 
 window.addEventListener("popstate", () => {
   const section = new URL(location.href).searchParams.get("settings");
-  state.settingsOpen = ["app", "account", "import"].includes(section);
+  state.settingsOpen = ["app", "account", "import", "backups", "pin"].includes(section);
   state.settingsSection = state.settingsOpen ? section : "app";
   state.settingsMenu = null;
-  if (state.settingsOpen) render();
+  if (state.settingsOpen) {
+    render();
+    if (state.settingsSection === "backups") Promise.all([refreshBackups({ silent: true }), refreshCloudConnections()]).then(() => renderSettings()).catch(showError);
+  }
   else if (state.settingsNeedsReload) {
     state.settingsNeedsReload = false;
     readLibraryRoute();
@@ -3890,5 +4288,10 @@ window.addEventListener("popstate", () => {
   }
 });
 
-if (await connection()) load().catch(showError);
-else connectionView(root, () => load().catch(showError));
+await prepareLock();
+const initialLock = await lockState();
+if (initialLock.enabled && initialLock.locked) showLockScreen();
+else if (await connection()) {
+  startLockMonitor(showLockScreen);
+  load().catch(showError);
+} else connectionView(root, () => load().catch(showError));
