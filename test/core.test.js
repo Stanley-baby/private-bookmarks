@@ -162,6 +162,26 @@ test("AI recommendations return confirmed metadata without exposing provider det
   assert.match(prompt, /React performance/);
 });
 
+test("AI recommendations ignore reasoning JSON before the final answer", async () => {
+  const api = createApi({
+    key: "test-key",
+    store: new MemoryStore(),
+    ai: {
+      async run() {
+        return { response: '<think>{"collectionId":null,"tags":[],"note":""}</think>\n{"collectionId":"frontend","tags":["reading"],"note":"待阅读。"}' };
+      },
+    },
+    aiModel: "test-model",
+  });
+  const response = await api.fetch(request("/v1/ai/recommendations", {
+    method: "POST",
+    body: JSON.stringify({ link: "https://example.com/read", collections: [{ id: "frontend", name: "前端" }] }),
+  }));
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { collectionId: "frontend", tags: ["reading"], note: "待阅读。" });
+});
+
 test("AI recommendations report an unavailable optional binding", async () => {
   const api = createApi({ key: "test-key", store: new MemoryStore() });
   const response = await api.fetch(request("/v1/ai/recommendations", { method: "POST", body: JSON.stringify({ link: "https://example.com" }) }));

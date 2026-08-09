@@ -556,19 +556,21 @@ dialog textarea { min-height: 54px; }
 dialog .checkbox { display: flex; align-items: center; gap: 7px; color: var(--text); cursor: pointer; }
 dialog .checkbox input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); }
 dialog menu { display: flex; justify-content: end; gap: 6px; margin: 0; padding: 0; }
-.bookmark-recommendations { display: grid; gap: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 6px; color: var(--text); background: var(--field); }
+.bookmark-recommendations { display: grid; gap: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: var(--field); }
 .edit-panel .bookmark-recommendations { grid-column: 1 / -1; }
-.bookmark-recommendations-header, .bookmark-recommendation-actions { display: flex; align-items: center; gap: 8px; }
-.bookmark-recommendations-header span { margin-left: auto; color: var(--muted); font-size: 12px; font-weight: 400; }
-.recommendation-items { display: grid; gap: 8px; }
-.recommendation-option { display: grid; min-width: 0; align-items: center; gap: 6px; grid-template-columns: auto auto minmax(0, 1fr); color: var(--text); font-size: 13px; font-weight: 400; }
+.bookmark-recommendations-header { display: grid; gap: 3px; min-width: 0; }
+.bookmark-recommendations-header strong { font-size: 14px; line-height: 20px; }
+.bookmark-recommendations-header span { min-width: 0; color: var(--muted); font-size: 12px; font-weight: 400; line-height: 17px; overflow-wrap: anywhere; }
+.recommendation-items { display: grid; gap: 10px; min-width: 0; }
+.recommendation-option { display: grid; min-width: 0; min-height: 32px; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 6px; background: var(--page); color: var(--text); font-size: 13px; font-weight: 400; grid-template-columns: auto auto minmax(0, 1fr); }
 .recommendation-option input, .recommendation-tag input { width: 13px; height: 13px; margin: 0; accent-color: var(--accent); }
-.recommendation-option strong { min-width: 0; overflow: hidden; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+.recommendation-option strong { min-width: 0; overflow: hidden; color: var(--muted); font-weight: 400; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .recommendation-tags { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .recommendation-tags > span { color: var(--muted); font-size: 12px; }
 .recommendation-tag { display: inline-flex; min-height: 24px; align-items: center; gap: 5px; padding: 0 7px; border-radius: 12px; color: var(--accent); background: var(--page); font-size: 12px; font-weight: 400; cursor: pointer; }
+.recommendation-note { display: grid; gap: 5px; }
 .recommendation-note textarea { min-height: 54px; }
-.bookmark-recommendation-actions { justify-content: flex-end; flex-wrap: wrap; }
+.bookmark-recommendation-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .bookmark-recommendation-actions button { min-height: 28px; }
 .bookmark-recommendation-actions button:disabled { cursor: wait; opacity: .6; }
 

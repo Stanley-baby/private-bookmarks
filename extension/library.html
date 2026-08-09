@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width">
   <title>私有书签</title>
-  <link rel="stylesheet" href="style.css?v=20260809-ai2">
+  <link rel="stylesheet" href="style.css?v=20260809-ai3">
 </head>
 <body>
   <div id="app"></div>
@@ -34,7 +34,7 @@
       <label>备注<textarea name="note" rows="3" placeholder="可选"></textarea></label>
       <input name="tags" type="hidden" value="[]">
       <section class="bookmark-recommendations" data-recommendations hidden aria-live="polite">
-        <div class="bookmark-recommendations-header"><strong>推荐</strong><span data-recommendation-status></span></div>
+        <div class="bookmark-recommendations-header"><strong>推荐</strong><span data-recommendation-status role="status"></span></div>
         <div data-recommendation-body></div>
         <div class="bookmark-recommendation-actions"><button type="button" data-recommendation-ai hidden>生成 AI 建议</button><button type="button" class="primary" data-recommendation-apply hidden>应用建议</button></div>
       </section>
@@ -89,7 +89,7 @@
           </div>
 
           <section class="bookmark-recommendations" data-recommendations hidden aria-live="polite">
-            <div class="bookmark-recommendations-header"><strong>推荐</strong><span data-recommendation-status></span></div>
+            <div class="bookmark-recommendations-header"><strong>推荐</strong><span data-recommendation-status role="status"></span></div>
             <div data-recommendation-body></div>
             <div class="bookmark-recommendation-actions"><button type="button" data-recommendation-ai hidden>生成 AI 建议</button><button type="button" class="primary" data-recommendation-apply hidden>应用建议</button></div>
           </section>
@@ -200,6 +200,6 @@
     </div>
   </dialog>
 
-  <script type="module" src="library.js?v=20260809-ai2"></script>
+  <script type="module" src="library.js?v=20260809-ai3"></script>
 </body>
 </html>
