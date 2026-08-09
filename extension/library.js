@@ -3,6 +3,7 @@ import { bookmarkType, dateFilterSuggestions, duplicateLinks, languageFilterSugg
 import { canonicalImportLink, parseImportText } from "./import.js";
 import { disablePin, enablePin, lockNow, lockState, prepareLock, setAutoLock, startLockMonitor } from "./lock.js?v=20260808-pin2";
 import { renderMarkdown } from "./markdown.js";
+import { recommendBookmark } from "./recommendations.js";
 import { collectionOptions, connectionView, escapeHtml, lockView } from "./ui.js?v=20260808-pin2";
 
 const root = document.querySelector("#app");
@@ -80,7 +81,7 @@ const state = {
   items: [], allItems: [], collections: [], collectionCounts: {}, trashCount: 0, trashedCollections: [], preferences: null, layout: "list",
   collapsedCollections: new Set(), dragBookmark: null, dragCollection: null, searchTimer: null, sidebarWidth: null, cardMenuId: null, cardActionProxies: null,
   searchMenuOpen: false, searchFilterGroup: null, sortMenuOpen: false, viewMenuOpen: false, themeMenuOpen: false, recentSearches: readSearchHistory(), groupMenuId: null, collectionMenuId: null, pickerCollectionMenuId: null, pickerGroupMenuId: null, inlineCollectionCreate: null, tagMenuOpen: false, tagItemMenu: null, collectionValueAction: null, collectionValueId: null, collectionSelection: null,
-  selectionMoreOpen: false, selectionScreenshotWorking: false, sidebarOpen: false, accountMenuOpen: false, mediaUploadEnabled: false,
+  selectionMoreOpen: false, selectionScreenshotWorking: false, sidebarOpen: false, accountMenuOpen: false, mediaUploadEnabled: false, aiRecommendationsAvailable: false, aiSettings: null, aiBusy: false,
   settingsOpen: initialSettingsRoute, settingsSection: initialSettingsSection || "app", settingsMenu: null, settingsNeedsReload: false, settingsSavePromise: null, connectionInfo: null,
   importPreview: readImportProgress(), importBusy: false, backups: readBackupHistory(), backupSource: "local", backupBusy: false, backupLoading: false, backupIncludeMedia: false, cloudConnections: [], cloudBackups: { dropbox: [], google: [], onedrive: [] }, cloudBackupLoading: {}, cloudBackupErrors: {}, cloudBusy: false, lock: { enabled: false, locked: false, autoLock: "15" },
 };
@@ -107,9 +108,13 @@ const EN_TEXT = Object.freeze({
   "打开所有书签": "Open all bookmarks", "展开所有收藏集": "Expand all collections", "折叠所有收藏集": "Collapse all collections", "按名称排序所有收藏集": "Sort all collections by name", "删除所有空收藏集": "Delete all empty collections", "没有找到收藏集": "No collections found",
   "全部": "All",
   "应用": "App", "帐户": "Account", "订阅": "Subscription", "导入": "Import", "整合方式": "Integrations", "备份": "Backups", "帮助": "Help", "设置": "Settings", "私有书签": "Private Bookmarks", "私有实例": "Private instance", "实例名称": "Instance name", "实例地址": "Instance address", "访问密钥": "Access key", "已配置（仅存储在此设备）": "Configured (stored on this device only)", "头像": "Avatar", "固定实例图标": "Fixed instance icon", "认证方式": "Authentication", "访问密钥认证": "Access key authentication", "实例类型": "Instance type", "自托管实例": "Self-hosted instance", "数据统计": "Data", "书签数量": "Bookmarks", "收藏夹数量": "Collections", "废纸篓项目数": "Trash items", "媒体上传": "Media uploads", "已启用": "Enabled", "未配置": "Not configured", "断开当前设备": "Disconnect this device", "确认断开当前设备吗？": "Disconnect this device?", "档案": "File", "上传书签文件 (html、csv 或 txt)": "Upload bookmark file (html, csv, or txt)", "上传书签文件 (html、csv、txt 或 enex)": "Upload bookmark file (html, csv, txt, or enex)", "你可以从浏览器或服务的“导出书签”部分得到这个文件": "You can get this file from the browser or service's bookmark export section", "如何使用？": "How to use?", "上传文件…": "Upload file…", "导入预览": "Import preview", "文件": "File", "格式": "Format", "有效书签": "Valid bookmarks", "重复书签": "Duplicate bookmarks", "无效项目": "Invalid items", "跳过重复项目": "Skip duplicates", "导入这些书签": "Import these bookmarks", "恢复私有书签备份": "Restore Private Bookmarks backup", "备份会替换整个资料库": "This backup replaces the entire library", "当前快照已下载": "The current snapshot was downloaded", "正在解析…": "Parsing…", "正在导入…": "Importing…", "导入完成": "Import complete", "没有可导入的书签": "No bookmarks to import", "清除": "Clear", "条": " items", "个": " ",
-  "语言": "Language", "界面样式": "Interface theme", "字体大小": "Font size", "大": "Large", "默认视图模式": "Default view", "默认视图已更改": "Default view changed", "新收藏夹现在将使用": "New collections will now use", "视图模式。": "view mode.", "是否将此更改应用于所有现有收藏夹？": "Apply this change to all existing collections?", "保持不变": "Keep unchanged", "全部更新": "Update all", "列表": "List", "卡片": "Cards", "标题": "Title", "心情看板": "Moodboard", "点击书签时": "When clicking bookmarks", "在新标签页中打开": "Open in new tab", "在当前标签页中打开": "Open in current tab", "按钮组": "Button group", "搜索": "Search", "按相关性排序": "Sort by relevance", "排序标签": "Sort tags", "按名称": "By name", "按书签数量": "By bookmark count", "失效链接": "Broken links", "嵌套收藏": "Nested collections", "旧视图": "Legacy view", "询问 AI": "Ask AI", "推荐的收藏集和标签": "Recommended collections and tags", "仅 Pro 可用。AI 功能暂未接入。": "Only available for Pro. AI is not connected yet.", "AI 功能暂未接入。": "AI is not connected yet.",
+  "语言": "Language", "界面样式": "Interface theme", "字体大小": "Font size", "大": "Large", "默认视图模式": "Default view", "默认视图已更改": "Default view changed", "新收藏夹现在将使用": "New collections will now use", "视图模式。": "view mode.", "是否将此更改应用于所有现有收藏夹？": "Apply this change to all existing collections?", "保持不变": "Keep unchanged", "全部更新": "Update all", "列表": "List", "卡片": "Cards", "标题": "Title", "心情看板": "Moodboard", "点击书签时": "When clicking bookmarks", "在新标签页中打开": "Open in new tab", "在当前标签页中打开": "Open in current tab", "按钮组": "Button group", "搜索": "Search", "按相关性排序": "Sort by relevance", "排序标签": "Sort tags", "按名称": "By name", "按书签数量": "By bookmark count", "失效链接": "Broken links", "嵌套收藏": "Nested collections", "旧视图": "Legacy view", "询问 AI": "Ask AI", "推荐的收藏集和标签": "Recommended collections and tags", "AI 推荐标签和备注": "AI suggested tags and note", "仅 Pro 可用。AI 功能暂未接入。": "Only available for Pro. AI is not connected yet.", "AI 功能暂未接入。": "AI is not connected yet.", "推荐功能使用本地已有书签，不会上传数据。": "Recommendations use existing bookmark data and do not upload it.", "AI 版需要在 Worker 中配置 Workers AI。": "The AI version requires a Workers AI binding on the Worker.",
   "所有书签": "All bookmarks", "未分类": "Unsorted", "星标": "Favorites", "待检查": "Pending check", "废纸篓": "Trash", "收藏": "Collections", "快速过滤…": "Quick filters…", "备注": "Notes", "高亮": "Highlights", "提醒": "Reminders", "重复书签": "Duplicates", "没有标签": "Untagged", "标签": "Tags", "链接": "Links", "文章": "Articles", "图片": "Images", "视频": "Videos", "音频": "Audio", "文档": "Documents", "建议的": "Suggested", "最近使用的": "Recently used", "删除最近项": "Remove recent item", "搜索帮助": "Search help", "排序": "Sort", "网站": "Website", "视图": "View", "封面": "Cover", "图标": "Icon", "左": "Left", "右": "Right", "书签信息": "Bookmark info", "描述": "Description", "在列表中显示": "Show in list", "在卡片中显示": "Show in cards", "在标题中显示": "Show in titles", "在心情看板中显示": "Show in moodboard", "应用到全部": "Apply to all", "添加": "Add", "导出书签": "Export bookmarks", "检查链接": "Check links", "导入书签": "Import bookmarks", "直接在浏览器打开": "Open in browser", "移动": "Move", "添加标签": "Add tags", "删除": "Delete", "取消": "Cancel", "更多": "More", "选择所有": "Select all", "创建页面截图": "Create page screenshot", "正在创建页面截图…": "Creating page screenshot…", "刷新预览": "Refresh preview", "添加到收藏夹": "Add to favorites", "从收藏夹移除": "Remove from favorites", "移除标签": "Remove tags", "此视图中还没有书签。": "No bookmarks in this view.", "主题：": "Theme: ", "主题": "Theme", "浅色": "Light", "深色": "Dark", "跟随系统": "System", "日落": "Sunset", "Default mode": "Default mode", "中文（汉语）": "中文（汉语）", "新标签": "New tag", "显示": "Show", "隐藏标签": "Hide tags", "按名称排序标签": "Sort tags by name", "按书签数排序标签": "Sort tags by count", "显示侧边栏": "Show sidebar", "关闭侧边栏": "Close sidebar",
-  "关闭": "Close", "返回书签": "Back to bookmarks", "显示设置菜单": "Show settings menu", "可选": "Optional", "选项": " options", "书签详情": "Bookmark details", "暂未支持": "Not supported yet", "打开原网页": "Open original page", "更改图标": "Change icon", "添加描述": "Add description", "添加备注": "Add note", "预览 Markdown": "Preview Markdown", "添加标签…": "Add tags…", "最喜爱的": "Favorite", "添加 URL…": "Add URL…", "上传封面文件": "Upload cover file", "可用封面": "Available covers", "分享收藏夹": "Share collection", "复制": "Copy", "系统分享": "Share", "添加书签": "Add bookmark", "编辑": "Edit", "询问": "Ask", "Web存档": "Web archive", "保存": "Save", "添加 URL": "Add URL", "选择收藏集": "Select collection", "查找或创建新的收藏集…": "Find or create a collection…", "网址": "URL", "收藏夹": "Collection", "封面 URL": "Cover URL", "选择": "Select", "选择全部": "Select all", "恢复": "Restore", "截屏": "Screenshot", "创建嵌套的集合": "Create nested collection", "创建收藏集": "Create collection", "改名": "Rename", "分享": "Share", "显示分组": "Show group", "隐藏分组": "Hide group", "展开": "Expand", "折叠": "Collapse", "收起": "Collapse", "创建群组": "Create group", "删除分组": "Delete group", "新建收藏夹": "New collection", "新收藏": "New collection", "新群组": "New group", "更多操作": "More actions", "复制链接": "Copy link", "将链接复制到剪贴板": "Copy link to clipboard", "列表视图": "List view", "网格视图": "Grid view", "手动排序": "Manual order", "最近添加": "Recently added", "标题 (A-Z)": "Title (A-Z)", "网站 (A-Z)": "Website (A-Z)", "调整侧边栏宽度": "Adjust sidebar width", "当前标签页": "Current tab", "预览模式": "Preview mode", "Web 预览模式": "Web preview mode", "搜索设置 / 筛选": "Search settings / filters", "缩小搜索范围": "Narrow your search", "在条件前添加短横(-) 将其排除在搜索范围之外": "Prefix a condition with a hyphen (-) to exclude it from search", "浏览器扩展": "Browser extension", "下载应用": "Download app", "帮助与支持": "Help and support", "博客": "Blog", "更新内容?": "What's new?", "注销": "Log out", "按日期 ↑": "By date ↑", "按日期 ↓": "By date ↓", "类型": "Type", "创建日期": "Created", "在标题/描述中": "In title/description", "在URL中": "In URL", "移动到…": "Move to…", "移动到": "Move to", "全选": "Select all", "取消星标": "Remove favorite", "添加星标": "Add favorite", "收藏选项": "Collection options", "收藏集选项": "Collection options", "收藏夹名称": "Collection name", "高亮颜色": "Highlight color", "（无备注）": "(No note)", "应用锁": "App lock", "定时锁定": "Auto-lock", "每次打开": "Every time opened", "1 分钟": "1 minute", "5 分钟": "5 minutes", "15 分钟": "15 minutes", "30 分钟": "30 minutes", "1 小时": "1 hour", "从不": "Never", "启用应用锁": "Enable app lock", "关闭应用锁": "Disable app lock", "立即锁定": "Lock now", "当前已启用": "Enabled on this device", "永远不用担心数据丢失。创建本地快照，保存收藏夹、书签、标签和高亮。": "Never worry about losing your data. Create a local snapshot of collections, bookmarks, tags and highlights.", "创建的快照只保存在此浏览器，完整内容仍可随时下载到本地。": "Snapshots are stored only in this browser and can be downloaded locally at any time.", "创建新的备份": "Create new backup", "备份正在创建": "Your new backup is being created. You can leave this page and come back later.", "下载完整备份": "Get backup", "下载上传文件": "Download uploaded files", "恢复备份": "Restore backup", "历史备份": "Backup history", "云备份": "Cloud backup", "云备份在自托管实例中暂不可用。": "Cloud backup is not available for this self-hosted instance.", "没有历史备份": "No backups created on this device yet.", "下载 JSON": "JSON", "备份创建于": "Created", "云端": "Cloud", "返回导入": "Go to import"
+  "关闭": "Close", "返回书签": "Back to bookmarks", "显示设置菜单": "Show settings menu", "可选": "Optional", "选项": " options", "书签详情": "Bookmark details", "暂未支持": "Not supported yet", "打开原网页": "Open original page", "更改图标": "Change icon", "添加描述": "Add description", "添加备注": "Add note", "预览 Markdown": "Preview Markdown", "添加标签…": "Add tags…", "最喜爱的": "Favorite", "添加 URL…": "Add URL…", "上传封面文件": "Upload cover file", "可用封面": "Available covers", "分享收藏夹": "Share collection", "复制": "Copy", "系统分享": "Share", "添加书签": "Add bookmark", "编辑": "Edit", "询问": "Ask", "Web存档": "Web archive", "保存": "Save", "添加 URL": "Add URL", "选择收藏集": "Select collection", "查找或创建新的收藏集…": "Find or create a collection…", "网址": "URL", "收藏夹": "Collection", "封面 URL": "Cover URL", "选择": "Select", "选择全部": "Select all", "恢复": "Restore", "截屏": "Screenshot", "创建嵌套的集合": "Create nested collection", "创建收藏集": "Create collection", "改名": "Rename", "分享": "Share", "显示分组": "Show group", "隐藏分组": "Hide group", "展开": "Expand", "折叠": "Collapse", "收起": "Collapse", "创建群组": "Create group", "删除分组": "Delete group", "新建收藏夹": "New collection", "新收藏": "New collection", "新群组": "New group", "更多操作": "More actions", "复制链接": "Copy link", "将链接复制到剪贴板": "Copy link to clipboard", "列表视图": "List view", "网格视图": "Grid view", "手动排序": "Manual order", "最近添加": "Recently added", "标题 (A-Z)": "Title (A-Z)", "网站 (A-Z)": "Website (A-Z)", "调整侧边栏宽度": "Resize sidebar", "当前标签页": "Current tab", "预览模式": "Preview mode", "Web 预览模式": "Web preview mode", "搜索设置 / 筛选": "Search settings / filters", "缩小搜索范围": "Narrow your search", "在条件前添加短横(-) 将其排除在搜索范围之外": "Prefix a condition with a hyphen (-) to exclude it from search", "浏览器扩展": "Browser extension", "下载应用": "Download app", "帮助与支持": "Help and support", "博客": "Blog", "更新内容?": "What's new?", "注销": "Log out", "按日期 ↑": "By date ↑", "按日期 ↓": "By date ↓", "类型": "Type", "创建日期": "Created", "在标题/描述中": "In title/description", "在URL中": "In URL", "移动到…": "Move to…", "移动到": "Move to", "全选": "Select all", "取消星标": "Remove favorite", "添加星标": "Add favorite", "收藏选项": "Collection options", "收藏集选项": "Collection options", "收藏夹名称": "Collection name", "高亮颜色": "Highlight color", "（无备注）": "(No note)", "应用锁": "App lock", "定时锁定": "Auto-lock", "每次打开": "Every time opened", "1 分钟": "1 minute", "5 分钟": "5 minutes", "15 分钟": "15 minutes", "30 分钟": "30 minutes", "1 小时": "1 hour", "从不": "Never", "启用应用锁": "Enable app lock", "关闭应用锁": "Disable app lock", "立即锁定": "Lock now", "当前已启用": "Enabled on this device", "永远不用担心数据丢失。创建本地快照，保存收藏夹、书签、标签和高亮。": "Never worry about losing your data. Create a local snapshot of collections, bookmarks, tags and highlights.", "创建的快照只保存在此浏览器，完整内容仍可随时下载到本地。": "Snapshots are stored only in this browser and can be downloaded locally at any time.", "创建新的备份": "Create new backup", "备份正在创建": "Your new backup is being created. You can leave this page and come back later.", "下载完整备份": "Get backup", "下载上传文件": "Download uploaded files", "恢复备份": "Restore backup", "历史备份": "Backup history", "云备份": "Cloud backup", "云备份在自托管实例中暂不可用。": "Cloud backup is not available for this self-hosted instance.", "没有历史备份": "No backups created on this device yet.", "下载 JSON": "JSON", "备份创建于": "Created", "云端": "Cloud", "返回导入": "Go to import", "推荐": "Recommendations", "推荐收藏集": "Suggested collection", "推荐标签": "Suggested tags", "应用本地建议": "Apply local suggestions", "生成 AI 建议": "Generate AI suggestions", "应用 AI 建议": "Apply AI suggestions", "正在分析…": "Analyzing…", "没有足够相似的书签": "No similar bookmarks yet", "AI 返回了空建议": "AI returned no suggestions", "AI 建议": "AI suggestions"
+});
+
+const EXTRA_EN_TEXT = Object.freeze({
+  "应用建议": "Apply suggestions", "已应用": "Applied", "AI 配置": "AI configuration", "提供商": "Provider", "Cloudflare Workers AI": "Cloudflare Workers AI", "外部 OpenAI 兼容 API": "External OpenAI-compatible API", "模型": "Model", "免费额度": "Free quota", "API 地址": "API base URL", "API Key": "API key", "已配置，留空保持不变": "Configured; leave blank to keep", "输入 API Key": "Enter API key", "清除已保存的 API Key": "Clear saved API key", "Prompt": "Prompt", "保存 AI 设置": "Save AI settings", "恢复默认 Prompt": "Restore default prompt", "尚未配置可用 AI": "No usable AI is configured", "Worker 已配置 Workers AI": "Workers AI is configured on this Worker", "外部 API 已配置": "External API is configured", "请在下方配置 Workers AI。": "Configure Workers AI below.", "请在下方配置外部 OpenAI 兼容 API。": "Configure an external OpenAI-compatible API below.", "外部 API 会收到当前书签和相似书签的元数据。": "The external API receives the current bookmark and similar-bookmark metadata.", "自定义 Prompt 会保留固定 JSON 输出约束。": "Custom prompts keep the fixed JSON output contract.", "免费额度受 Cloudflare 账户限制，不代表无限免费。": "Free quota is subject to your Cloudflare account and is not unlimited.", "配置已保存": "Settings saved"
 });
 
 function languageIsEnglish() {
@@ -117,10 +122,10 @@ function languageIsEnglish() {
 }
 
 function t(text) {
-  return languageIsEnglish() ? EN_TEXT[text] || text : text;
+  return languageIsEnglish() ? EN_TEXT[text] || EXTRA_EN_TEXT[text] || text : text;
 }
 
-const translationEntries = Object.entries(EN_TEXT).sort(([a], [b]) => b.length - a.length);
+const translationEntries = Object.entries({ ...EN_TEXT, ...EXTRA_EN_TEXT }).sort(([a], [b]) => b.length - a.length);
 
 function translateText(text) {
   if (!languageIsEnglish()) return text;
@@ -941,6 +946,117 @@ function collectionPath(id) {
   const names = [];
   for (let item = state.collections.find((entry) => entry.id === id); item; item = state.collections.find((entry) => entry.id === item.parentId)) names.unshift(item.name);
   return names.join(" / ") || "未分类";
+}
+
+function recommendationInput(form, getTags = () => []) {
+  return {
+    link: form.elements.link?.value || "",
+    title: form.elements.title?.value || "",
+    description: form.elements.description?.value || "",
+    tags: getTags(),
+  };
+}
+
+function recommendationsEnabled() {
+  return Boolean(state.preferences?.recommendCollectionsTags || (state.preferences?.aiRecommendations && state.aiRecommendationsAvailable));
+}
+
+function validRecommendationLink(link) {
+  try { return /^https?:$/.test(new URL(link).protocol); } catch { return false; }
+}
+
+function recommendationPanel(form) {
+  return form.querySelector("[data-recommendations]");
+}
+
+function renderRecommendations(form, result, mode = "local", status = "", busy = false) {
+  const panel = recommendationPanel(form);
+  if (!panel) return;
+  const suggestion = result?.[mode];
+  const hasSuggestion = Boolean(suggestion?.collectionId || suggestion?.tags?.length || suggestion?.note);
+  const aiEnabled = Boolean(state.preferences?.aiRecommendations && state.aiRecommendationsAvailable && validRecommendationLink(result?.input?.link || ""));
+  panel.hidden = !recommendationsEnabled();
+  panel.dataset.recommendationMode = mode;
+  panel.querySelector("[data-recommendation-status]").textContent = status || (!hasSuggestion ? t("没有足够相似的书签") : "");
+  panel.querySelector("[data-recommendation-body]").innerHTML = localizeHtml(hasSuggestion ? `<div class="recommendation-items">${suggestion.collectionId ? `<label class="recommendation-option"><input type="checkbox" data-recommendation-collection checked><span>${t("推荐收藏集")}</span><strong>${escapeHtml(collectionPath(suggestion.collectionId))}</strong></label>` : ""}${suggestion.tags?.length ? `<div class="recommendation-tags"><span>${t("推荐标签")}</span>${suggestion.tags.map((tag) => `<label class="recommendation-tag"><input type="checkbox" data-recommendation-tag value="${escapeHtml(tag)}" checked><span>#${escapeHtml(tag)}</span></label>`).join("")}</div>` : ""}${suggestion.note ? `<label class="recommendation-note"><span>${t("备注")}</span><textarea data-recommendation-note rows="3">${escapeHtml(suggestion.note)}</textarea></label>` : ""}</div>` : "");
+  const aiButton = panel.querySelector("[data-recommendation-ai]");
+  const applyButton = panel.querySelector("[data-recommendation-apply]");
+  aiButton.hidden = !aiEnabled;
+  aiButton.disabled = busy;
+  applyButton.hidden = !hasSuggestion;
+  applyButton.textContent = t(mode === "ai" ? "应用 AI 建议" : "应用本地建议");
+  applyButton.disabled = !hasSuggestion;
+  panel.querySelector("[data-recommendation-ai]").onclick = () => requestAiRecommendations(form);
+  panel.querySelector("[data-recommendation-apply]").onclick = () => applyRecommendations(form);
+}
+
+function localRecommendation(form) {
+  return recommendBookmark(recommendationInput(form, form._recommendationGetTags), state.allItems, state.collections);
+}
+
+function refreshRecommendations(form) {
+  if (!recommendationsEnabled()) {
+    const panel = recommendationPanel(form);
+    if (panel) panel.hidden = true;
+    return;
+  }
+  const input = recommendationInput(form, form._recommendationGetTags);
+  const local = localRecommendation(form);
+  form._recommendationResult = { input, local, ai: null };
+  renderRecommendations(form, form._recommendationResult, "local");
+}
+
+async function requestAiRecommendations(form) {
+  const result = form._recommendationResult || { input: recommendationInput(form, form._recommendationGetTags), local: localRecommendation(form), ai: null };
+  const panel = recommendationPanel(form);
+  const aiButton = panel?.querySelector("[data-recommendation-ai]");
+  if (!panel || !aiButton || !validRecommendationLink(result.input.link)) return;
+  aiButton.disabled = true;
+  renderRecommendations(form, result, "local", t("正在分析…"), true);
+  try {
+    result.ai = await api("/v1/ai/recommendations", {
+      method: "POST",
+      body: JSON.stringify({
+        ...result.input,
+        collections: state.collections.map(({ id, name, parentId }) => ({ id, name, parentId })),
+        context: result.local.matches,
+      }),
+    });
+    form._recommendationResult = result;
+    renderRecommendations(form, result, "ai");
+  } catch (error) {
+    renderRecommendations(form, result, "local", error.message || "AI 建议失败");
+  }
+}
+
+function applyRecommendations(form) {
+  const result = form._recommendationResult;
+  const mode = recommendationPanel(form)?.dataset.recommendationMode || "local";
+  const suggestion = result?.[mode];
+  if (!suggestion) return;
+  const collection = form.elements.collectionId;
+  const collectionChoice = recommendationPanel(form).querySelector("[data-recommendation-collection]");
+  if (collectionChoice?.checked && suggestion.collectionId && [...collection.options].some((option) => option.value === suggestion.collectionId)) {
+    collection.value = suggestion.collectionId;
+    form._recommendationSyncCollection?.();
+  }
+  const selectedTags = [...recommendationPanel(form).querySelectorAll("[data-recommendation-tag]:checked")].map((input) => input.value);
+  const currentTags = form._recommendationGetTags();
+  const mergedTags = [...currentTags, ...selectedTags].filter((tag, index, all) => all.findIndex((value) => value.toLocaleLowerCase() === tag.toLocaleLowerCase()) === index);
+  form._recommendationSetTags(mergedTags);
+  if (mode === "ai" && suggestion.note && form.elements.note) form.elements.note.value = suggestion.note;
+  renderRecommendations(form, result, mode, t("已应用"));
+}
+
+function bindRecommendationForm(form, { getTags = () => [], setTags = () => {}, syncCollection = () => {} } = {}) {
+  form._recommendationGetTags = getTags;
+  form._recommendationSetTags = setTags;
+  form._recommendationSyncCollection = syncCollection;
+  for (const field of [form.elements.link, form.elements.title, form.elements.description].filter(Boolean)) field.oninput = () => {
+    clearTimeout(form._recommendationTimer);
+    form._recommendationTimer = setTimeout(() => refreshRecommendations(form), 180);
+  };
+  refreshRecommendations(form);
 }
 
 function collectionPickerRowsSource(query, selectedId) {
@@ -2250,7 +2366,77 @@ function settingsAppMarkup() {
     { value: "off", label: "关闭" },
   ];
   const language = settingsPreference("language", "zh-Hans");
-  return `<div class="settings-content"><div class="settings-grid"><div class="settings-label">语言</div><div>${settingsControlMarkup("language", language, LANGUAGE_OPTIONS)}</div><div class="settings-label">界面样式</div><div class="settings-theme-picker" role="group" aria-label="界面样式">${settingsThemeMarkup(theme)}</div><div class="settings-label">字体大小</div><div><label class="settings-check"><input type="checkbox" data-settings-toggle="largeFont" ${settingsPreference("largeFont", false) ? "checked" : ""}>大</label></div><div class="settings-separator"></div><div class="settings-label">默认视图模式</div><div>${settingsControlMarkup("defaultView", defaultView, viewOptions, "viewGrid")}</div><div class="settings-label">点击书签时</div><div>${settingsControlMarkup("bookmarkClick", bookmarkClick, clickOptions)}</div><div class="settings-label">按钮组</div><div>${settingsButtonGroupMarkup()}</div><div class="settings-label">搜索</div><div><label class="settings-check settings-search-relevance"><input type="checkbox" data-settings-toggle="searchRelevance" ${searchRelevance ? "checked" : ""}>按相关性排序</label></div><div class="settings-separator"></div><div class="settings-label">排序标签</div><div><label class="settings-radio"><input type="radio" name="settings-tag-sort" value="name" data-settings-tag-sort ${tagSort !== "count" ? "checked" : ""}>按名称</label><label class="settings-radio"><input type="radio" name="settings-tag-sort" value="count" data-settings-tag-sort ${tagSort === "count" ? "checked" : ""}>按书签数量</label></div><div class="settings-label">失效链接 <a class="settings-help-link" href="https://help.raindrop.io/broken-links#reducing-false-positives" target="_blank" rel="noopener">[?]</a></div><div>${settingsControlMarkup("brokenLinks", "default", brokenLinkOptions)}</div><div class="settings-label">嵌套收藏</div><div><label class="settings-check settings-disabled"><input type="checkbox" disabled>旧视图</label></div><div class="settings-separator"></div><div class="settings-label">AI</div><div><label class="settings-check settings-disabled"><input type="checkbox" disabled>询问 AI <a class="settings-help-link" href="https://help.raindrop.io/stella" target="_blank" rel="noopener">[?]</a></label><label class="settings-check settings-disabled"><input type="checkbox" disabled>推荐的收藏集和标签</label><p class="settings-sub-label">Only available for <a href="https://app.raindrop.io/settings/pro" target="_blank" rel="noopener">Pro</a>. AI 功能暂未接入。</p></div></div></div>`;
+  const localRecommendations = settingsPreference("recommendCollectionsTags", false);
+  const aiRecommendations = settingsPreference("aiRecommendations", false);
+  const aiClass = state.aiRecommendationsAvailable ? "settings-check" : "settings-check settings-disabled";
+  return `<div class="settings-content"><div class="settings-grid"><div class="settings-label">语言</div><div>${settingsControlMarkup("language", language, LANGUAGE_OPTIONS)}</div><div class="settings-label">界面样式</div><div class="settings-theme-picker" role="group" aria-label="界面样式">${settingsThemeMarkup(theme)}</div><div class="settings-label">字体大小</div><div><label class="settings-check"><input type="checkbox" data-settings-toggle="largeFont" ${settingsPreference("largeFont", false) ? "checked" : ""}>大</label></div><div class="settings-separator"></div><div class="settings-label">默认视图模式</div><div>${settingsControlMarkup("defaultView", defaultView, viewOptions, "viewGrid")}</div><div class="settings-label">点击书签时</div><div>${settingsControlMarkup("bookmarkClick", bookmarkClick, clickOptions)}</div><div class="settings-label">按钮组</div><div>${settingsButtonGroupMarkup()}</div><div class="settings-label">搜索</div><div><label class="settings-check settings-search-relevance"><input type="checkbox" data-settings-toggle="searchRelevance" ${searchRelevance ? "checked" : ""}>按相关性排序</label></div><div class="settings-separator"></div><div class="settings-label">排序标签</div><div><label class="settings-radio"><input type="radio" name="settings-tag-sort" value="name" data-settings-tag-sort ${tagSort !== "count" ? "checked" : ""}>按名称</label><label class="settings-radio"><input type="radio" name="settings-tag-sort" value="count" data-settings-tag-sort ${tagSort === "count" ? "checked" : ""}>按书签数量</label></div><div class="settings-label">失效链接 <a class="settings-help-link" href="https://help.raindrop.io/broken-links#reducing-false-positives" target="_blank" rel="noopener">[?]</a></div><div>${settingsControlMarkup("brokenLinks", "default", brokenLinkOptions)}</div><div class="settings-label">嵌套收藏</div><div><label class="settings-check settings-disabled"><input type="checkbox" disabled>旧视图</label></div><div class="settings-separator"></div><div class="settings-label">AI</div><div><label class="settings-check settings-disabled"><input type="checkbox" disabled>询问 AI <a class="settings-help-link" href="https://help.raindrop.io/stella" target="_blank" rel="noopener">[?]</a></label><label class="settings-check"><input type="checkbox" data-settings-toggle="recommendCollectionsTags" ${localRecommendations ? "checked" : ""}>推荐的收藏集和标签</label><label class="${aiClass}"><input type="checkbox" data-settings-toggle="aiRecommendations" ${aiRecommendations ? "checked" : ""} ${state.aiRecommendationsAvailable ? "" : "disabled"}>AI 推荐标签和备注</label><p class="settings-sub-label">${state.aiRecommendationsAvailable ? "推荐功能使用本地已有书签，不会上传数据。" : "AI 版需要在 Worker 中配置 Workers AI。"}</p></div></div></div>`;
+}
+
+function aiSettingsMarkup() {
+  const settings = state.aiSettings || {};
+  const provider = settingsPreference("aiProvider", settings.provider || "cloudflare");
+  const model = state.preferences?.aiModel || settings.model || "";
+  const baseUrl = state.preferences?.aiBaseUrl || settings.baseUrl || "https://api.openai.com/v1";
+  const externalModel = state.preferences?.aiExternalModel || settings.externalModel || "gpt-4o-mini";
+  const prompt = state.preferences?.aiPrompt || settings.prompt || settings.defaultPrompt || "";
+  const models = Array.isArray(settings.models) ? settings.models : model ? [{ id: model, label: model, free: false }] : [];
+  const modelOptions = models.map((item) => `<option value="${escapeHtml(item.id)}" ${item.id === model ? "selected" : ""}>${item.free ? `${escapeHtml(t("免费额度"))} · ` : ""}${escapeHtml(item.label || item.id)}</option>`).join("");
+  const apiKeyConfigured = Boolean(settings.apiKeyConfigured || state.preferences?.aiApiKeyConfigured);
+  const status = provider === "cloudflare"
+    ? settings.cloudflareAvailable ? t("Worker 已配置 Workers AI") : t("尚未配置可用 AI")
+    : settings.externalAvailable ? t("外部 API 已配置") : t("尚未配置可用 AI");
+  return `<div class="settings-ai-panel" data-ai-settings-panel><div class="settings-ai-fields"><label>${t("提供商")}<select data-ai-provider><option value="cloudflare" ${provider === "cloudflare" ? "selected" : ""}>${t("Cloudflare Workers AI")}</option><option value="openai" ${provider === "openai" ? "selected" : ""}>${t("外部 OpenAI 兼容 API")}</option></select></label><div data-ai-cloudflare-fields ${provider === "cloudflare" ? "" : "hidden"}><label>${t("模型")}<select data-ai-model>${modelOptions}</select></label></div><div class="settings-ai-external-fields" data-ai-external-fields ${provider === "openai" ? "" : "hidden"}><label>${t("API 地址")}<input data-ai-base-url type="url" value="${escapeHtml(baseUrl)}" placeholder="https://api.openai.com/v1"></label><label>${t("模型")}<input data-ai-external-model value="${escapeHtml(externalModel)}" placeholder="gpt-4o-mini"></label><label>${t("API Key")}<input data-ai-api-key type="password" autocomplete="new-password" placeholder="${escapeHtml(apiKeyConfigured ? t("已配置，留空保持不变") : t("输入 API Key"))}"></label>${apiKeyConfigured ? `<label class="settings-check"><input type="checkbox" data-ai-clear-key>${t("清除已保存的 API Key")}</label>` : ""}</div><label>${t("Prompt")}<textarea data-ai-prompt rows="7">${escapeHtml(prompt)}</textarea></label></div><p class="settings-sub-label" data-ai-config-note>${escapeHtml(status)}</p><p class="settings-sub-label">${t("自定义 Prompt 会保留固定 JSON 输出约束。")} ${t("外部 API 会收到当前书签和相似书签的元数据。")} ${t("免费额度受 Cloudflare 账户限制，不代表无限免费。")}</p><div class="settings-ai-actions"><button type="button" class="primary" data-ai-save ${state.aiBusy ? "disabled" : ""}>${t("保存 AI 设置")}</button><button type="button" data-ai-reset-prompt ${state.aiBusy ? "disabled" : ""}>${t("恢复默认 Prompt")}</button></div></div>`;
+}
+
+function syncAiProviderFields() {
+  const provider = root.querySelector("[data-ai-provider]")?.value;
+  const cloudflare = root.querySelector("[data-ai-cloudflare-fields]");
+  const external = root.querySelector("[data-ai-external-fields]");
+  if (cloudflare) cloudflare.hidden = provider !== "cloudflare";
+  if (external) external.hidden = provider !== "openai";
+}
+
+async function saveAiSettings(promptOverride = null) {
+  const panel = root.querySelector("[data-ai-settings-panel]");
+  if (!panel || state.aiBusy) return;
+  const prompt = promptOverride == null ? panel.querySelector("[data-ai-prompt]").value : promptOverride;
+  const apiKey = panel.querySelector("[data-ai-api-key]")?.value.trim() || "";
+  const provider = panel.querySelector("[data-ai-provider]").value;
+  const button = panel.querySelector("[data-ai-save]");
+  let rerender = false;
+  state.aiBusy = true;
+  if (button) button.disabled = true;
+  try {
+    const response = await mutate("/v1/ai/settings", {
+      method: "PATCH",
+      body: JSON.stringify({
+        revision: state.preferences.revision,
+        settings: {
+          provider,
+          model: panel.querySelector("[data-ai-model]")?.value || state.aiSettings?.model || "",
+          baseUrl: panel.querySelector("[data-ai-base-url]")?.value || "",
+          externalModel: panel.querySelector("[data-ai-external-model]")?.value || "",
+          prompt: prompt === state.aiSettings?.defaultPrompt ? "" : prompt,
+        },
+        apiKey: apiKey || null,
+        clearApiKey: provider === "openai" && Boolean(panel.querySelector("[data-ai-clear-key]")?.checked),
+      }),
+    });
+    if (!response) {
+      rerender = true;
+      return;
+    }
+    state.preferences = response.preferences;
+    state.aiSettings = response.ai;
+    state.aiRecommendationsAvailable = Boolean(response.ai?.available);
+    rerender = true;
+  } catch (error) {
+    if (button) button.disabled = false;
+    showError(error);
+  } finally {
+    state.aiBusy = false;
+    if (rerender) renderSettings();
+  }
 }
 
 const AUTO_LOCK_OPTIONS = [
@@ -2283,6 +2469,7 @@ function settingsMarkup() {
 function renderSettings() {
   document.title = languageIsEnglish() ? "Private Bookmarks" : "私有书签";
   root.innerHTML = settingsMarkup();
+  if (state.settingsSection === "app") root.querySelector(".settings-grid")?.insertAdjacentHTML("beforeend", `<div class="settings-label">${t("AI 配置")}</div><div>${aiSettingsMarkup()}</div>`);
   const legacyLabel = t("旧视图");
   const legacyInput = [...root.querySelectorAll(".settings-check input")].find((input) => input.parentElement?.textContent.trim() === legacyLabel);
   if (legacyInput) {
@@ -2292,7 +2479,12 @@ function renderSettings() {
     legacyInput.parentElement.classList.remove("settings-disabled");
   }
   const aiNote = root.querySelector(".settings-sub-label");
-  if (aiNote) aiNote.innerHTML = languageIsEnglish() ? 'Only available for <a href="https://app.raindrop.io/settings/pro" target="_blank" rel="noopener">Pro</a>. AI is not connected yet.' : '仅 Pro 可用。AI 功能暂未接入。';
+  if (aiNote) {
+    const settings = state.aiSettings;
+    aiNote.textContent = settings?.provider === "openai"
+      ? t(settings.externalAvailable ? "推荐功能使用本地已有书签，不会上传数据。" : "请在下方配置外部 OpenAI 兼容 API。")
+      : t(settings?.cloudflareAvailable ? "推荐功能使用本地已有书签，不会上传数据。" : "请在下方配置 Workers AI。");
+  }
   applyTheme();
   localizeDialogs();
   bindSettings();
@@ -2522,6 +2714,10 @@ function bindSettings() {
   root.querySelectorAll("[data-settings-button-option]").forEach((input) => input.onchange = () => setSettingsPreference("buttonGroup", { ...buttonGroupPreference(), [input.dataset.settingsButtonOption]: input.checked }));
   root.querySelectorAll("[data-settings-tag-sort]").forEach((input) => input.onchange = () => setSettingsPreference("tagSort", input.value));
   root.querySelectorAll("[data-settings-theme]").forEach((button) => button.onclick = () => setSettingsPreference("theme", button.dataset.settingsTheme));
+  root.querySelector("[data-ai-provider]")?.addEventListener("change", syncAiProviderFields);
+  root.querySelector("[data-ai-save]")?.addEventListener("click", () => saveAiSettings());
+  root.querySelector("[data-ai-reset-prompt]")?.addEventListener("click", () => saveAiSettings(state.aiSettings?.defaultPrompt || ""));
+  syncAiProviderFields();
   positionSettingsMenu();
   if (!settingsMenuPositionBound) {
     window.addEventListener("resize", positionSettingsMenu);
@@ -2538,6 +2734,8 @@ async function load() {
   state.connectionInfo = connectionInfo;
   state.lock = await lockState();
   setCoverUploadEnabled(boot.capabilities?.mediaUpload);
+  state.aiSettings = boot.ai || null;
+  state.aiRecommendationsAvailable = Boolean(boot.capabilities?.aiRecommendations);
   state.collections = boot.collections;
   state.collectionCounts = boot.collectionCounts || {};
   state.trashCount = boot.trashCount || 0;
@@ -3762,6 +3960,11 @@ function bind() {
       const option = event.target.closest("[data-tag-option], [data-create-tag]");
       if (option) addTag(option.dataset.tagOption || candidate());
     };
+    bindRecommendationForm(form, {
+      getTags: () => [...editTags],
+      setTags: (tags) => { editTags = [...tags]; syncTags(); updateTagMenu(); },
+      syncCollection,
+    });
     form.elements.favorite.checked = item.favorite;
     const notePreview = editBookmarkDialog.querySelector("#edit-note-preview");
     const markdownButton = editBookmarkDialog.querySelector("#edit-note-markdown");
@@ -3833,6 +4036,12 @@ function bind() {
   root.querySelector("#add-bookmark").onclick = () => {
     const form = bookmarkDialog.querySelector("form");
     form.elements.collectionId.innerHTML = collectionOptions(state.collections, state.collectionId || state.preferences.defaultCollectionId);
+    bindRecommendationForm(form, {
+      getTags: () => {
+        try { return JSON.parse(form.elements.tags.value || "[]"); } catch { return []; }
+      },
+      setTags: (tags) => { form.elements.tags.value = JSON.stringify(tags); },
+    });
     bookmarkDialog.showModal();
   };
   root.querySelector("#import").onclick = () => setSettingsRoute(true, "import");
@@ -4139,7 +4348,7 @@ bookmarkDialog.addEventListener("close", async () => {
   if (bookmarkDialog.returnValue !== "create") return;
   const form = bookmarkDialog.querySelector("form");
   const fields = new FormData(form);
-  await api("/v1/bookmarks", { method: "POST", body: JSON.stringify({ link: fields.get("link"), title: fields.get("title"), collectionId: fields.get("collectionId") }) });
+  await api("/v1/bookmarks", { method: "POST", body: JSON.stringify({ link: fields.get("link"), title: fields.get("title"), note: fields.get("note"), tags: JSON.parse(fields.get("tags") || "[]"), collectionId: fields.get("collectionId") }) });
   form.reset();
   load().catch(showError);
 });

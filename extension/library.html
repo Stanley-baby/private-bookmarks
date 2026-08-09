@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width">
   <title>私有书签</title>
-  <link rel="stylesheet" href="style.css?v=20260808-pin2">
+  <link rel="stylesheet" href="style.css?v=20260809-ai2">
 </head>
 <body>
   <div id="app"></div>
@@ -31,6 +31,13 @@
       <label>网址<input name="link" type="url" placeholder="https://example.com" required autofocus></label>
       <label>标题<input name="title" placeholder="可选"></label>
       <label>收藏夹<select name="collectionId"></select></label>
+      <label>备注<textarea name="note" rows="3" placeholder="可选"></textarea></label>
+      <input name="tags" type="hidden" value="[]">
+      <section class="bookmark-recommendations" data-recommendations hidden aria-live="polite">
+        <div class="bookmark-recommendations-header"><strong>推荐</strong><span data-recommendation-status></span></div>
+        <div data-recommendation-body></div>
+        <div class="bookmark-recommendation-actions"><button type="button" data-recommendation-ai hidden>生成 AI 建议</button><button type="button" class="primary" data-recommendation-apply hidden>应用建议</button></div>
+      </section>
       <menu><button value="cancel" formnovalidate>取消</button><button class="primary" value="create">添加</button></menu>
     </form>
   </dialog>
@@ -80,6 +87,12 @@
             </div>
             <div id="edit-tag-menu" class="edit-tag-menu" role="listbox" hidden></div>
           </div>
+
+          <section class="bookmark-recommendations" data-recommendations hidden aria-live="polite">
+            <div class="bookmark-recommendations-header"><strong>推荐</strong><span data-recommendation-status></span></div>
+            <div data-recommendation-body></div>
+            <div class="bookmark-recommendation-actions"><button type="button" data-recommendation-ai hidden>生成 AI 建议</button><button type="button" class="primary" data-recommendation-apply hidden>应用建议</button></div>
+          </section>
 
           <label class="edit-field-label" for="edit-link">URL</label>
           <div class="edit-field"><textarea id="edit-link" name="link" rows="1" type="url" placeholder="https://" required></textarea></div>
@@ -187,6 +200,6 @@
     </div>
   </dialog>
 
-  <script type="module" src="library.js?v=20260808-pin2"></script>
+  <script type="module" src="library.js?v=20260809-ai2"></script>
 </body>
 </html>

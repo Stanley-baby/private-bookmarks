@@ -1,4 +1,4 @@
-import { automaticBackupRetention, createApi, createCloudBackup, deleteCloudBackup } from "./src/core.js";
+import { AI_DEFAULT_MODEL, automaticBackupRetention, createApi, createCloudBackup, deleteCloudBackup } from "./src/core.js";
 import { D1Store } from "./src/d1-store.js";
 import { runHealthChecks } from "./src/health.js";
 
@@ -9,6 +9,8 @@ function app(env) {
     store,
     mediaBucket: env.COVERS,
     backupBucket: env.BACKUPS || env.COVERS,
+    ai: env.AI,
+    aiModel: env.AI_MODEL || AI_DEFAULT_MODEL,
     oauth: {
       encryptionKey: env.OAUTH_ENCRYPTION_KEY || env.ACCESS_KEY,
       dropbox: { clientId: env.DROPBOX_CLIENT_ID, clientSecret: env.DROPBOX_CLIENT_SECRET, redirectUri: env.DROPBOX_REDIRECT_URI },

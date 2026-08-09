@@ -28,6 +28,10 @@ The GitHub Actions deploy workflow reads these optional repository Secrets and s
 
 The Worker URL and access key are entered once in each browser installation. The key is stored only in that browser's local extension storage.
 
+Bookmark recommendations can be enabled in **Settings → App**. “Recommended collections and tags” matches the new bookmark against existing local bookmark metadata; it does not upload data. “AI suggested tags and note” always shows editable suggestions before they are applied. The AI settings support several curated Cloudflare Workers AI models and external OpenAI-compatible APIs (`/v1` base URL plus model and API key). Cloudflare models marked “free quota” still follow the account's daily quota and are not unlimited free service. External API keys are encrypted in D1 and are never returned to the browser.
+
+The current system Prompt is shown as the default in the AI settings. You can edit it and save it, or restore the default; custom Prompts keep a fixed JSON output contract so recommendation parsing remains safe. The static UI server (`npm run dev:ui`) cannot run the AI endpoint; use `npx wrangler dev --remote` for local Worker debugging, and keep the `[ai]` binding in `wrangler.toml` enabled. Set `OAUTH_ENCRYPTION_KEY` to a separate random secret when possible; it is used to encrypt stored external AI keys.
+
 ## Load the extension
 
 Open `chrome://extensions` or `edge://extensions`, enable Developer mode, choose **Load unpacked**, then select `extension/`.

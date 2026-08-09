@@ -6,6 +6,7 @@ class MemoryStore {
   bookmarks = new Map();
   collections = new Map([["unsorted", { id: "unsorted", name: "Unsorted", parentId: null, revision: 1 }]]);
   nextId = 1;
+  preferences = { theme: "auto", revision: 0 };
 
   async createBookmark(bookmark) {
     const saved = { ...bookmark, id: String(this.nextId++), revision: 1 };
@@ -59,8 +60,21 @@ class MemoryStore {
     return saved;
   }
 
-  async getPreferences() {
-    return { theme: "auto", revision: 0 };
+  async getPreferences({ includeSecrets = false } = {}) {
+    const value = { ...this.preferences };
+    if (!includeSecrets) {
+      value.aiApiKeyConfigured = Boolean(value.aiApiKeyEncrypted);
+      delete value.aiApiKeyEncrypted;
+    }
+    return value;
+  }
+
+  async updatePreferences(expectedRevision, preferences) {
+    if (expectedRevision !== this.preferences.revision) return { conflict: await this.getPreferences() };
+    const value = { ...this.preferences, ...preferences };
+    delete value.revision;
+    this.preferences = { ...value, revision: expectedRevision + 1 };
+    return { preferences: await this.getPreferences() };
   }
 
   async batchBookmarks(items, action) {
@@ -113,6 +127,84 @@ test("canonicalizeUrl removes tracking parameters and normalizes path/query orde
     canonicalizeUrl("https://user:pass@example.com/articles/?z=2&utm_source=newsletter&a=1#:~:text=clip"),
     "https://example.com/articles?a=1&z=2",
   );
+});
+
+test("AI recommendations return confirmed metadata without exposing provider details", async () => {
+  let prompt;
+  const api = createApi({
+    key: "test-key",
+    store: new MemoryStore(),
+    ai: {
+      async run(model, input) {
+        assert.equal(model, "test-model");
+        prompt = input.messages[1].content;
+        return { response: '{"collectionId":"frontend","tags":["React","performance"],"note":"关于 React 性能优化的参考资料。"}' };
+      },
+    },
+    aiModel: "test-model",
+  });
+  const response = await api.fetch(request("/v1/ai/recommendations", {
+    method: "POST",
+    body: JSON.stringify({
+      link: "https://example.com/react?utm_source=test",
+      title: "React performance",
+      collections: [{ id: "frontend", name: "前端" }],
+      context: [{ title: "React rendering", collectionId: "frontend", tags: ["React"] }],
+    }),
+  }));
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    collectionId: "frontend",
+    tags: ["React", "performance"],
+    note: "关于 React 性能优化的参考资料。",
+  });
+  assert.match(prompt, /React performance/);
+});
+
+test("AI recommendations report an unavailable optional binding", async () => {
+  const api = createApi({ key: "test-key", store: new MemoryStore() });
+  const response = await api.fetch(request("/v1/ai/recommendations", { method: "POST", body: JSON.stringify({ link: "https://example.com" }) }));
+  assert.equal(response.status, 501);
+  assert.equal((await response.json()).code, "ai_not_configured");
+});
+
+test("AI settings select an external provider, encrypt its key, and keep the default prompt contract", async () => {
+  let externalRequest;
+  const store = new MemoryStore();
+  const api = createApi({
+    key: "test-key",
+    store,
+    aiModel: "test-model",
+    fetchImpl: async (url, init) => {
+      externalRequest = { url, init };
+      return new Response(JSON.stringify({ choices: [{ message: { content: '{"collectionId":null,"tags":["reading"],"note":"待阅读。"}' } }] }), { status: 200, headers: { "content-type": "application/json" } });
+    },
+  });
+  const saved = await api.fetch(request("/v1/ai/settings", {
+    method: "PATCH",
+    body: JSON.stringify({ revision: 0, settings: { provider: "openai", baseUrl: "https://api.example/v1", externalModel: "demo-model", prompt: "请用简洁中文整理。" }, apiKey: "secret-key" }),
+  }));
+
+  assert.equal(saved.status, 200);
+  const savedBody = await saved.json();
+  assert.equal(savedBody.ai.provider, "openai");
+  assert.equal(savedBody.ai.apiKeyConfigured, true);
+  assert.equal(savedBody.preferences.aiApiKeyEncrypted, undefined);
+  assert.notEqual(store.preferences.aiApiKeyEncrypted, "secret-key");
+
+  const response = await api.fetch(request("/v1/ai/recommendations", {
+    method: "POST",
+    body: JSON.stringify({ link: "https://example.com/read", title: "Reading list" }),
+  }));
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { collectionId: null, tags: ["reading"], note: "待阅读。" });
+  assert.equal(externalRequest.url, "https://api.example/v1/chat/completions");
+  assert.equal(externalRequest.init.headers.authorization, "Bearer secret-key");
+  const payload = JSON.parse(externalRequest.init.body);
+  assert.equal(payload.model, "demo-model");
+  assert.match(payload.messages[0].content, /请用简洁中文整理/);
+  assert.match(payload.messages[0].content, /只返回 JSON/);
 });
 
 test("bookmark API creates a bookmark and rejects stale updates", async () => {
