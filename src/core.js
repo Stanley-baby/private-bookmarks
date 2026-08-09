@@ -5,6 +5,7 @@ const MAX_TEXT = 10_000;
 const MAX_MEDIA_BYTES = 5 * 1024 * 1024;
 const MAX_BACKUP_MEDIA_FILES = 100;
 const MAX_BACKUP_MEDIA_BYTES = 100 * 1024 * 1024;
+const MAX_REMOTE_BACKUP_BYTES = MAX_BACKUP_MEDIA_BYTES + 10 * 1024 * 1024;
 // Keep imports small enough for one D1 batch and predictable request sizes.
 export const MAX_IMPORT_ITEMS = 100;
 const MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp", "image/avif", "image/svg+xml"]);
@@ -21,11 +22,12 @@ const ATTACHMENT_TYPES = new Set([
 const BOOKMARK_TYPES = new Set(["link", "article", "image", "video", "audio", "document"]);
 const CLOUD_BACKUP_FORMAT = "private-bookmarks/cloud-backup/v1";
 const BACKUP_FILES = ["library.json", "manifest.json"];
+const BACKUP_ENCRYPTION_MAGIC = new TextEncoder().encode("PBKENC01");
 const CLOUD_PROVIDERS = Object.freeze({
   dropbox: {
     authEndpoint: "https://www.dropbox.com/oauth2/authorize",
     tokenEndpoint: "https://api.dropboxapi.com/oauth2/token",
-    scopes: "account_info.read files.content.write",
+    scopes: "account_info.read files.content.read files.content.write files.metadata.read files.metadata.write",
   },
   google: {
     authEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
@@ -244,12 +246,13 @@ async function removeBackupObjects(bucket, id, mediaIds = []) {
   for (const key of keys) await bucket.delete(key);
 }
 
-async function copyBackupMedia({ bucket, backupId, mediaIds }) {
+async function copyBackupMedia({ bucket, mediaBucket = bucket, backupId, mediaIds }) {
   const media = [];
   let totalBytes = 0;
+  const sourceBucket = mediaBucket || bucket;
   for (const id of mediaIds) {
     if (media.length >= MAX_BACKUP_MEDIA_FILES) throw backupInvalid("Too many media files in one backup", "media_backup_too_large");
-    const object = await bucket.get(mediaKey(id));
+    const object = await sourceBucket.get(mediaKey(id));
     if (!object) throw backupInvalid(`Media ${id} is missing`, "media_backup_missing");
     const bytes = await objectBytes(object);
     totalBytes += bytes.byteLength;
@@ -266,7 +269,7 @@ async function copyBackupMedia({ bucket, backupId, mediaIds }) {
   return media;
 }
 
-export async function createCloudBackup({ store, bucket, kind = "manual", includeMedia = false } = {}) {
+export async function createCloudBackup({ store, bucket, mediaBucket = bucket, kind = "manual", includeMedia = false } = {}) {
   if (!store || !bucket) throw backupInvalid("Backup storage is not configured", "not_available");
   const backup = await store.exportData();
   if (backup?.format !== "private-bookmarks/v1") throw backupInvalid("Export is not a Private Bookmarks backup");
@@ -290,7 +293,7 @@ export async function createCloudBackup({ store, bucket, kind = "manual", includ
   try {
     await bucket.put(backupKey(id, "library.json"), libraryBytes, { httpMetadata: { contentType: "application/json", cacheControl: "private, no-store" } });
     if (includeMedia) {
-      media = await copyBackupMedia({ bucket, backupId: id, mediaIds });
+      media = await copyBackupMedia({ bucket, mediaBucket, backupId: id, mediaIds });
       manifest.media = media;
       manifest.mediaCount = media.length;
       for (const item of media) manifest.files[item.key] = { bytes: item.bytes, sha256: item.sha256, contentType: item.contentType };
@@ -342,12 +345,28 @@ async function readBackupMedia(bucket, id, item) {
   return bytes;
 }
 
-async function restoreBackupMedia(bucket, id, manifest) {
+async function restoreBackupMedia(bucket, id, manifest, mediaBucket = bucket) {
   const media = mediaManifestEntries(manifest);
   for (const item of media) {
     const bytes = await readBackupMedia(bucket, id, item);
-    await bucket.put(mediaKey(item.id), bytes, { httpMetadata: { contentType: item.contentType || "application/octet-stream", cacheControl: "public, max-age=31536000, immutable" } });
+    await mediaBucket.put(mediaKey(item.id), bytes, { httpMetadata: { contentType: item.contentType || "application/octet-stream", cacheControl: "public, max-age=31536000, immutable" } });
   }
+}
+
+async function restoreArchiveMedia(bucket, entries, manifest) {
+  const media = mediaManifestEntries(manifest);
+  if (media.length && !bucket) throw backupInvalid("Media storage is not configured", "not_available");
+  for (const item of media) {
+    const entry = entries.find((candidate) => candidate.name === item.key);
+    if (!entry) throw backupInvalid("Cloud backup media is missing", "cloud_backup_invalid");
+    await bucket.put(mediaKey(item.id), entry.bytes, { httpMetadata: { contentType: item.contentType || "application/octet-stream", cacheControl: "public, max-age=31536000, immutable" } });
+  }
+  return media.map((item) => item.id);
+}
+
+async function removeMediaObjects(bucket, ids) {
+  if (!bucket?.delete) return;
+  for (const id of ids) await bucket.delete(mediaKey(id));
 }
 
 function concatBytes(chunks) {
@@ -416,6 +435,85 @@ async function backupArchiveBytes({ bucket, id, backup, manifest, libraryBytes, 
   ];
   for (const item of mediaManifestEntries(manifest)) entries.push({ name: item.key, bytes: await readBackupMedia(bucket, id, item) });
   return zipArchive(entries);
+}
+
+async function backupCipherKey(secret) {
+  if (!secret) throw backupInvalid("Cloud backup encryption is not configured", "cloud_encryption_unavailable");
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret));
+  return crypto.subtle.importKey("raw", digest, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
+}
+
+async function encryptBackupArchive(bytes, secret) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await backupCipherKey(secret), bytes));
+  return concatBytes([BACKUP_ENCRYPTION_MAGIC, iv, ciphertext]);
+}
+
+async function decryptBackupArchive(bytes, secret) {
+  const value = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  const hasHeader = value.length >= BACKUP_ENCRYPTION_MAGIC.length
+    && BACKUP_ENCRYPTION_MAGIC.every((byte, index) => value[index] === byte);
+  if (!hasHeader) return value;
+  try {
+    const ivStart = BACKUP_ENCRYPTION_MAGIC.length;
+    const iv = value.slice(ivStart, ivStart + 12);
+    const ciphertext = value.slice(ivStart + 12);
+    return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv }, await backupCipherKey(secret), ciphertext));
+  } catch {
+    throw backupInvalid("Cloud backup decryption failed", "cloud_backup_decrypt_failed");
+  }
+}
+
+function zipEntries(bytes) {
+  const value = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  const entries = [];
+  let offset = 0;
+  while (offset + 30 <= value.byteLength) {
+    const view = new DataView(value.buffer, value.byteOffset + offset, value.byteLength - offset);
+    const signature = view.getUint32(0, true);
+    if (signature === 0x02014b50 || signature === 0x06054b50) break;
+    if (signature !== 0x04034b50) throw backupInvalid("Cloud backup ZIP is invalid", "cloud_backup_invalid");
+    const flags = view.getUint16(6, true);
+    const method = view.getUint16(8, true);
+    const compressedBytes = view.getUint32(18, true);
+    const uncompressedBytes = view.getUint32(22, true);
+    const nameBytes = view.getUint16(26, true);
+    const extraBytes = view.getUint16(28, true);
+    if ((flags & 0x08) !== 0 || method !== 0 || compressedBytes !== uncompressedBytes) throw backupInvalid("Cloud backup ZIP uses an unsupported compression mode", "cloud_backup_invalid");
+    const nameStart = offset + 30;
+    const dataStart = nameStart + nameBytes + extraBytes;
+    const dataEnd = dataStart + compressedBytes;
+    if (dataEnd > value.byteLength) throw backupInvalid("Cloud backup ZIP is truncated", "cloud_backup_invalid");
+    const name = new TextDecoder().decode(value.slice(nameStart, dataStart - extraBytes));
+    if (!name || name.includes("..") || name.startsWith("/")) throw backupInvalid("Cloud backup ZIP contains an invalid path", "cloud_backup_invalid");
+    entries.push({ name, bytes: value.slice(dataStart, dataEnd) });
+    offset = dataEnd;
+  }
+  if (!entries.length) throw backupInvalid("Cloud backup ZIP is empty", "cloud_backup_invalid");
+  return entries;
+}
+
+async function validateArchiveBackup(entries) {
+  const library = entries.find((item) => item.name === "library.json");
+  const manifestEntry = entries.find((item) => item.name === "manifest.json");
+  if (!library || !manifestEntry) throw backupInvalid("Cloud backup archive is incomplete", "cloud_backup_invalid");
+  let backup;
+  let manifest;
+  try {
+    backup = JSON.parse(new TextDecoder().decode(library.bytes));
+    manifest = JSON.parse(new TextDecoder().decode(manifestEntry.bytes));
+  } catch {
+    throw backupInvalid("Cloud backup JSON is invalid", "cloud_backup_invalid");
+  }
+  if (backup?.format !== "private-bookmarks/v1" || manifest?.format !== CLOUD_BACKUP_FORMAT || !Array.isArray(manifest.media)) throw backupInvalid("Cloud backup format is invalid", "cloud_backup_invalid");
+  if (manifest.files?.["library.json"]?.sha256 !== await hexDigest(library.bytes) || Number(manifest.files?.["library.json"]?.bytes) !== library.bytes.byteLength) throw backupInvalid("Cloud backup library checksum mismatch", "cloud_backup_checksum_mismatch");
+  const media = mediaManifestEntries(manifest);
+  if (media.length !== manifest.media.length || media.length !== Number(manifest.mediaCount || 0) || (manifest.includeMedia === true && manifest.mediaCopied !== true) || (manifest.includeMedia !== true && media.length)) throw backupInvalid("Cloud backup media manifest is invalid", "cloud_backup_invalid");
+  for (const item of media) {
+    const entry = entries.find((candidate) => candidate.name === item.key);
+    if (!entry || entry.bytes.byteLength !== Number(item.bytes) || await hexDigest(entry.bytes) !== item.sha256) throw backupInvalid("Cloud backup media checksum mismatch", "cloud_backup_checksum_mismatch");
+  }
+  return { backup, manifest, entries, libraryBytes: library.bytes, manifestBytes: manifestEntry.bytes };
 }
 
 export async function deleteCloudBackup({ store, bucket, id } = {}) {
@@ -541,6 +639,150 @@ async function responsePayload(response) {
   try { return text ? JSON.parse(text) : {}; } catch { return { message: text }; }
 }
 
+async function responseBytes(response, limit = MAX_REMOTE_BACKUP_BYTES) {
+  const contentLength = Number(response.headers?.get?.("content-length"));
+  if (Number.isFinite(contentLength) && contentLength > limit) throw backupInvalid("Cloud backup is too large", "cloud_backup_too_large");
+  if (!response.body?.getReader) {
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.byteLength > limit) throw backupInvalid("Cloud backup is too large", "cloud_backup_too_large");
+    return bytes;
+  }
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const chunk = value instanceof Uint8Array ? value : new Uint8Array(value);
+    total += chunk.byteLength;
+    if (total > limit) {
+      await reader.cancel();
+      throw backupInvalid("Cloud backup is too large", "cloud_backup_too_large");
+    }
+    chunks.push(chunk);
+  }
+  return concatBytes(chunks);
+}
+
+function parseCloudBody(bytes) {
+  const text = new TextDecoder().decode(bytes);
+  try { return text ? JSON.parse(text) : {}; } catch { return { message: text }; }
+}
+
+function cloudErrorMessage(payload, fallback) {
+  return payload?.error?.message || payload?.error_description || payload?.message || payload?.error_summary || payload?.error || fallback;
+}
+
+async function cloudRequest(fetchImpl, url, init = {}, { binary = false, errorCode = "cloud_request_failed" } = {}) {
+  let response;
+  try {
+    response = await fetchImpl(url, init);
+  } catch (reason) {
+    throw backupInvalid(reason?.message || "Cloud request failed", errorCode);
+  }
+  const bytes = await responseBytes(response);
+  if (!response.ok) {
+    const payload = parseCloudBody(bytes);
+    const reason = backupInvalid(cloudErrorMessage(payload, "Cloud request failed"), errorCode);
+    reason.status = response.status;
+    reason.payload = payload;
+    throw reason;
+  }
+  return binary ? bytes : parseCloudBody(bytes);
+}
+
+function remoteBackupInfo(provider, file, fallbackName = "", fallbackSize = 0) {
+  const name = String(file?.name || fallbackName);
+  if (!/^private-bookmarks-/i.test(name) || !/\.(?:zip|pbk)$/i.test(name)) return null;
+  const id = String(file?.id || file?.path_display || file?.path_lower || (provider === "dropbox" ? `/Private Bookmarks/${name}` : ""));
+  if (!id) return null;
+  const size = Number(file?.size ?? fallbackSize);
+  return {
+    id,
+    name,
+    size: Number.isFinite(size) ? size : 0,
+    createdAt: file?.server_modified || file?.createdTime || file?.createdDateTime || file?.lastModifiedDateTime || "",
+    encrypted: /\.pbk$/i.test(name),
+  };
+}
+
+function sortRemoteBackups(items) {
+  return items.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)) || b.name.localeCompare(a.name));
+}
+
+async function listCloudBackups({ provider, accessToken, fetchImpl }) {
+  const backups = [];
+  if (provider === "dropbox") {
+    let payload;
+    try {
+      payload = await cloudRequest(fetchImpl, "https://api.dropboxapi.com/2/files/list_folder", { method: "POST", headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" }, body: JSON.stringify({ path: "/Private Bookmarks", recursive: false, include_deleted: false }) }, { errorCode: "cloud_list_failed" });
+    } catch (reason) {
+      if (reason.status === 409 && reason.payload?.error?.[".tag"] === "path" && reason.payload.error.path?.[".tag"] === "not_found") return [];
+      throw reason;
+    }
+    while (payload) {
+      for (const file of payload.entries || []) {
+        if (file?.[".tag"] === "file") {
+          const item = remoteBackupInfo(provider, file);
+          if (item) backups.push(item);
+        }
+      }
+      if (!payload.has_more || !payload.cursor) break;
+      payload = await cloudRequest(fetchImpl, "https://api.dropboxapi.com/2/files/list_folder/continue", { method: "POST", headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" }, body: JSON.stringify({ cursor: payload.cursor }) }, { errorCode: "cloud_list_failed" });
+    }
+    return sortRemoteBackups(backups);
+  }
+  if (provider === "google") {
+    let pageToken = "";
+    do {
+      const url = new URL("https://www.googleapis.com/drive/v3/files");
+      url.searchParams.set("q", "trashed = false and name contains 'private-bookmarks-'");
+      url.searchParams.set("spaces", "drive");
+      url.searchParams.set("pageSize", "1000");
+      url.searchParams.set("fields", "files(id,name,size,createdTime,modifiedTime,mimeType),nextPageToken");
+      if (pageToken) url.searchParams.set("pageToken", pageToken);
+      const payload = await cloudRequest(fetchImpl, url.toString(), { headers: { authorization: `Bearer ${accessToken}` } }, { errorCode: "cloud_list_failed" });
+      for (const file of payload.files || []) {
+        const item = remoteBackupInfo(provider, file);
+        if (item) backups.push(item);
+      }
+      pageToken = payload.nextPageToken || "";
+    } while (pageToken);
+    return sortRemoteBackups(backups);
+  }
+  let next = "https://graph.microsoft.com/v1.0/me/drive/special/approot:/Private%20Bookmarks:/children?$select=id,name,size,createdDateTime,lastModifiedDateTime,file&$top=200";
+  while (next) {
+    const payload = await cloudRequest(fetchImpl, next, { headers: { authorization: `Bearer ${accessToken}` } }, { errorCode: "cloud_list_failed" });
+    for (const file of payload.value || []) {
+      if (!file?.file) continue;
+      const item = remoteBackupInfo(provider, file);
+      if (item) backups.push(item);
+    }
+    next = payload["@odata.nextLink"] || "";
+  }
+  return sortRemoteBackups(backups);
+}
+
+async function downloadCloudArchive({ provider, accessToken, fileId, fetchImpl }) {
+  if (provider === "dropbox") {
+    return cloudRequest(fetchImpl, "https://content.dropboxapi.com/2/files/download", { method: "POST", headers: { authorization: `Bearer ${accessToken}`, "dropbox-api-arg": JSON.stringify({ path: fileId }) } }, { binary: true, errorCode: "cloud_download_failed" });
+  }
+  if (provider === "google") {
+    return cloudRequest(fetchImpl, `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`, { headers: { authorization: `Bearer ${accessToken}` } }, { binary: true, errorCode: "cloud_download_failed" });
+  }
+  return cloudRequest(fetchImpl, `https://graph.microsoft.com/v1.0/me/drive/items/${encodeURIComponent(fileId)}/content`, { headers: { authorization: `Bearer ${accessToken}` } }, { binary: true, errorCode: "cloud_download_failed" });
+}
+
+async function deleteCloudRemote({ provider, accessToken, fileId, fetchImpl }) {
+  if (provider === "dropbox") {
+    return cloudRequest(fetchImpl, "https://api.dropboxapi.com/2/files/delete_v2", { method: "POST", headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" }, body: JSON.stringify({ path: fileId }) }, { errorCode: "cloud_delete_failed" });
+  }
+  if (provider === "google") {
+    return cloudRequest(fetchImpl, `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}`, { method: "DELETE", headers: { authorization: `Bearer ${accessToken}` } }, { errorCode: "cloud_delete_failed" });
+  }
+  return cloudRequest(fetchImpl, `https://graph.microsoft.com/v1.0/me/drive/items/${encodeURIComponent(fileId)}`, { method: "DELETE", headers: { authorization: `Bearer ${accessToken}` } }, { errorCode: "cloud_delete_failed" });
+}
+
 async function exchangeOAuthCode({ provider, config, code, redirectUri, fetchImpl }) {
   const body = new URLSearchParams({ code, client_id: config.clientId, client_secret: config.clientSecret, redirect_uri: redirectUri, grant_type: "authorization_code" });
   const response = await fetchImpl(config.tokenEndpoint, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body });
@@ -591,29 +833,49 @@ async function cloudAccessToken({ store, connection, config, secret, fetchImpl }
   return payload.access_token;
 }
 
-function multipartUploadBody(metadata, bytes, boundary) {
+function multipartUploadBody(metadata, bytes, boundary, contentType = "application/octet-stream") {
   const encoder = new TextEncoder();
   return concatBytes([
-    encoder.encode(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n--${boundary}\r\nContent-Type: application/zip\r\n\r\n`),
+    encoder.encode(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n--${boundary}\r\nContent-Type: ${contentType}\r\n\r\n`),
     bytes,
     encoder.encode(`\r\n--${boundary}--\r\n`),
   ]);
 }
 
 async function uploadCloudArchive({ provider, accessToken, name, bytes, fetchImpl }) {
-  let response;
   if (provider === "dropbox") {
-    response = await fetchImpl("https://content.dropboxapi.com/2/files/upload", { method: "POST", headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/octet-stream", "dropbox-api-arg": JSON.stringify({ path: `/Private Bookmarks/${name}`, mode: "add", autorename: true, mute: true }) }, body: bytes });
-  } else if (provider === "google") {
-    const boundary = `private-bookmarks-${crypto.randomUUID()}`;
-    response = await fetchImpl("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", { method: "POST", headers: { authorization: `Bearer ${accessToken}`, "content-type": `multipart/related; boundary=${boundary}` }, body: multipartUploadBody({ name, mimeType: "application/zip" }, bytes, boundary) });
-  } else {
-    const path = encodeURIComponent(name);
-    response = await fetchImpl(`https://graph.microsoft.com/v1.0/me/drive/special/approot:/Private%20Bookmarks/${path}:/content`, { method: "PUT", headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/zip" }, body: bytes });
+    return cloudRequest(fetchImpl, "https://content.dropboxapi.com/2/files/upload", { method: "POST", headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/octet-stream", "dropbox-api-arg": JSON.stringify({ path: `/Private Bookmarks/${name}`, mode: "add", autorename: true, mute: true }) }, body: bytes }, { errorCode: "cloud_upload_failed" });
   }
-  const payload = await responsePayload(response);
-  if (!response.ok) throw backupInvalid(payload.error?.message || payload.error_description || payload.message || "Cloud upload failed", "cloud_upload_failed");
-  return payload;
+  if (provider === "google") {
+    const boundary = `private-bookmarks-${crypto.randomUUID()}`;
+    return cloudRequest(fetchImpl, "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", { method: "POST", headers: { authorization: `Bearer ${accessToken}`, "content-type": `multipart/related; boundary=${boundary}` }, body: multipartUploadBody({ name, mimeType: "application/octet-stream" }, bytes, boundary) }, { errorCode: "cloud_upload_failed" });
+  }
+  {
+    const path = encodeURIComponent(name);
+    return cloudRequest(fetchImpl, `https://graph.microsoft.com/v1.0/me/drive/special/approot:/Private%20Bookmarks/${path}:/content`, { method: "PUT", headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/octet-stream" }, body: bytes }, { errorCode: "cloud_upload_failed" });
+  }
+}
+
+function uploadedCloudInfo(provider, payload, name, size) {
+  const remote = remoteBackupInfo(provider, payload, name, size);
+  if (!remote?.id) throw backupInvalid("Cloud upload response is invalid", "cloud_upload_failed");
+  return remote;
+}
+
+async function connectedCloudAccess({ store, provider, config, secret, fetchImpl }) {
+  if (!config) throw backupInvalid(`${provider} OAuth is not configured`, "oauth_not_configured");
+  if (!store.getCloudConnection) throw backupInvalid("Cloud OAuth storage is not configured", "oauth_not_available");
+  const connection = await store.getCloudConnection(provider);
+  if (!connection) throw backupInvalid(`${provider} is not connected`, "oauth_not_connected");
+  return { connection, accessToken: await cloudAccessToken({ store, connection, config, secret, fetchImpl }) };
+}
+
+async function remoteArchiveBytes({ provider, accessToken, fileId, fetchImpl, secret }) {
+  const encrypted = await downloadCloudArchive({ provider, accessToken, fileId, fetchImpl });
+  const archive = await decryptBackupArchive(encrypted, secret);
+  if (archive.byteLength > MAX_REMOTE_BACKUP_BYTES) throw backupInvalid("Cloud backup is too large", "cloud_backup_too_large");
+  zipEntries(archive);
+  return archive;
 }
 
 function callbackHtml(ok, message) {
@@ -713,29 +975,79 @@ export function createApi({ key, store, healthCheck, mediaBucket = null, backupB
             await store.deleteCloudConnection(provider);
             return json({ ok: true, provider });
           }
-          if (action === "backups" && request.method === "POST") {
+          if (action === "backups" && (request.method === "GET" || request.method === "POST")) {
             if (!config) return error(501, "oauth_not_configured", `${provider} OAuth is not configured`);
-            if (!cloudBucket) return error(501, "not_available", "Backup storage is not configured");
             if (!store.getCloudConnection) return error(501, "oauth_not_available", "Cloud OAuth storage is not configured");
-            const connection = await store.getCloudConnection(provider);
-            if (!connection) return error(409, "oauth_not_connected", `${provider} is not connected`);
+            const { accessToken } = await connectedCloudAccess({ store, provider, config, secret: oauthSecret, fetchImpl });
+            if (request.method === "GET") return json({ provider, backups: await listCloudBackups({ provider, accessToken, fetchImpl }) });
+            if (!cloudBucket) return error(501, "not_available", "Backup storage is not configured");
             const input = await readJson(request);
             if (!input || typeof input !== "object" || Array.isArray(input)) return error(400, "invalid_request", "Cloud backup options are required");
             if ("includeMedia" in input && typeof input.includeMedia !== "boolean") return error(400, "invalid_request", "includeMedia must be a boolean");
-            const created = await createCloudBackup({ store, bucket: cloudBucket, includeMedia: input.includeMedia === true });
+            const created = await createCloudBackup({ store, bucket: cloudBucket, mediaBucket: mediaBucket || cloudBucket, includeMedia: input.includeMedia === true });
             const archive = await backupArchiveBytes({ bucket: cloudBucket, id: created.metadata.id, backup: created.backup, manifest: created.manifest });
-            const accessToken = await cloudAccessToken({ store, connection, config, secret: oauthSecret, fetchImpl });
-            const name = `private-bookmarks-${created.metadata.id}.zip`;
-            const remote = await uploadCloudArchive({ provider, accessToken, name, bytes: archive, fetchImpl });
-            return json({ ok: true, provider, backupId: created.metadata.id, name, bytes: archive.byteLength, remote });
+            if (archive.byteLength > MAX_REMOTE_BACKUP_BYTES) throw backupInvalid("Cloud backup is too large", "cloud_backup_too_large");
+            const encryptedArchive = await encryptBackupArchive(archive, oauthSecret);
+            if (encryptedArchive.byteLength > MAX_REMOTE_BACKUP_BYTES) throw backupInvalid("Cloud backup is too large", "cloud_backup_too_large");
+            const name = `private-bookmarks-${created.metadata.id}.pbk`;
+            const remote = uploadedCloudInfo(provider, await uploadCloudArchive({ provider, accessToken, name, bytes: encryptedArchive, fetchImpl }), name, encryptedArchive.byteLength);
+            return json({ ok: true, provider, backupId: created.metadata.id, name, bytes: encryptedArchive.byteLength, encrypted: true, remote });
           }
+        }
+        const remoteCloudMatch = pathname.match(/^\/v1\/cloud\/([^/]+)\/backups\/([^/]+)(?:\/(download|restore))?$/i);
+        if (remoteCloudMatch) {
+          const provider = cloudProvider(remoteCloudMatch[1]);
+          if (!CLOUD_PROVIDERS[provider]) return error(404, "not_found", "Unsupported cloud provider");
+          const action = remoteCloudMatch[3] || "";
+          const config = cloudConfig(provider, oauth, request);
+          if (!config) return error(501, "oauth_not_configured", `${provider} OAuth is not configured`);
+          let fileId;
+          try { fileId = decodeURIComponent(remoteCloudMatch[2]); } catch { return error(400, "invalid_request", "Cloud backup id is invalid"); }
+          const { accessToken } = await connectedCloudAccess({ store, provider, config, secret: oauthSecret, fetchImpl });
+          if (request.method === "GET" && action === "download") {
+            const archive = await remoteArchiveBytes({ provider, accessToken, fileId, fetchImpl, secret: oauthSecret });
+            return new Response(archive, { headers: { "content-type": "application/zip", "content-length": String(archive.byteLength), "content-disposition": 'attachment; filename="private-bookmarks-backup.zip"', "cache-control": "no-store", "access-control-allow-origin": "*" } });
+          }
+          if (request.method === "DELETE" && !action) {
+            await deleteCloudRemote({ provider, accessToken, fileId, fetchImpl });
+            return json({ ok: true, provider, id: fileId });
+          }
+          if (request.method === "POST" && action === "restore") {
+            if (!cloudBucket) return error(501, "not_available", "Backup storage is not configured");
+            const input = await readJson(request);
+            if (input.confirm !== true) return error(400, "invalid_backup", "Restore requires explicit confirmation");
+            const archive = await remoteArchiveBytes({ provider, accessToken, fileId, fetchImpl, secret: oauthSecret });
+            const restoredArchive = await validateArchiveBackup(zipEntries(archive));
+            if (restoreStatementCount(restoredArchive.backup) > MAX_RESTORE_STATEMENTS) return error(413, "backup_too_large", `Backup is too large to restore in one D1 batch (maximum ${MAX_RESTORE_STATEMENTS} statements)`);
+            let preRestoreBackup;
+            try {
+              preRestoreBackup = await createCloudBackup({ store, bucket: cloudBucket, mediaBucket: mediaBucket || cloudBucket, kind: "pre_restore", includeMedia: restoredArchive.manifest.includeMedia === true });
+            } catch (reason) {
+              console.error(reason);
+              return error(503, "pre_restore_failed", "A pre-restore snapshot could not be created");
+            }
+            let restoredMediaIds = [];
+            try {
+              restoredMediaIds = await restoreArchiveMedia(mediaBucket || cloudBucket, restoredArchive.entries, restoredArchive.manifest);
+              await store.replaceData(restoredArchive.backup);
+            } catch (reason) {
+              try {
+                if (preRestoreBackup.manifest.includeMedia === true) await restoreBackupMedia(cloudBucket, preRestoreBackup.metadata.id, preRestoreBackup.manifest, mediaBucket || cloudBucket);
+              } catch (rollbackReason) { console.error(rollbackReason); }
+              const previousMediaIds = new Set(mediaManifestEntries(preRestoreBackup.manifest).map((item) => item.id));
+              try { await removeMediaObjects(mediaBucket || cloudBucket, restoredMediaIds.filter((id) => !previousMediaIds.has(id))); } catch (cleanupReason) { console.error(cleanupReason); }
+              throw reason;
+            }
+            return json({ ok: true, provider, id: fileId, preRestoreBackupId: preRestoreBackup.metadata.id });
+          }
+          return error(404, "not_found", "Cloud backup route not found");
         }
         if (request.method === "POST" && pathname === "/v1/backups") {
           if (!cloudBucket) return error(501, "not_available", "Backup storage is not configured");
           const input = await readJson(request);
           if (!input || typeof input !== "object" || Array.isArray(input)) return error(400, "invalid_request", "A backup options object is required");
           if ("includeMedia" in input && typeof input.includeMedia !== "boolean") return error(400, "invalid_request", "includeMedia must be a boolean");
-          const { metadata } = await createCloudBackup({ store, bucket: cloudBucket, includeMedia: input.includeMedia === true });
+          const { metadata } = await createCloudBackup({ store, bucket: cloudBucket, mediaBucket: mediaBucket || cloudBucket, includeMedia: input.includeMedia === true });
           return json(metadata, 201);
         }
         if (request.method === "GET" && pathname === "/v1/backups") {
@@ -778,17 +1090,17 @@ export function createApi({ key, store, healthCheck, mediaBucket = null, backupB
             if (restoreStatementCount(backup) > MAX_RESTORE_STATEMENTS) return error(413, "backup_too_large", `Backup is too large to restore in one D1 batch (maximum ${MAX_RESTORE_STATEMENTS} statements)`);
             let preRestoreBackup;
             try {
-              preRestoreBackup = await createCloudBackup({ store, bucket: cloudBucket, kind: "pre_restore", includeMedia: manifest.includeMedia === true });
+              preRestoreBackup = await createCloudBackup({ store, bucket: cloudBucket, mediaBucket: mediaBucket || cloudBucket, kind: "pre_restore", includeMedia: manifest.includeMedia === true });
             } catch (reason) {
               console.error(reason);
               return error(503, "pre_restore_failed", "A pre-restore snapshot could not be created");
             }
             try {
-              if (manifest.includeMedia === true) await restoreBackupMedia(cloudBucket, id, manifest);
+              if (manifest.includeMedia === true) await restoreBackupMedia(cloudBucket, id, manifest, mediaBucket || cloudBucket);
               await store.replaceData(backup);
             } catch (reason) {
               try {
-                if (preRestoreBackup.manifest.includeMedia === true) await restoreBackupMedia(cloudBucket, preRestoreBackup.metadata.id, preRestoreBackup.manifest);
+                if (preRestoreBackup.manifest.includeMedia === true) await restoreBackupMedia(cloudBucket, preRestoreBackup.metadata.id, preRestoreBackup.manifest, mediaBucket || cloudBucket);
               } catch (rollbackReason) { console.error(rollbackReason); }
               throw reason;
             }
@@ -980,11 +1292,12 @@ export function createApi({ key, store, healthCheck, mediaBucket = null, backupB
       } catch (reason) {
         if (reason?.code === "backup_not_found") return error(404, "not_found", reason.message);
         if (reason?.code === "backup_checksum_mismatch") return error(409, reason.code, reason.message);
-        if (reason?.code === "backup_too_large") return error(413, reason.code, reason.message);
+        if (reason?.code === "backup_too_large" || reason?.code === "cloud_backup_too_large") return error(413, reason.code, reason.message);
         if (reason?.code === "media_backup_missing" || reason?.code === "media_backup_too_large" || reason?.code === "oauth_refresh_failed" || reason?.code === "oauth_token_invalid") return error(409, reason.code, reason.message);
-        if (reason?.code === "oauth_not_available" || reason?.code === "oauth_not_configured") return error(501, reason.code, reason.message);
+        if (reason?.code === "cloud_backup_decrypt_failed" || reason?.code === "cloud_backup_invalid" || reason?.code === "cloud_backup_checksum_mismatch") return error(409, reason.code, reason.message);
+        if (reason?.code === "oauth_not_available" || reason?.code === "oauth_not_configured" || reason?.code === "cloud_encryption_unavailable" || reason?.code === "not_available") return error(501, reason.code, reason.message);
         if (reason?.code === "oauth_not_connected") return error(409, reason.code, reason.message);
-        if (reason?.code === "cloud_upload_failed") return error(502, reason.code, reason.message);
+        if (reason?.code === "cloud_upload_failed" || reason?.code === "cloud_list_failed" || reason?.code === "cloud_download_failed" || reason?.code === "cloud_delete_failed" || reason?.code === "cloud_request_failed") return error(502, reason.code, reason.message);
         if (reason instanceof TypeError) return error(400, reason.code || "invalid_request", reason.message);
         console.error(reason);
         return error(500, "internal_error", "Unexpected server error");
