@@ -1021,7 +1021,11 @@ dialog menu { display: flex; justify-content: end; gap: 6px; margin: 0; padding:
 .settings-backup-row-actions button.danger { color: var(--danger); }
 .settings-backup-empty, .settings-backup-muted { margin: 0; color: var(--muted); font-size: 13px; }
 .settings-cloud-options { display: grid; gap: 4px; margin-top: 8px; }
+.settings-cloud-provider { display: grid; gap: 4px; }
 .settings-cloud-option-row { display: flex; align-items: center; gap: 4px; }
+.settings-cloud-backups { margin: 0 0 8px 28px; }
+.settings-cloud-error { margin: 0; color: var(--danger); font-size: 13px; }
+.settings-cloud-error button { color: inherit; text-decoration: underline; }
 .settings-cloud-option { display: flex; width: 100%; min-height: 32px; align-items: center; gap: 8px; padding: 0 8px; color: var(--muted); text-align: left; }
 .settings-cloud-option .tree-svg { width: 20px; height: 20px; }
 .settings-cloud-option small { margin-left: auto; color: var(--muted); font-size: 11px; }
@@ -1044,4 +1048,7 @@ dialog menu { display: flex; justify-content: end; gap: 6px; margin: 0; padding:
   .settings-label { min-height: 24px; justify-content: flex-start; line-height: 24px; text-align: left; }
   .settings-separator { margin: 12px 0; }
   .settings-theme-picker { grid-template-columns: repeat(3, 64px); }
+  .settings-cloud-backups { margin-left: 0; }
+  .settings-cloud-backups .settings-backup-row { grid-template-columns: 20px minmax(0, 1fr); }
+  .settings-cloud-backups .settings-backup-row-actions { grid-column: 1 / -1; justify-content: flex-start; }
 }

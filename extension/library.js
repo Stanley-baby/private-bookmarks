@@ -82,7 +82,7 @@ const state = {
   searchMenuOpen: false, searchFilterGroup: null, sortMenuOpen: false, viewMenuOpen: false, themeMenuOpen: false, recentSearches: readSearchHistory(), groupMenuId: null, collectionMenuId: null, pickerCollectionMenuId: null, pickerGroupMenuId: null, inlineCollectionCreate: null, tagMenuOpen: false, tagItemMenu: null, collectionValueAction: null, collectionValueId: null, collectionSelection: null,
   selectionMoreOpen: false, selectionScreenshotWorking: false, sidebarOpen: false, accountMenuOpen: false, mediaUploadEnabled: false,
   settingsOpen: initialSettingsRoute, settingsSection: initialSettingsSection || "app", settingsMenu: null, settingsNeedsReload: false, settingsSavePromise: null, connectionInfo: null,
-  importPreview: readImportProgress(), importBusy: false, backups: readBackupHistory(), backupSource: "local", backupBusy: false, backupLoading: false, backupIncludeMedia: false, cloudConnections: [], cloudBusy: false, lock: { enabled: false, locked: false, autoLock: "15" },
+  importPreview: readImportProgress(), importBusy: false, backups: readBackupHistory(), backupSource: "local", backupBusy: false, backupLoading: false, backupIncludeMedia: false, cloudConnections: [], cloudBackups: { dropbox: [], google: [], onedrive: [] }, cloudBackupLoading: {}, cloudBackupErrors: {}, cloudBusy: false, lock: { enabled: false, locked: false, autoLock: "15" },
 };
 
 function setSettingsRoute(open, section = state.settingsSection || "app") {
@@ -1767,6 +1767,19 @@ function backupHistoryMarkup() {
   }).join("");
 }
 
+function cloudBackupHistoryMarkup(provider) {
+  if (state.cloudBackupLoading[provider]) return `<p class="settings-backup-empty">正在加载远程备份…</p>`;
+  const error = state.cloudBackupErrors[provider];
+  if (error) return `<p class="settings-cloud-error">远程备份加载失败：${escapeHtml(error.message || "请稍后重试")} <button type="button" data-cloud-refresh="${provider}">重试</button></p>`;
+  const backups = state.cloudBackups[provider] || [];
+  if (!backups.length) return `<p class="settings-backup-empty">没有远程备份</p>`;
+  const disabled = state.cloudBusy || state.backupBusy ? "disabled" : "";
+  return `<div class="settings-backup-list">${backups.map((item) => {
+    const details = [dateTimeLabel(item.createdAt), formatBackupSize(item.size), item.encrypted ? "加密" : "明文兼容"].filter(Boolean).join(" · ");
+    return `<div class="settings-backup-row"><span class="settings-backup-row-icon">${treeIcon(item.encrypted ? "backupReady" : "backup")}</span><span class="settings-backup-date"><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(details)}</small></span><span class="settings-backup-row-actions"><button type="button" data-cloud-backup-download="${escapeHtml(item.id)}" data-cloud-backup-provider="${provider}" ${disabled}>下载 ZIP</button><button type="button" data-cloud-backup-restore="${escapeHtml(item.id)}" data-cloud-backup-provider="${provider}" ${disabled}>恢复</button><button type="button" class="danger" data-cloud-backup-delete="${escapeHtml(item.id)}" data-cloud-backup-provider="${provider}" ${disabled}>删除</button></span></div>`;
+  }).join("")}</div>`;
+}
+
 function backupSettingsMarkup() {
   const disabled = state.backupBusy || state.backupLoading ? "disabled" : "";
   const cloudMessage = state.backupSource === "server"
@@ -1780,7 +1793,7 @@ function backupSettingsMarkup() {
     const item = state.cloudConnections.find((entry) => entry.provider === provider) || {};
     const status = !item.configured ? "待配置" : item.connected ? "上传备份" : "连接";
     const actionDisabled = disabled || state.cloudBusy || !item.configured ? "disabled" : "";
-    return `<div class="settings-cloud-option-row"><button type="button" class="settings-cloud-option" data-cloud-action="${provider}" ${actionDisabled} title="${item.connected ? "创建并上传备份" : item.configured ? "连接云盘" : "需要配置 OAuth 客户端凭据"}">${treeIcon(icon)}<span>${label}</span><small>${status}</small></button>${item.connected ? `<button type="button" class="settings-cloud-disconnect" data-cloud-disconnect="${provider}" ${disabled}>断开</button>` : ""}</div>`;
+    return `<div class="settings-cloud-provider"><div class="settings-cloud-option-row"><button type="button" class="settings-cloud-option" data-cloud-action="${provider}" ${actionDisabled} title="${item.connected ? "创建并上传备份" : item.configured ? "连接云盘" : "需要配置 OAuth 客户端凭据"}">${treeIcon(icon)}<span>${label}</span><small>${status}</small></button>${item.connected ? `<button type="button" class="settings-cloud-disconnect" data-cloud-disconnect="${provider}" ${disabled}>断开</button>` : ""}</div>${item.connected ? `<div class="settings-cloud-backups">${cloudBackupHistoryMarkup(provider)}</div>` : ""}</div>`;
   };
   return `<div class="settings-content settings-backup-content"><div class="settings-grid settings-backup-grid"><div class="settings-label">备份</div><div><div class="settings-backup-alert"><strong>永远不用担心数据丢失。创建服务端快照，保存收藏夹、书签、标签和高亮。</strong><p>${cloudMessage}</p></div><p class="settings-backup-muted settings-backup-media-note">勾选后会把本实例已上传的媒体文件一并复制到备份，外部网址媒体不会被下载。</p><label class="settings-backup-media-toggle"><input type="checkbox" data-backup-include-media ${state.backupIncludeMedia ? "checked" : ""} ${mediaDisabled}>包含已上传媒体文件</label><div class="settings-backup-actions"><button type="button" class="primary" data-backup-create ${disabled}>${treeIcon("add")}<span>${state.backupBusy ? "备份正在创建" : t("创建新的备份")}</span></button><button type="button" class="settings-outline-button" data-backup-download-current ${disabled}>${treeIcon("download")}<span>${t("下载完整备份")}</span></button><button type="button" class="settings-outline-button" data-backup-download-archive ${archiveDisabled} title="下载包含媒体文件的 ZIP 备份">${treeIcon("download")}<span>${t("下载上传文件")}</span></button><button type="button" class="settings-outline-button" data-backup-restore>${treeIcon("upload")}<span>${t("恢复备份")}</span></button></div><section class="settings-backup-section"><h2>${t("历史备份")}</h2><div class="settings-backup-list">${backupHistoryMarkup()}</div></section><section class="settings-backup-section settings-backup-cloud"><h2>${t("云备份")}</h2><p class="settings-backup-muted">${cloudMessage}</p><div class="settings-cloud-options">${cloudOption("dropbox", "Dropbox", "dropbox")}${cloudOption("google", "Google Drive", "gdrive")}${cloudOption("onedrive", "OneDrive", "onedrive")}</div></section></div></div></div>`;
 }
@@ -1819,6 +1832,35 @@ async function refreshCloudConnections({ silent = true } = {}) {
     if (!silent) throw error;
   }
   return state.cloudConnections;
+}
+
+async function refreshCloudBackups({ silent = true } = {}) {
+  const connected = new Set(state.cloudConnections.filter((item) => item.connected).map((item) => item.provider));
+  await Promise.all(["dropbox", "google", "onedrive"].map(async (provider) => {
+    if (!connected.has(provider)) {
+      state.cloudBackups[provider] = [];
+      delete state.cloudBackupErrors[provider];
+      return;
+    }
+    state.cloudBackupLoading[provider] = true;
+    try {
+      const response = await api(`/v1/cloud/${provider}/backups`);
+      if (!Array.isArray(response?.backups)) throw new TypeError("远程备份响应格式无效");
+      state.cloudBackups[provider] = response.backups;
+      delete state.cloudBackupErrors[provider];
+    } catch (error) {
+      state.cloudBackupErrors[provider] = error;
+      if (!silent) throw error;
+    } finally {
+      state.cloudBackupLoading[provider] = false;
+    }
+  }));
+  return state.cloudBackups;
+}
+
+async function refreshBackupSettings() {
+  await Promise.all([refreshBackups({ silent: true }), refreshCloudConnections()]);
+  await refreshCloudBackups({ silent: true });
 }
 
 function localBackupSnapshot(backup) {
@@ -1909,6 +1951,48 @@ async function deleteServerBackup(id) {
   }
 }
 
+async function downloadCloudBackup(provider, id) {
+  const config = await connection();
+  if (!config) throw new TypeError("请先连接私有实例");
+  const response = await fetch(`${config.endpoint}/v1/cloud/${provider}/backups/${encodeURIComponent(id)}/download`, { headers: { "x-private-bookmarks-key": config.key } });
+  if (!response.ok) {
+    let payload = {};
+    try { payload = await response.json(); } catch { /* keep generic error */ }
+    throw Object.assign(new Error(payload.message || "云备份下载失败"), { status: response.status, code: payload.code });
+  }
+  const url = URL.createObjectURL(await response.blob());
+  const link = Object.assign(document.createElement("a"), { href: url, download: "私有书签-云备份.zip" });
+  document.body.append(link); link.click();
+  window.setTimeout(() => { URL.revokeObjectURL(url); link.remove(); }, 1000);
+}
+
+async function restoreCloudBackup(provider, id) {
+  if (!window.confirm("要用此云端备份替换整个书签资料库吗？服务端会先创建当前快照。")) return;
+  state.cloudBusy = true;
+  renderSettings();
+  try {
+    await api(`/v1/cloud/${provider}/backups/${encodeURIComponent(id)}/restore`, { method: "POST", body: JSON.stringify({ confirm: true }) });
+    window.alert("云备份已恢复，页面将刷新。");
+    await load();
+  } finally {
+    state.cloudBusy = false;
+    renderSettings();
+  }
+}
+
+async function deleteCloudBackup(provider, id) {
+  if (!window.confirm("确定删除这份第三方云盘备份吗？删除后无法恢复。")) return;
+  state.cloudBusy = true;
+  renderSettings();
+  try {
+    await api(`/v1/cloud/${provider}/backups/${encodeURIComponent(id)}`, { method: "DELETE" });
+    await refreshCloudBackups({ silent: true });
+  } finally {
+    state.cloudBusy = false;
+    renderSettings();
+  }
+}
+
 async function cloudAction(provider) {
   if (state.cloudBusy) return;
   const item = state.cloudConnections.find((entry) => entry.provider === provider);
@@ -1926,6 +2010,7 @@ async function cloudAction(provider) {
   } finally {
     state.cloudBusy = false;
     await Promise.all([refreshCloudConnections(), refreshBackups({ silent: true })]);
+    await refreshCloudBackups({ silent: true });
     renderSettings();
   }
 }
@@ -1935,7 +2020,7 @@ async function disconnectCloud(provider) {
   state.cloudBusy = true;
   renderSettings();
   try { await api(`/v1/cloud/${provider}/disconnect`, { method: "POST", body: "{}" }); }
-  finally { state.cloudBusy = false; await refreshCloudConnections(); renderSettings(); }
+  finally { state.cloudBusy = false; await refreshCloudConnections(); await refreshCloudBackups({ silent: true }); renderSettings(); }
 }
 
 async function downloadCurrentBackup() {
@@ -2295,7 +2380,7 @@ function setSettingsSection(section) {
   const supported = SETTINGS_NAV.some(([id, , , enabled]) => id === section && enabled);
   if (supported && section !== state.settingsSection) {
     setSettingsRoute(true, section);
-    if (section === "backups") Promise.all([refreshBackups(), refreshCloudConnections()]).then(() => renderSettings()).catch(showError);
+    if (section === "backups") refreshBackupSettings().then(() => renderSettings()).catch(showError);
   }
 }
 
@@ -2367,6 +2452,10 @@ function bindSettings() {
     if (item) downloadServerBackupArchive(item).catch(showError);
   }));
   root.querySelectorAll("[data-backup-delete]").forEach((button) => button.addEventListener("click", () => deleteServerBackup(button.dataset.backupDelete).catch(showError)));
+  root.querySelectorAll("[data-cloud-refresh]").forEach((button) => button.addEventListener("click", () => refreshCloudBackups({ silent: true }).then(() => renderSettings()).catch(showError)));
+  root.querySelectorAll("[data-cloud-backup-download]").forEach((button) => button.addEventListener("click", () => downloadCloudBackup(button.dataset.cloudBackupProvider, button.dataset.cloudBackupDownload).catch(showError)));
+  root.querySelectorAll("[data-cloud-backup-restore]").forEach((button) => button.addEventListener("click", () => restoreCloudBackup(button.dataset.cloudBackupProvider, button.dataset.cloudBackupRestore).catch(showError)));
+  root.querySelectorAll("[data-cloud-backup-delete]").forEach((button) => button.addEventListener("click", () => deleteCloudBackup(button.dataset.cloudBackupProvider, button.dataset.cloudBackupDelete).catch(showError)));
   root.querySelectorAll("[data-cloud-action]").forEach((button) => button.addEventListener("click", () => cloudAction(button.dataset.cloudAction).catch(showError)));
   root.querySelectorAll("[data-cloud-disconnect]").forEach((button) => button.addEventListener("click", () => disconnectCloud(button.dataset.cloudDisconnect).catch(showError)));
   root.querySelector("[data-account-instance-name]")?.addEventListener("change", (event) => {
@@ -2460,7 +2549,7 @@ async function load() {
   state.tags = Array.isArray(tags) ? tags : [];
   state.favoriteCount = (allItems || items).filter((item) => item.favorite).length;
   state.trashedCollections = trashedCollections;
-  if (state.settingsOpen && state.settingsSection === "backups") await Promise.all([refreshBackups({ silent: true }), refreshCloudConnections()]);
+  if (state.settingsOpen && state.settingsSection === "backups") await refreshBackupSettings();
   applyTheme();
   render();
 }
@@ -4276,7 +4365,7 @@ window.addEventListener("popstate", () => {
   state.settingsMenu = null;
   if (state.settingsOpen) {
     render();
-    if (state.settingsSection === "backups") Promise.all([refreshBackups({ silent: true }), refreshCloudConnections()]).then(() => renderSettings()).catch(showError);
+    if (state.settingsSection === "backups") refreshBackupSettings().then(() => renderSettings()).catch(showError);
   }
   else if (state.settingsNeedsReload) {
     state.settingsNeedsReload = false;

@@ -269,11 +269,30 @@ test("cloud OAuth connects, reports status, and uploads a ZIP backup", async () 
   const store = new CloudMemoryStore();
   const bucket = new MemoryBucket();
   const calls = [];
-  const fetchImpl = async (url) => {
+  const remoteFiles = new Map();
+  let uploadedBytes;
+  const fetchImpl = async (url, init = {}) => {
     calls.push(String(url));
     if (String(url).includes("oauth2/token")) return Response.json({ access_token: "access", refresh_token: "refresh", expires_in: 3600, scope: "files" });
     if (String(url).includes("get_current_account")) return Response.json({ account_id: "account", name: { display_name: "Tester" }, email: "tester@example.com" });
-    if (String(url).includes("files/upload")) return Response.json({ id: "remote" });
+    if (String(url).includes("files/upload")) {
+      uploadedBytes = new Uint8Array(init.body);
+      const name = JSON.parse(init.headers["dropbox-api-arg"]).path.split("/").pop();
+      remoteFiles.set("remote", { id: "remote", name, size: uploadedBytes.byteLength, server_modified: "2026-08-08T01:00:00.000Z", bytes: uploadedBytes });
+      return Response.json({ id: "remote", name, size: uploadedBytes.byteLength, server_modified: "2026-08-08T01:00:00.000Z" });
+    }
+    if (String(url).includes("files/list_folder")) {
+      return Response.json({ entries: [...remoteFiles.values()].map(({ bytes, ...file }) => ({ ".tag": "file", ...file })), has_more: false });
+    }
+    if (String(url).includes("files/download")) {
+      const id = JSON.parse(init.headers["dropbox-api-arg"]).path;
+      const file = remoteFiles.get(id);
+      return file ? new Response(file.bytes) : Response.json({ error: "missing" }, { status: 409 });
+    }
+    if (String(url).includes("files/delete_v2")) {
+      remoteFiles.delete(JSON.parse(await new Response(init.body).text()).path);
+      return Response.json({ ok: true });
+    }
     throw new Error(`unexpected OAuth request ${url}`);
   };
   const api = createApi({ key: KEY, store, backupBucket: bucket, fetchImpl, oauth: { encryptionKey: "oauth-secret", dropbox: { clientId: "client", clientSecret: "secret" } } });
@@ -287,8 +306,80 @@ test("cloud OAuth connects, reports status, and uploads a ZIP backup", async () 
   assert.equal(status.find((item) => item.provider === "dropbox").connected, true);
   const uploaded = await api.fetch(request("/v1/cloud/dropbox/backups", { method: "POST", body: JSON.stringify({ includeMedia: false }) }));
   assert.equal(uploaded.status, 200);
-  assert.equal((await uploaded.json()).remote.id, "remote");
+  const uploadedPayload = await uploaded.json();
+  assert.equal(uploadedPayload.remote.id, "remote");
+  assert.equal(uploadedPayload.name.endsWith(".pbk"), true);
+  assert.equal(uploadedPayload.encrypted, true);
+  assert.equal(uploadedPayload.bytes, uploadedBytes.byteLength);
+  assert.deepEqual([...uploadedBytes.slice(0, 8)], [...new TextEncoder().encode("PBKENC01")]);
+  assert.equal(new TextDecoder().decode(uploadedBytes).includes("library.json"), false);
   assert.equal(calls.some((url) => url.includes("files/upload")), true);
+
+  const listed = await api.fetch(request("/v1/cloud/dropbox/backups"));
+  assert.deepEqual((await listed.json()).backups.map((item) => ({ id: item.id, encrypted: item.encrypted })), [{ id: "remote", encrypted: true }]);
+  const downloaded = await api.fetch(request("/v1/cloud/dropbox/backups/remote/download"));
+  assert.equal(downloaded.status, 200);
+  assert.equal(downloaded.headers.get("content-type"), "application/zip");
+  assert.equal((await downloaded.arrayBuffer()).byteLength > 30, true);
+  const restored = await api.fetch(request("/v1/cloud/dropbox/backups/remote/restore", { method: "POST", body: JSON.stringify({ confirm: true }) }));
+  assert.equal(restored.status, 200);
+  assert.equal(store.restored.format, "private-bookmarks/v1");
+  const deleted = await api.fetch(request("/v1/cloud/dropbox/backups/remote", { method: "DELETE" }));
+  assert.equal(deleted.status, 200);
+  assert.equal(remoteFiles.has("remote"), false);
   const disconnected = await api.fetch(request("/v1/cloud/dropbox/disconnect", { method: "POST", body: "{}" }));
   assert.equal(disconnected.status, 200);
+});
+
+test("remote cloud backups keep legacy plaintext ZIPs readable and reject damaged ciphertext", async () => {
+  const store = new CloudMemoryStore();
+  const bucket = new MemoryBucket();
+  const remoteFiles = new Map();
+  const fetchImpl = async (url, init = {}) => {
+    if (String(url).includes("oauth2/token")) return Response.json({ access_token: "access", refresh_token: "refresh", expires_in: 3600 });
+    if (String(url).includes("get_current_account")) return Response.json({ account_id: "account" });
+    if (String(url).includes("files/list_folder")) return Response.json({ entries: [...remoteFiles.values()].map(({ bytes, ...file }) => ({ ".tag": "file", ...file })), has_more: false });
+    if (String(url).includes("files/download")) return new Response(remoteFiles.get(JSON.parse(init.headers["dropbox-api-arg"]).path)?.bytes || new Uint8Array());
+    throw new Error(`unexpected cloud request ${url}`);
+  };
+  const api = createApi({ key: KEY, store, backupBucket: bucket, fetchImpl, oauth: { encryptionKey: "oauth-secret", dropbox: { clientId: "client", clientSecret: "secret" } } });
+  const authorized = await api.fetch(request("/v1/cloud/dropbox/authorize"));
+  const state = new URL((await authorized.json()).authorizationUrl).searchParams.get("state");
+  await api.fetch(new Request(`https://private-bookmarks.test/v1/cloud/dropbox/callback?state=${encodeURIComponent(state)}&code=one-time-code`));
+  const created = await (await api.fetch(request("/v1/backups", { method: "POST", body: "{}" }))).json();
+  const legacy = await api.fetch(request(`/v1/backups/${created.id}/download?format=zip`));
+  remoteFiles.set("legacy", { id: "legacy", name: "private-bookmarks-legacy.zip", size: 0, server_modified: "2026-08-08T00:00:00.000Z", bytes: new Uint8Array(await legacy.arrayBuffer()) });
+  const legacyDownload = await api.fetch(request("/v1/cloud/dropbox/backups/legacy/download"));
+  assert.equal(legacyDownload.status, 200);
+  const legacyRestore = await api.fetch(request("/v1/cloud/dropbox/backups/legacy/restore", { method: "POST", body: JSON.stringify({ confirm: true }) }));
+  assert.equal(legacyRestore.status, 200);
+
+  remoteFiles.set("damaged", { id: "damaged", name: "private-bookmarks-damaged.pbk", size: 8, bytes: new TextEncoder().encode("PBKENC01") });
+  const damaged = await api.fetch(request("/v1/cloud/dropbox/backups/damaged/download"));
+  assert.equal(damaged.status, 409);
+  assert.equal((await damaged.json()).code, "cloud_backup_decrypt_failed");
+
+  remoteFiles.set("broken-zip", { id: "broken-zip", name: "private-bookmarks-broken.zip", size: 2, bytes: new Uint8Array([1, 2]) });
+  const brokenZip = await api.fetch(request("/v1/cloud/dropbox/backups/broken-zip/restore", { method: "POST", body: JSON.stringify({ confirm: true }) }));
+  assert.equal(brokenZip.status, 409);
+  assert.equal((await brokenZip.json()).code, "cloud_backup_invalid");
+
+  const mediaId = "33333333-3333-4333-8333-333333333333";
+  store.exportData = async () => ({
+    format: "private-bookmarks/v1",
+    collections: [{ id: "unsorted", parentId: null, name: "Unsorted" }],
+    bookmarks: [{ id: "bookmark-1", link: "https://example.com", collectionId: "unsorted", cover: `https://private-bookmarks.test/v1/media/${mediaId}?token=test` }],
+    preferences: {},
+  });
+  await bucket.put(`covers/${mediaId}`, new Uint8Array([1, 2, 3]), { httpMetadata: { contentType: "image/png" } });
+  const mediaBackup = await (await api.fetch(request("/v1/backups", { method: "POST", body: JSON.stringify({ includeMedia: true }) }))).json();
+  const mediaZipResponse = await api.fetch(request(`/v1/backups/${mediaBackup.id}/download?format=zip`));
+  const mediaZip = new Uint8Array(await mediaZipResponse.arrayBuffer());
+  const mediaOffset = mediaZip.findIndex((value, index) => value === 1 && mediaZip[index + 1] === 2 && mediaZip[index + 2] === 3);
+  assert.notEqual(mediaOffset, -1);
+  mediaZip[mediaOffset] ^= 1;
+  remoteFiles.set("broken-media", { id: "broken-media", name: "private-bookmarks-broken-media.zip", size: mediaZip.byteLength, bytes: mediaZip });
+  const brokenMedia = await api.fetch(request("/v1/cloud/dropbox/backups/broken-media/restore", { method: "POST", body: JSON.stringify({ confirm: true }) }));
+  assert.equal(brokenMedia.status, 409);
+  assert.equal((await brokenMedia.json()).code, "cloud_backup_checksum_mismatch");
 });
