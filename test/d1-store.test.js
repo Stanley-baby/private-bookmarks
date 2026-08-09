@@ -106,6 +106,15 @@ test("D1 stores encrypted cloud connection metadata without exposing plaintext f
   assert.equal(await store.getCloudConnection("dropbox"), null);
 });
 
+test("D1 hides the encrypted external AI key from public preferences", async () => {
+  const store = new D1Store(new D1TestDatabase());
+  await store.updatePreferences(0, { aiProvider: "openai", aiApiKeyEncrypted: "ciphertext" });
+  const publicPreferences = await store.getPreferences();
+  assert.equal(publicPreferences.aiApiKeyConfigured, true);
+  assert.equal(publicPreferences.aiApiKeyEncrypted, undefined);
+  assert.equal((await store.getPreferences({ includeSecrets: true })).aiApiKeyEncrypted, "ciphertext");
+});
+
 test("D1 export reads the library tables from one batch snapshot", async () => {
   const store = new D1Store(new D1TestDatabase());
   const bookmark = await store.createBookmark({ link: "https://example.com/snapshot", title: "Snapshot", description: "", note: "", cover: "", media: [], collectionId: "unsorted", tags: [], highlights: [], favorite: false });

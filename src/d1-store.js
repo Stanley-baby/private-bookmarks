@@ -8,6 +8,13 @@ const DEFAULT_PREFERENCES = {
   defaultView: "list",
   buttonGroup: { select: true, current_tab: false, new_tab: true, preview: false, web: false, copy: false, ask: false, important: false, tags: false, edit: true, remove: true },
   searchRelevance: true,
+  recommendCollectionsTags: false,
+  aiRecommendations: false,
+  aiProvider: "cloudflare",
+  aiModel: "",
+  aiBaseUrl: "https://api.openai.com/v1",
+  aiExternalModel: "gpt-4o-mini",
+  aiPrompt: "",
   brokenLevel: "default",
   nestedViewLegacy: false,
   layoutByScope: {},
@@ -641,15 +648,25 @@ export class D1Store {
     return { collection: await this.getCollection(id) };
   }
 
-  async getPreferences() {
+  async getPreferences({ includeSecrets = false } = {}) {
     const row = await this.db.prepare("SELECT * FROM preferences WHERE key = 'ui'").first();
-    return row ? { ...DEFAULT_PREFERENCES, ...parse(row.value_json, {}), revision: row.revision } : { ...DEFAULT_PREFERENCES, revision: 0 };
+    const stored = row ? parse(row.value_json, {}) : {};
+    const apiKeyConfigured = Boolean(stored.aiApiKeyEncrypted);
+    const preferences = { ...DEFAULT_PREFERENCES, ...stored, revision: row?.revision || 0 };
+    delete preferences.aiApiKeyConfigured;
+    if (!includeSecrets) {
+      delete preferences.aiApiKeyEncrypted;
+      preferences.aiApiKeyConfigured = apiKeyConfigured;
+    }
+    return preferences;
   }
 
   async updatePreferences(expectedRevision, preferences) {
-    const current = await this.getPreferences();
+    const current = await this.getPreferences({ includeSecrets: true });
     if (current.revision !== expectedRevision) return { conflict: current };
-    const value = { ...DEFAULT_PREFERENCES, ...preferences };
+    const value = { ...DEFAULT_PREFERENCES, ...current, ...preferences };
+    delete value.revision;
+    delete value.aiApiKeyConfigured;
     const updatedAt = now();
     if (current.revision === 0) {
       await this.db.prepare("INSERT INTO preferences (key, value_json, revision, updated_at) VALUES ('ui', ?, 1, ?)").bind(JSON.stringify(value), updatedAt).run();
