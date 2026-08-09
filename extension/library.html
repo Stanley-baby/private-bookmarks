@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width">
   <title>私有书签</title>
-  <link rel="stylesheet" href="style.css?v=20260809-ai4">
+  <link rel="stylesheet" href="style.css?v=20260809-ai5">
 </head>
 <body>
   <div id="app"></div>
@@ -37,6 +37,7 @@
         <div class="bookmark-recommendations-header"><strong>推荐</strong><span data-recommendation-status role="status"></span></div>
         <div data-recommendation-body></div>
         <div class="bookmark-recommendation-actions"><button type="button" data-recommendation-ai hidden>生成 AI 建议</button><button type="button" class="primary" data-recommendation-apply hidden>应用建议</button></div>
+        <div class="bookmark-recommendation-help"><p>AI 建议可能需要更长时间；失败时会保留本地建议。</p><details class="recommendation-info"><summary title="AI 推荐说明" aria-label="AI 推荐说明">!</summary><div class="recommendation-info-popover"><strong>AI 推荐说明</strong><p>思考模式会增加等待时间和 Cloudflare Neurons 消耗。<code>max_tokens</code> 是单次输出上限，不是账户每日额度。</p><p>如果思考模式在上限内没有返回最终 JSON，系统会自动关闭思考模式重试一次。两次都失败时不会覆盖当前内容；本地建议也不会自动覆盖当前内容。</p></div></details></div>
       </section>
       <menu><button value="cancel" formnovalidate>取消</button><button class="primary" value="create">添加</button></menu>
     </form>
@@ -92,6 +93,7 @@
             <div class="bookmark-recommendations-header"><strong>推荐</strong><span data-recommendation-status role="status"></span></div>
             <div data-recommendation-body></div>
             <div class="bookmark-recommendation-actions"><button type="button" data-recommendation-ai hidden>生成 AI 建议</button><button type="button" class="primary" data-recommendation-apply hidden>应用建议</button></div>
+            <div class="bookmark-recommendation-help"><p>AI 建议可能需要更长时间；失败时会保留本地建议。</p><details class="recommendation-info"><summary title="AI 推荐说明" aria-label="AI 推荐说明">!</summary><div class="recommendation-info-popover"><strong>AI 推荐说明</strong><p>思考模式会增加等待时间和 Cloudflare Neurons 消耗。<code>max_tokens</code> 是单次输出上限，不是账户每日额度。</p><p>如果思考模式在上限内没有返回最终 JSON，系统会自动关闭思考模式重试一次。两次都失败时不会覆盖当前内容；本地建议也不会自动覆盖当前内容。</p></div></details></div>
           </section>
 
           <label class="edit-field-label" for="edit-link">URL</label>
@@ -200,6 +202,6 @@
     </div>
   </dialog>
 
-  <script type="module" src="library.js?v=20260809-ai3"></script>
+  <script type="module" src="library.js?v=20260809-ai5"></script>
 </body>
 </html>

@@ -12,6 +12,8 @@ const DEFAULT_PREFERENCES = {
   aiRecommendations: false,
   aiProvider: "cloudflare",
   aiModel: "",
+  aiThinkingEnabled: false,
+  aiMaxTokens: 300,
   aiBaseUrl: "https://api.openai.com/v1",
   aiExternalModel: "gpt-4o-mini",
   aiPrompt: "",
