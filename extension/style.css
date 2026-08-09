@@ -557,7 +557,7 @@ dialog .checkbox { display: flex; align-items: center; gap: 7px; color: var(--te
 dialog .checkbox input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); }
 dialog menu { display: flex; justify-content: end; gap: 6px; margin: 0; padding: 0; }
 .bookmark-recommendations { display: grid; gap: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: var(--field); }
-.edit-panel .bookmark-recommendations { grid-column: 1 / -1; }
+.edit-panel .bookmark-recommendations { grid-column: 2; width: fit-content; max-width: 100%; justify-self: start; box-sizing: border-box; }
 .bookmark-recommendations-header { display: grid; gap: 3px; min-width: 0; }
 .bookmark-recommendations-header strong { font-size: 14px; line-height: 20px; }
 .bookmark-recommendations-header span { min-width: 0; color: var(--muted); font-size: 12px; font-weight: 400; line-height: 17px; overflow-wrap: anywhere; }
