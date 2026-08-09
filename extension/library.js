@@ -950,9 +950,9 @@ function collectionPath(id) {
 
 function recommendationInput(form, getTags = () => []) {
   return {
-    link: form.elements.link?.value || "",
-    title: form.elements.title?.value || "",
-    description: form.elements.description?.value || "",
+    link: form.elements.namedItem("link")?.value || "",
+    title: form.elements.namedItem("title")?.value || "",
+    description: form.elements.namedItem("description")?.value || "",
     tags: getTags(),
   };
 }
@@ -989,7 +989,8 @@ function renderRecommendations(form, result, mode = "local", status = "", busy =
   const suggestion = result?.[mode];
   const currentTags = new Set((form._recommendationGetTags?.() || []).map((tag) => String(tag).toLocaleLowerCase()));
   const noteValue = String(suggestion?.note || "");
-  const noteApplied = Boolean(noteValue && form.elements.note && form.elements.note.value.trim() === noteValue.trim());
+  const noteField = form.elements.namedItem("note");
+  const noteApplied = Boolean(noteValue && noteField && noteField.value.trim() === noteValue.trim());
   const hasSuggestion = Boolean(suggestion?.collectionId || suggestion?.tags?.length || suggestion?.note);
   const aiEnabled = Boolean(state.preferences?.aiRecommendations && state.aiRecommendationsAvailable && validRecommendationLink(result?.input?.link || ""));
   panel.hidden = !recommendationsEnabled();
@@ -1021,8 +1022,9 @@ function renderRecommendations(form, result, mode = "local", status = "", busy =
   const noteButton = panel.querySelector("[data-recommendation-note-add]");
   if (noteInput && noteButton) {
     noteButton.onclick = () => {
-      if (!form.elements.note) return;
-      form.elements.note.value = noteInput.value;
+      const field = form.elements.namedItem("note");
+      if (!field) return;
+      field.value = noteInput.value;
       noteButton.disabled = true;
       noteButton.setAttribute("aria-pressed", "true");
       noteButton.textContent = t("已应用");
@@ -1036,7 +1038,8 @@ function renderRecommendations(form, result, mode = "local", status = "", busy =
 }
 
 function localRecommendation(form) {
-  return recommendBookmark(recommendationInput(form, form._recommendationGetTags), state.allItems, state.collections);
+  const excludeId = form.closest("#edit-bookmark-dialog")?.dataset.bookmarkId || "";
+  return recommendBookmark(recommendationInput(form, form._recommendationGetTags), state.allItems, state.collections, excludeId);
 }
 
 function refreshRecommendations(form) {
@@ -1080,7 +1083,7 @@ function applyRecommendations(form) {
   const mode = recommendationPanel(form)?.dataset.recommendationMode || "local";
   const suggestion = result?.[mode];
   if (!suggestion) return;
-  const collection = form.elements.collectionId;
+  const collection = form.elements.namedItem("collectionId");
   const collectionChoice = recommendationPanel(form).querySelector("[data-recommendation-collection]");
   if (collectionChoice?.checked && suggestion.collectionId && [...collection.options].some((option) => option.value === suggestion.collectionId)) {
     collection.value = suggestion.collectionId;
@@ -1091,7 +1094,10 @@ function applyRecommendations(form) {
   const mergedTags = [...currentTags, ...selectedTags].filter((tag, index, all) => all.findIndex((value) => value.toLocaleLowerCase() === tag.toLocaleLowerCase()) === index);
   form._recommendationSetTags(mergedTags);
   const noteInput = recommendationPanel(form).querySelector("[data-recommendation-note]");
-  if (mode === "ai" && noteInput && form.elements.note) form.elements.note.value = noteInput.value;
+  if (mode === "ai" && noteInput) {
+    const noteField = form.elements.namedItem("note");
+    if (noteField) noteField.value = noteInput.value;
+  }
   renderRecommendations(form, result, mode, t("已应用"));
 }
 
@@ -1099,10 +1105,13 @@ function bindRecommendationForm(form, { getTags = () => [], setTags = () => {}, 
   form._recommendationGetTags = getTags;
   form._recommendationSetTags = setTags;
   form._recommendationSyncCollection = syncCollection;
-  for (const field of [form.elements.link, form.elements.title, form.elements.description].filter(Boolean)) field.oninput = () => {
-    clearTimeout(form._recommendationTimer);
-    form._recommendationTimer = setTimeout(() => refreshRecommendations(form), 180);
-  };
+  for (const name of ["link", "title", "description"]) {
+    const field = form.elements.namedItem(name);
+    if (field) field.oninput = () => {
+      clearTimeout(form._recommendationTimer);
+      form._recommendationTimer = setTimeout(() => refreshRecommendations(form), 180);
+    };
+  }
   refreshRecommendations(form);
 }
 
@@ -1723,7 +1732,6 @@ function accountMenuMarkup() {
 const SETTINGS_NAV = [
   ["app", "应用", "app", true],
   ["account", "帐户", "user", true],
-  ["subscription", "订阅", "diamond", false],
   ["import", "导入", "upload", true],
   ["integrations", "整合方式", "integrations", false],
   ["backups", "备份", "export", true],
@@ -4016,6 +4024,7 @@ function bind() {
       const option = event.target.closest("[data-tag-option], [data-create-tag]");
       if (option) addTag(option.dataset.tagOption || candidate());
     };
+    editBookmarkDialog.dataset.bookmarkId = item.id;
     bindRecommendationForm(form, {
       getTags: () => [...editTags],
       setTags: (tags) => { editTags = [...tags]; syncTags(); updateTagMenu(); },
@@ -4054,7 +4063,6 @@ function bind() {
       editBookmarkDialog.close("cancel");
       load().catch(showError);
     };
-    editBookmarkDialog.dataset.bookmarkId = item.id;
     editBookmarkDialog.dataset.highlights = JSON.stringify(item.highlights);
     const highlightsButton = form.querySelector("#edit-highlights");
     if (highlightsButton) highlightsButton.onclick = () => {

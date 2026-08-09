@@ -35,14 +35,14 @@ function contextItem(item, relevance) {
   };
 }
 
-export function recommendBookmark(input = {}, bookmarks = [], collections = []) {
+export function recommendBookmark(input = {}, bookmarks = [], collections = [], excludeId = "") {
   const query = tokens([input.title, input.description, input.link, ...(Array.isArray(input.tags) ? input.tags : [])]);
   const currentTags = new Set((Array.isArray(input.tags) ? input.tags : []).map((tag) => String(tag).toLocaleLowerCase()));
   if (!query.length) return { collectionId: null, tags: [], matches: [] };
 
   const collectionScores = new Map();
   const tagScores = new Map();
-  const matches = bookmarks.map((item) => {
+  const matches = bookmarks.filter((item) => item.id !== excludeId).map((item) => {
     const relevance = score(query, bookmarkTokens(item));
     return relevance ? { item, relevance } : null;
   }).filter(Boolean).sort((a, b) => b.relevance - a.relevance);

@@ -27,3 +27,26 @@ test("recommendations do not invent a collection or repeat current tags", () => 
   assert.equal(result.collectionId, null);
   assert.deepEqual(result.tags, []);
 });
+
+test("recommendations exclude the bookmark currently being edited", () => {
+  const current = {
+    id: "current",
+    link: "https://docs.example.test/react-performance",
+    title: "React performance guide",
+    collectionId: "frontend",
+    tags: ["React", "performance"],
+  };
+  const related = {
+    id: "related",
+    link: "https://react.dev/learn/performance",
+    title: "React performance patterns",
+    description: "Rendering and performance",
+    collectionId: "frontend",
+    tags: ["React", "performance", "reading"],
+  };
+
+  const result = recommendBookmark(current, [current, related], [{ id: "frontend" }], current.id);
+
+  assert.deepEqual(result.matches.map(({ link }) => link), [related.link]);
+  assert.deepEqual(result.tags, ["reading"]);
+});
