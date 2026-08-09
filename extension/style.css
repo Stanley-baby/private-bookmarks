@@ -556,7 +556,7 @@ dialog textarea { min-height: 54px; }
 dialog .checkbox { display: flex; align-items: center; gap: 7px; color: var(--text); cursor: pointer; }
 dialog .checkbox input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); }
 dialog menu { display: flex; justify-content: end; gap: 6px; margin: 0; padding: 0; }
-.bookmark-recommendations { display: grid; gap: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: var(--field); }
+.bookmark-recommendations { display: grid; min-width: 0; gap: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: var(--field); }
 .edit-panel .bookmark-recommendations { grid-column: 2; width: fit-content; max-width: 100%; justify-self: start; box-sizing: border-box; }
 .bookmark-recommendations-header { display: grid; gap: 3px; min-width: 0; }
 .bookmark-recommendations-header strong { font-size: 14px; line-height: 20px; }
@@ -573,6 +573,16 @@ dialog menu { display: flex; justify-content: end; gap: 6px; margin: 0; padding:
 .bookmark-recommendation-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .bookmark-recommendation-actions button { min-height: 28px; }
 .bookmark-recommendation-actions button:disabled { cursor: wait; opacity: .6; }
+.bookmark-recommendation-help { position: relative; display: flex; max-width: 100%; align-items: flex-start; gap: 8px; color: var(--muted); }
+.bookmark-recommendation-help > p { max-width: 380px; margin: 0; font-size: 12px; line-height: 17px; }
+.recommendation-info { position: relative; flex: 0 0 auto; }
+.recommendation-info summary { display: grid; width: 18px; height: 18px; place-items: center; border: 1px solid currentColor; border-radius: 50%; color: var(--muted); font-size: 12px; font-weight: 700; line-height: 16px; cursor: pointer; list-style: none; }
+.recommendation-info summary::-webkit-details-marker { display: none; }
+.recommendation-info summary:hover, .recommendation-info summary:focus-visible { color: var(--accent); outline: 0; }
+.recommendation-info-popover { position: absolute; z-index: 6; right: 0; bottom: calc(100% + 8px); width: min(320px, calc(100vw - 48px)); padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: var(--page); box-shadow: 0 10px 30px #0003; font-size: 12px; line-height: 17px; }
+.recommendation-info-popover strong { display: block; margin-bottom: 5px; font-size: 13px; }
+.recommendation-info-popover p { margin: 0 0 7px; }
+.recommendation-info-popover p:last-child { margin-bottom: 0; }
 
 .cover-picker { position: fixed; inset: 0; display: none; width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; overflow: visible; z-index: 6; contain: strict; align-items: center; justify-content: center; border: 0; border-radius: 0; color: light-dark(#1a1a1a, #ececee); background: transparent; box-shadow: none; font: 14px/19.6px -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
 .cover-picker::backdrop { background: rgba(0, 0, 0, .35); }
@@ -978,7 +988,10 @@ dialog menu { display: flex; justify-content: end; gap: 6px; margin: 0; padding:
 .settings-sub-label { max-width: 498px; margin: 0; color: light-dark(#808080, #a9aaaf); font-size: 13px; line-height: 18.2px; }
 .settings-ai-panel { display: grid; max-width: 498px; gap: 10px; }
 .settings-ai-fields, .settings-ai-external-fields { display: grid; gap: 10px; }
+.settings-ai-cloudflare-fields { display: grid; gap: 10px; }
 .settings-ai-fields > label, .settings-ai-external-fields > label { display: grid; gap: 5px; color: var(--muted); font-size: 13px; }
+.settings-ai-fields .settings-ai-thinking { color: var(--text); }
+.settings-ai-field-note { margin: -5px 0 0; color: var(--muted); font-size: 12px; line-height: 17px; }
 .settings-ai-fields input, .settings-ai-fields select, .settings-ai-fields textarea { width: 100%; min-width: 0; padding: 5px 8px; border: 0; border-radius: 4px; color: var(--text); background: var(--field); box-shadow: none; }
 .settings-ai-fields input, .settings-ai-fields select { min-height: 32px; }
 .settings-ai-fields textarea { min-height: 140px; resize: vertical; }

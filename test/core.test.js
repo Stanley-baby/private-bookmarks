@@ -182,6 +182,83 @@ test("AI recommendations ignore reasoning JSON before the final answer", async (
   assert.deepEqual(await response.json(), { collectionId: "frontend", tags: ["reading"], note: "待阅读。" });
 });
 
+test("Workers AI recommendations disable model reasoning for the JSON answer", async () => {
+  const api = createApi({
+    key: "test-key",
+    store: new MemoryStore(),
+    ai: {
+      async run(_model, input) {
+        assert.deepEqual(input.chat_template_kwargs, { enable_thinking: false });
+        return { choices: [{ message: { content: '```json\n{"collectionId":null,"tags":["reading"],"note":"待阅读。"}\n```', reasoning_content: null } }] };
+      },
+    },
+    aiModel: "test-model",
+  });
+  const response = await api.fetch(request("/v1/ai/recommendations", {
+    method: "POST",
+    body: JSON.stringify({ link: "https://example.com/read" }),
+  }));
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { collectionId: null, tags: ["reading"], note: "待阅读。" });
+});
+
+test("Workers AI recommendations retry once without reasoning after an invalid answer", async () => {
+  const calls = [];
+  const store = new MemoryStore();
+  store.preferences = { revision: 0, aiThinkingEnabled: true, aiMaxTokens: 800 };
+  const api = createApi({
+    key: "test-key",
+    store,
+    ai: {
+      async run(_model, input) {
+        calls.push(input);
+        return calls.length === 1
+          ? { choices: [{ message: { content: null, reasoning_content: "思考过程被截断" } }] }
+          : { choices: [{ message: { content: '{"collectionId":null,"tags":["reading"],"note":"待阅读。"}' } }] };
+      },
+    },
+    aiModel: "test-model",
+  });
+  const response = await api.fetch(request("/v1/ai/recommendations", {
+    method: "POST",
+    body: JSON.stringify({ link: "https://example.com/read" }),
+  }));
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { collectionId: null, tags: ["reading"], note: "待阅读。", fallbackUsed: true });
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].max_tokens, 800);
+  assert.equal(calls[0].chat_template_kwargs.enable_thinking, true);
+  assert.equal(calls[1].max_tokens, 800);
+  assert.equal(calls[1].chat_template_kwargs.enable_thinking, false);
+});
+
+test("Workers AI quota errors do not trigger a retry", async () => {
+  let calls = 0;
+  const store = new MemoryStore();
+  store.preferences = { revision: 0, aiThinkingEnabled: true, aiMaxTokens: 800 };
+  const api = createApi({
+    key: "test-key",
+    store,
+    ai: {
+      async run() {
+        calls += 1;
+        throw Object.assign(new Error("daily free allocation exhausted"), { code: 3036 });
+      },
+    },
+    aiModel: "test-model",
+  });
+  const response = await api.fetch(request("/v1/ai/recommendations", {
+    method: "POST",
+    body: JSON.stringify({ link: "https://example.com/read" }),
+  }));
+
+  assert.equal(response.status, 429);
+  assert.equal((await response.json()).code, "ai_quota_exhausted");
+  assert.equal(calls, 1);
+});
+
 test("AI recommendations report an unavailable optional binding", async () => {
   const api = createApi({ key: "test-key", store: new MemoryStore() });
   const response = await api.fetch(request("/v1/ai/recommendations", { method: "POST", body: JSON.stringify({ link: "https://example.com" }) }));
@@ -203,13 +280,15 @@ test("AI settings select an external provider, encrypt its key, and keep the def
   });
   const saved = await api.fetch(request("/v1/ai/settings", {
     method: "PATCH",
-    body: JSON.stringify({ revision: 0, settings: { provider: "openai", baseUrl: "https://api.example/v1", externalModel: "demo-model", prompt: "请用简洁中文整理。" }, apiKey: "secret-key" }),
+    body: JSON.stringify({ revision: 0, settings: { provider: "openai", baseUrl: "https://api.example/v1", externalModel: "demo-model", maxTokens: 777, thinkingEnabled: true, prompt: "请用简洁中文整理。" }, apiKey: "secret-key" }),
   }));
 
   assert.equal(saved.status, 200);
   const savedBody = await saved.json();
   assert.equal(savedBody.ai.provider, "openai");
   assert.equal(savedBody.ai.apiKeyConfigured, true);
+  assert.equal(savedBody.ai.maxTokens, 777);
+  assert.equal(savedBody.ai.thinkingEnabled, true);
   assert.equal(savedBody.preferences.aiApiKeyEncrypted, undefined);
   assert.notEqual(store.preferences.aiApiKeyEncrypted, "secret-key");
 
@@ -223,6 +302,7 @@ test("AI settings select an external provider, encrypt its key, and keep the def
   assert.equal(externalRequest.init.headers.authorization, "Bearer secret-key");
   const payload = JSON.parse(externalRequest.init.body);
   assert.equal(payload.model, "demo-model");
+  assert.equal(payload.max_tokens, 777);
   assert.match(payload.messages[0].content, /请用简洁中文整理/);
   assert.match(payload.messages[0].content, /只返回 JSON/);
 });

@@ -114,7 +114,7 @@ const EN_TEXT = Object.freeze({
 });
 
 const EXTRA_EN_TEXT = Object.freeze({
-  "应用建议": "Apply suggestions", "已应用": "Applied", "AI 配置": "AI configuration", "提供商": "Provider", "Cloudflare Workers AI": "Cloudflare Workers AI", "外部 OpenAI 兼容 API": "External OpenAI-compatible API", "模型": "Model", "免费额度": "Free quota", "API 地址": "API base URL", "API Key": "API key", "已配置，留空保持不变": "Configured; leave blank to keep", "输入 API Key": "Enter API key", "清除已保存的 API Key": "Clear saved API key", "Prompt": "Prompt", "保存 AI 设置": "Save AI settings", "恢复默认 Prompt": "Restore default prompt", "尚未配置可用 AI": "No usable AI is configured", "Worker 已配置 Workers AI": "Workers AI is configured on this Worker", "外部 API 已配置": "External API is configured", "请在下方配置 Workers AI。": "Configure Workers AI below.", "请在下方配置外部 OpenAI 兼容 API。": "Configure an external OpenAI-compatible API below.", "外部 API 会收到当前书签和相似书签的元数据。": "The external API receives the current bookmark and similar-bookmark metadata.", "自定义 Prompt 会保留固定 JSON 输出约束。": "Custom prompts keep the fixed JSON output contract.", "免费额度受 Cloudflare 账户限制，不代表无限免费。": "Free quota is subject to your Cloudflare account and is not unlimited.", "配置已保存": "Settings saved"
+  "应用建议": "Apply suggestions", "已应用": "Applied", "AI 配置": "AI configuration", "提供商": "Provider", "Cloudflare Workers AI": "Cloudflare Workers AI", "外部 OpenAI 兼容 API": "External OpenAI-compatible API", "模型": "Model", "免费额度": "Free quota", "API 地址": "API base URL", "API Key": "API key", "已配置，留空保持不变": "Configured; leave blank to keep", "输入 API Key": "Enter API key", "清除已保存的 API Key": "Clear saved API key", "Prompt": "Prompt", "保存 AI 设置": "Save AI settings", "恢复默认 Prompt": "Restore default prompt", "尚未配置可用 AI": "No usable AI is configured", "Worker 已配置 Workers AI": "Workers AI is configured on this Worker", "外部 API 已配置": "External API is configured", "请在下方配置 Workers AI。": "Configure Workers AI below.", "请在下方配置外部 OpenAI 兼容 API。": "Configure an external OpenAI-compatible API below.", "外部 API 会收到当前书签和相似书签的元数据。": "The external API receives the current bookmark and similar-bookmark metadata.", "自定义 Prompt 会保留固定 JSON 输出约束。": "Custom prompts keep the fixed JSON output contract.", "免费额度受 Cloudflare 账户限制，不代表无限免费。": "Free quota is subject to your Cloudflare account and is not unlimited.", "启用思考模式": "Enable thinking mode", "思考模式会增加等待时间和 Neurons 消耗，建议提高 max_tokens。": "Thinking mode takes longer and uses more Neurons; a higher max_tokens is recommended.", "最大输出 tokens（max_tokens）": "Maximum output tokens (max_tokens)", "控制单次 AI 请求的输出上限，范围为 128–4096。": "Controls the output limit for one AI request; range: 128–4096.", "AI 推荐说明": "AI recommendation details", "AI 建议可能需要更长时间；失败时会保留本地建议。": "AI suggestions may take longer; local suggestions are kept if AI fails.", "思考模式会增加等待时间和 Cloudflare Neurons 消耗。": "Thinking mode takes longer and uses more Cloudflare Neurons.", " 是单次输出上限，不是账户每日额度。": " is the output limit for one request, not your account's daily quota.", "如果思考模式在上限内没有返回最终 JSON，系统会自动关闭思考模式重试一次。两次都失败时不会覆盖当前内容；本地建议也不会自动覆盖当前内容。": "If thinking uses the limit before returning final JSON, the system retries once with thinking disabled. If both attempts fail, current content is not changed; local suggestions are never applied automatically.", "已自动关闭思考模式重试并生成建议": "Thinking mode was disabled for one automatic retry and suggestions were generated.", "模型未在 max_tokens 内返回最终 JSON，已保留本地建议。": "The model did not return final JSON within max_tokens; local suggestions were kept.", "模型在自动回退后仍未返回有效 JSON，已保留本地建议。": "The model still did not return valid JSON after automatic fallback; local suggestions were kept.", "Cloudflare 今日免费额度可能已用尽，请稍后再试或更换模型。": "Your Cloudflare free quota may be exhausted; try again later or choose another model.", "Cloudflare AI 暂时没有可用容量，请稍后再试。": "Cloudflare AI is temporarily out of capacity; try again later.", "该模型需要付费计划，请更换模型或检查账户。": "This model requires a paid plan; choose another model or check your account.", "外部 API Key 无效，请检查 AI 设置。": "The external API key is invalid; check AI settings.", "AI 服务尚未配置，请检查 AI 设置。": "AI is not configured; check AI settings.", "AI 服务不可用，已保留本地建议。": "AI is unavailable; local suggestions were kept.", "配置已保存": "Settings saved"
 });
 
 function languageIsEnglish() {
@@ -965,6 +965,20 @@ function validRecommendationLink(link) {
   try { return /^https?:$/.test(new URL(link).protocol); } catch { return false; }
 }
 
+function recommendationErrorMessage(error) {
+  const messages = {
+    ai_failed: "模型未在 max_tokens 内返回最终 JSON，已保留本地建议。",
+    ai_failed_after_fallback: "模型在自动回退后仍未返回有效 JSON，已保留本地建议。",
+    ai_quota_exhausted: "Cloudflare 今日免费额度可能已用尽，请稍后再试或更换模型。",
+    ai_capacity: "Cloudflare AI 暂时没有可用容量，请稍后再试。",
+    ai_paid_required: "该模型需要付费计划，请更换模型或检查账户。",
+    ai_key_invalid: "外部 API Key 无效，请检查 AI 设置。",
+    ai_not_configured: "AI 服务尚未配置，请检查 AI 设置。",
+    ai_external_not_configured: "AI 服务尚未配置，请检查 AI 设置。",
+  };
+  return t(messages[error?.code] || "AI 服务不可用，已保留本地建议。");
+}
+
 function recommendationPanel(form) {
   return form.querySelector("[data-recommendations]");
 }
@@ -1023,9 +1037,10 @@ async function requestAiRecommendations(form) {
       }),
     });
     form._recommendationResult = result;
-    renderRecommendations(form, result, "ai");
+    renderRecommendations(form, result, "ai", result.ai?.fallbackUsed ? t("已自动关闭思考模式重试并生成建议") : "");
   } catch (error) {
-    renderRecommendations(form, result, "local", error.message || "AI 建议失败");
+    form._recommendationResult = result;
+    renderRecommendations(form, result, "local", recommendationErrorMessage(error));
   }
 }
 
@@ -2379,13 +2394,18 @@ function aiSettingsMarkup() {
   const baseUrl = state.preferences?.aiBaseUrl || settings.baseUrl || "https://api.openai.com/v1";
   const externalModel = state.preferences?.aiExternalModel || settings.externalModel || "gpt-4o-mini";
   const prompt = state.preferences?.aiPrompt || settings.prompt || settings.defaultPrompt || "";
+  const configuredMaxTokens = Number(state.preferences?.aiMaxTokens ?? settings.maxTokens ?? 300);
+  const maxTokens = Number.isInteger(configuredMaxTokens) && configuredMaxTokens >= 128 && configuredMaxTokens <= 4096 ? configuredMaxTokens : 300;
+  const thinkingEnabled = Boolean(state.preferences?.aiThinkingEnabled ?? settings.thinkingEnabled);
   const models = Array.isArray(settings.models) ? settings.models : model ? [{ id: model, label: model, free: false }] : [];
   const modelOptions = models.map((item) => `<option value="${escapeHtml(item.id)}" ${item.id === model ? "selected" : ""}>${item.free ? `${escapeHtml(t("免费额度"))} · ` : ""}${escapeHtml(item.label || item.id)}</option>`).join("");
   const apiKeyConfigured = Boolean(settings.apiKeyConfigured || state.preferences?.aiApiKeyConfigured);
   const status = provider === "cloudflare"
     ? settings.cloudflareAvailable ? t("Worker 已配置 Workers AI") : t("尚未配置可用 AI")
     : settings.externalAvailable ? t("外部 API 已配置") : t("尚未配置可用 AI");
-  return `<div class="settings-ai-panel" data-ai-settings-panel><div class="settings-ai-fields"><label>${t("提供商")}<select data-ai-provider><option value="cloudflare" ${provider === "cloudflare" ? "selected" : ""}>${t("Cloudflare Workers AI")}</option><option value="openai" ${provider === "openai" ? "selected" : ""}>${t("外部 OpenAI 兼容 API")}</option></select></label><div data-ai-cloudflare-fields ${provider === "cloudflare" ? "" : "hidden"}><label>${t("模型")}<select data-ai-model>${modelOptions}</select></label></div><div class="settings-ai-external-fields" data-ai-external-fields ${provider === "openai" ? "" : "hidden"}><label>${t("API 地址")}<input data-ai-base-url type="url" value="${escapeHtml(baseUrl)}" placeholder="https://api.openai.com/v1"></label><label>${t("模型")}<input data-ai-external-model value="${escapeHtml(externalModel)}" placeholder="gpt-4o-mini"></label><label>${t("API Key")}<input data-ai-api-key type="password" autocomplete="new-password" placeholder="${escapeHtml(apiKeyConfigured ? t("已配置，留空保持不变") : t("输入 API Key"))}"></label>${apiKeyConfigured ? `<label class="settings-check"><input type="checkbox" data-ai-clear-key>${t("清除已保存的 API Key")}</label>` : ""}</div><label>${t("Prompt")}<textarea data-ai-prompt rows="7">${escapeHtml(prompt)}</textarea></label></div><p class="settings-sub-label" data-ai-config-note>${escapeHtml(status)}</p><p class="settings-sub-label">${t("自定义 Prompt 会保留固定 JSON 输出约束。")} ${t("外部 API 会收到当前书签和相似书签的元数据。")} ${t("免费额度受 Cloudflare 账户限制，不代表无限免费。")}</p><div class="settings-ai-actions"><button type="button" class="primary" data-ai-save ${state.aiBusy ? "disabled" : ""}>${t("保存 AI 设置")}</button><button type="button" data-ai-reset-prompt ${state.aiBusy ? "disabled" : ""}>${t("恢复默认 Prompt")}</button></div></div>`;
+  const cloudflareFields = `<div class="settings-ai-cloudflare-fields" data-ai-cloudflare-fields ${provider === "cloudflare" ? "" : "hidden"}><label>${t("模型")}<select data-ai-model>${modelOptions}</select></label><label class="settings-check settings-ai-thinking"><input type="checkbox" data-ai-thinking ${thinkingEnabled ? "checked" : ""}>${t("启用思考模式")}</label><p class="settings-ai-field-note">${t("思考模式会增加等待时间和 Neurons 消耗，建议提高 max_tokens。")}</p></div>`;
+  const externalFields = `<div class="settings-ai-external-fields" data-ai-external-fields ${provider === "openai" ? "" : "hidden"}><label>${t("API 地址")}<input data-ai-base-url type="url" value="${escapeHtml(baseUrl)}" placeholder="https://api.openai.com/v1"></label><label>${t("模型")}<input data-ai-external-model value="${escapeHtml(externalModel)}" placeholder="gpt-4o-mini"></label><label>${t("API Key")}<input data-ai-api-key type="password" autocomplete="new-password" placeholder="${escapeHtml(apiKeyConfigured ? t("已配置，留空保持不变") : t("输入 API Key"))}"></label>${apiKeyConfigured ? `<label class="settings-check"><input type="checkbox" data-ai-clear-key>${t("清除已保存的 API Key")}</label>` : ""}</div>`;
+  return `<div class="settings-ai-panel" data-ai-settings-panel><div class="settings-ai-fields"><label>${t("提供商")}<select data-ai-provider><option value="cloudflare" ${provider === "cloudflare" ? "selected" : ""}>${t("Cloudflare Workers AI")}</option><option value="openai" ${provider === "openai" ? "selected" : ""}>${t("外部 OpenAI 兼容 API")}</option></select></label>${cloudflareFields}${externalFields}<label>${t("最大输出 tokens（max_tokens）")}<input data-ai-max-tokens type="number" min="128" max="4096" step="1" value="${maxTokens}"></label><p class="settings-ai-field-note">${t("控制单次 AI 请求的输出上限，范围为 128–4096。")}</p><label>${t("Prompt")}<textarea data-ai-prompt rows="7">${escapeHtml(prompt)}</textarea></label></div><p class="settings-sub-label" data-ai-config-note>${escapeHtml(status)}</p><p class="settings-sub-label">${t("自定义 Prompt 会保留固定 JSON 输出约束。")} ${t("外部 API 会收到当前书签和相似书签的元数据。")} ${t("免费额度受 Cloudflare 账户限制，不代表无限免费。")}</p><div class="settings-ai-actions"><button type="button" class="primary" data-ai-save ${state.aiBusy ? "disabled" : ""}>${t("保存 AI 设置")}</button><button type="button" data-ai-reset-prompt ${state.aiBusy ? "disabled" : ""}>${t("恢复默认 Prompt")}</button></div></div>`;
 }
 
 function syncAiProviderFields() {
@@ -2402,6 +2422,8 @@ async function saveAiSettings(promptOverride = null) {
   const prompt = promptOverride == null ? panel.querySelector("[data-ai-prompt]").value : promptOverride;
   const apiKey = panel.querySelector("[data-ai-api-key]")?.value.trim() || "";
   const provider = panel.querySelector("[data-ai-provider]").value;
+  const maxTokens = Number(panel.querySelector("[data-ai-max-tokens]")?.value);
+  const thinkingEnabled = Boolean(panel.querySelector("[data-ai-thinking]")?.checked);
   const button = panel.querySelector("[data-ai-save]");
   let rerender = false;
   state.aiBusy = true;
@@ -2416,6 +2438,8 @@ async function saveAiSettings(promptOverride = null) {
           model: panel.querySelector("[data-ai-model]")?.value || state.aiSettings?.model || "",
           baseUrl: panel.querySelector("[data-ai-base-url]")?.value || "",
           externalModel: panel.querySelector("[data-ai-external-model]")?.value || "",
+          thinkingEnabled,
+          maxTokens,
           prompt: prompt === state.aiSettings?.defaultPrompt ? "" : prompt,
         },
         apiKey: apiKey || null,
