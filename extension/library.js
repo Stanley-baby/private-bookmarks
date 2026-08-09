@@ -987,12 +987,15 @@ function renderRecommendations(form, result, mode = "local", status = "", busy =
   const panel = recommendationPanel(form);
   if (!panel) return;
   const suggestion = result?.[mode];
+  const currentTags = new Set((form._recommendationGetTags?.() || []).map((tag) => String(tag).toLocaleLowerCase()));
+  const noteValue = String(suggestion?.note || "");
+  const noteApplied = Boolean(noteValue && form.elements.note && form.elements.note.value.trim() === noteValue.trim());
   const hasSuggestion = Boolean(suggestion?.collectionId || suggestion?.tags?.length || suggestion?.note);
   const aiEnabled = Boolean(state.preferences?.aiRecommendations && state.aiRecommendationsAvailable && validRecommendationLink(result?.input?.link || ""));
   panel.hidden = !recommendationsEnabled();
   panel.dataset.recommendationMode = mode;
   panel.querySelector("[data-recommendation-status]").textContent = status || (!hasSuggestion ? t("没有足够相似的书签") : "");
-  panel.querySelector("[data-recommendation-body]").innerHTML = localizeHtml(hasSuggestion ? `<div class="recommendation-items">${suggestion.collectionId ? `<label class="recommendation-option"><input type="checkbox" data-recommendation-collection checked><span>${t("推荐收藏集")}</span><strong>${escapeHtml(collectionPath(suggestion.collectionId))}</strong></label>` : ""}${suggestion.tags?.length ? `<div class="recommendation-tags"><span>${t("推荐标签")}</span>${suggestion.tags.map((tag) => `<label class="recommendation-tag"><input type="checkbox" data-recommendation-tag value="${escapeHtml(tag)}" checked><span>#${escapeHtml(tag)}</span></label>`).join("")}</div>` : ""}${suggestion.note ? `<label class="recommendation-note"><span>${t("备注")}</span><textarea data-recommendation-note rows="3">${escapeHtml(suggestion.note)}</textarea></label>` : ""}</div>` : "");
+  panel.querySelector("[data-recommendation-body]").innerHTML = localizeHtml(hasSuggestion ? `<div class="recommendation-items">${suggestion.collectionId ? `<label class="recommendation-option"><input type="checkbox" data-recommendation-collection checked><span>${t("推荐收藏集")}</span><strong>${escapeHtml(collectionPath(suggestion.collectionId))}</strong></label>` : ""}${suggestion.tags?.length ? `<div class="recommendation-tags"><span>${t("推荐标签")}</span>${suggestion.tags.map((tag) => { const value = String(tag); const added = currentTags.has(value.toLocaleLowerCase()); return `<div class="recommendation-tag"><input type="checkbox" data-recommendation-tag value="${escapeHtml(value)}" checked><button type="button" class="recommendation-tag-add" data-recommendation-tag-add="${escapeHtml(value)}" title="${escapeHtml(t("添加标签"))}" aria-label="${escapeHtml(`${added ? t("已应用") : t("添加标签")} ${value}`)}" aria-pressed="${added}" ${added ? "disabled" : ""}>#${escapeHtml(value)}</button></div>`; }).join("")}</div>` : ""}${suggestion.note ? `<div class="recommendation-note"><div class="recommendation-note-header"><span>${t("备注")}</span><button type="button" data-recommendation-note-add aria-pressed="${noteApplied}" ${noteApplied ? "disabled" : ""}>${noteApplied ? t("已应用") : t("添加备注")}</button></div><textarea data-recommendation-note rows="3">${escapeHtml(noteValue)}</textarea></div>` : ""}</div>` : "");
   const aiButton = panel.querySelector("[data-recommendation-ai]");
   const applyButton = panel.querySelector("[data-recommendation-apply]");
   aiButton.hidden = !aiEnabled;
@@ -1002,6 +1005,34 @@ function renderRecommendations(form, result, mode = "local", status = "", busy =
   applyButton.disabled = !hasSuggestion;
   panel.querySelector("[data-recommendation-ai]").onclick = () => requestAiRecommendations(form);
   panel.querySelector("[data-recommendation-apply]").onclick = () => applyRecommendations(form);
+  panel.querySelectorAll("[data-recommendation-tag-add]").forEach((button) => {
+    button.onclick = () => {
+      const value = button.dataset.recommendationTagAdd?.trim();
+      const tags = form._recommendationGetTags();
+      if (!value || tags.some((tag) => tag.toLocaleLowerCase() === value.toLocaleLowerCase())) return;
+      form._recommendationSetTags([...tags, value]);
+      if (result?.input) result.input.tags = form._recommendationGetTags();
+      button.disabled = true;
+      button.setAttribute("aria-pressed", "true");
+      button.setAttribute("aria-label", `${t("已应用")} ${value}`);
+    };
+  });
+  const noteInput = panel.querySelector("[data-recommendation-note]");
+  const noteButton = panel.querySelector("[data-recommendation-note-add]");
+  if (noteInput && noteButton) {
+    noteButton.onclick = () => {
+      if (!form.elements.note) return;
+      form.elements.note.value = noteInput.value;
+      noteButton.disabled = true;
+      noteButton.setAttribute("aria-pressed", "true");
+      noteButton.textContent = t("已应用");
+    };
+    noteInput.oninput = () => {
+      noteButton.disabled = false;
+      noteButton.setAttribute("aria-pressed", "false");
+      noteButton.textContent = t("添加备注");
+    };
+  }
 }
 
 function localRecommendation(form) {
@@ -1059,7 +1090,8 @@ function applyRecommendations(form) {
   const currentTags = form._recommendationGetTags();
   const mergedTags = [...currentTags, ...selectedTags].filter((tag, index, all) => all.findIndex((value) => value.toLocaleLowerCase() === tag.toLocaleLowerCase()) === index);
   form._recommendationSetTags(mergedTags);
-  if (mode === "ai" && suggestion.note && form.elements.note) form.elements.note.value = suggestion.note;
+  const noteInput = recommendationPanel(form).querySelector("[data-recommendation-note]");
+  if (mode === "ai" && noteInput && form.elements.note) form.elements.note.value = noteInput.value;
   renderRecommendations(form, result, mode, t("已应用"));
 }
 

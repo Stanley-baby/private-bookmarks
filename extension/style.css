@@ -567,8 +567,15 @@ dialog menu { display: flex; justify-content: end; gap: 6px; margin: 0; padding:
 .recommendation-option strong { min-width: 0; overflow: hidden; color: var(--muted); font-weight: 400; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .recommendation-tags { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .recommendation-tags > span { color: var(--muted); font-size: 12px; }
-.recommendation-tag { display: inline-flex; min-height: 24px; align-items: center; gap: 5px; padding: 0 7px; border-radius: 12px; color: var(--accent); background: var(--page); font-size: 12px; font-weight: 400; cursor: pointer; }
+.recommendation-tag { display: inline-flex; min-height: 24px; align-items: center; gap: 5px; padding: 0 7px; border-radius: 12px; color: var(--accent); background: var(--page); font-size: 12px; font-weight: 400; }
+.recommendation-tag-add { min-height: 22px; padding: 0; color: inherit; background: transparent; font-size: inherit; line-height: 22px; }
+.recommendation-tag-add:hover, .recommendation-tag-add:focus-visible { color: var(--text); background: transparent; outline: 0; }
+.recommendation-tag-add[aria-pressed="true"] { color: var(--muted); }
 .recommendation-note { display: grid; gap: 5px; }
+.recommendation-note-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.recommendation-note-header > span { color: var(--muted); font-size: 12px; }
+.recommendation-note-header button { min-height: 24px; padding: 0 7px; color: var(--accent); font-size: 12px; }
+.recommendation-note-header button[aria-pressed="true"] { color: var(--muted); }
 .recommendation-note textarea { min-height: 54px; }
 .bookmark-recommendation-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .bookmark-recommendation-actions button { min-height: 28px; }
