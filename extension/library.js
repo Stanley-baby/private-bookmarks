@@ -208,7 +208,7 @@ const treeIcons = {
   extension: '<path d="M8 1a1 1 0 0 0-.993.883L7 2v3H2a1 1 0 0 0-.993.883L1 6v3h1.037l.186.008a3 3 0 0 1-.047 5.987L2 15H1v3a1 1 0 0 0 .883.993L2 19h3v-1.037l.008-.186a3 3 0 0 1 5.987.047L11 18v1h3a1 1 0 0 0 .993-.883L15 18v-5h3a2 2 0 1 0 0-4h-3V6a1 1 0 0 0-.883-.993L14 5H9V2a1 1 0 0 0-1-1Z"></path>',
   install: '<path d="M10 12.962 13.679 9H15l-5.5 6L4 9h1.321L9 12.962V4h1z"></path><path d="M9.5 1a8.5 8.5 0 1 1 0 17 8.5 8.5 0 0 1 0-17Zm0 1a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15Z"></path>',
   history: '<path d="M2 4.002v9.996c0 .162.186.455.335.525l7.59 3.572h-.85l7.59-3.572c.15-.07.335-.36.335-.525V4.002c0 .184.352.408.516.33l-7.59 3.573-.426.2-.426-.2-7.59-3.572c.16.076.516-.148.516-.33Zm-1 0c0-.553.41-.81.91-.574L9.5 7l7.59-3.572c.503-.236.91.028.91.574v9.996c0 .553-.41 1.195-.91 1.43L9.5 19l-7.59-3.572c-.503-.236-.91-.884-.91-1.43V4.002Z"></path>',
-  exit: '<path d="M7 10v4c0 1.1.9 2 2 2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2H9c-1.1 0-2 .9-2 2v4H4.143L5 6 2 9.5 5 13l-.857-3H7v2h1v-2H7Zm1 0v4.154c0 .474.45.846 1 .846h7c.54 0 1-.38 1-.846V4.846C17 4.372 16.55 4 16 4H9c-.54 0-1 .38-1 .846V9h5v1H8Z"></path>',
+  exit: '<g fill-rule="evenodd"><path d="M7 4h10v11H7z" opacity=".09"></path><path d="M7 10v4c0 1.1.9 2 2 2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2H9c-1.1 0-2 1.1-2 2v4H4.143L5 6 2 9.5 5 13l-.857-3H7v2h1v-2H7Zm1 0v4.154c0 .474.45.846 1 .846h7c.54 0 1-.38 1-.846V4.846C17 4.372 16.55 4 16 4H9c-.54 0-1 .38-1 .846V9h5v1H8Zm0-1V7H7v2h1Z"></path></g>',
   help: '<g fill-rule="evenodd"><path d="M10 18c-4.417 0-8-3.583-8-8s3.583-8 8-8 8 3.583 8 8-3.583 8-8 8Z" opacity=".1"></path><path fill-rule="nonzero" d="M19 10c0-4.974-4.026-9-9-9s-9 4.026-9 9 4.026 9 9 9 9-4.026 9-9Zm-9 7.94A7.942 7.942 0 0 1 2.06 10 7.942 7.942 0 0 1 10 2.06 7.942 7.942 0 0 1 17.94 10 7.942 7.942 0 0 1 10 17.94Z"></path><path fill-rule="nonzero" d="M10 14a1 1 0 1 1 0 2 1 1 0 0 1 0-2Zm.129-10a3.132 3.132 0 0 1 3.128 3.13c0 1.568-1.16 2.87-2.667 3.094v1.823a.462.462 0 0 1-.923 0V9.796c0-.255.207-.462.462-.462a2.207 2.207 0 0 0 2.205-2.205c0-1.216-.99-2.206-2.205-2.206-1.217 0-2.206.99-2.206 2.206a.462.462 0 0 1-.923 0A3.132 3.132 0 0 1 10.129 4Z"></path></g>',
   microTune: '<path fill-rule="evenodd" d="M2.5 5a2.5 2.5 0 0 1 2.45 2H10v1H4.95A2.5 2.5 0 1 1 2.5 5Zm0 1a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Zm5-6a2.5 2.5 0 1 1-2.45 3H0V2h5.05A2.5 2.5 0 0 1 7.5 0Zm0 1a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z"></path>',
   microArrow: '<path d="m2 4 2.995 3L7.99 4z"></path>',
@@ -989,6 +989,19 @@ function recommendationCollectionPath(proposal) {
   return proposal?.parentId ? `${collectionPath(proposal.parentId)} / ${name}` : name;
 }
 
+function syncRecommendationTagButtons(form) {
+  const currentTags = new Set((form._recommendationGetTags?.() || []).map((tag) => String(tag).toLocaleLowerCase()));
+  form.querySelectorAll("[data-recommendation-tag-add]").forEach((button) => {
+    const value = button.dataset.recommendationTagAdd?.trim();
+    const added = currentTags.has(value?.toLocaleLowerCase());
+    const label = t(added ? "移除标签" : "添加标签");
+    button.disabled = false;
+    button.title = label;
+    button.setAttribute("aria-label", `${label} ${value}`);
+    button.setAttribute("aria-pressed", String(added));
+  });
+}
+
 function collectionAtLevel(name, parentId = null) {
   const key = String(name || "").trim().toLocaleLowerCase();
   const level = parentId || null;
@@ -1055,7 +1068,7 @@ function renderRecommendations(form, result, mode = "local", status = "", busy =
   panel.dataset.recommendationMode = mode;
   panel.querySelector(".bookmark-recommendations-header strong").textContent = t(mode === "ai" ? "AI 推荐收藏集" : "系统推荐收藏集");
   panel.querySelector("[data-recommendation-status]").textContent = status || (!hasSuggestion ? t("没有足够相似的书签") : "");
-  panel.querySelector("[data-recommendation-body]").innerHTML = localizeHtml(hasSuggestion ? `<div class="recommendation-items">${suggestion.collectionId ? `<label class="recommendation-option"><input type="checkbox" data-recommendation-collection checked><span>${t("推荐收藏集")}</span><strong>${escapeHtml(collectionPath(suggestion.collectionId))}</strong></label>` : ""}${suggestion.newCollection?.name ? `<div class="recommendation-new-collection"><div><span>${t("新收藏集")}</span><strong>${escapeHtml(recommendationCollectionPath(suggestion.newCollection))}</strong></div><button type="button" data-recommendation-create-collection>${t("创建并选中")}</button></div>` : ""}${suggestion.tags?.length ? `<div class="recommendation-tags"><span>${t("推荐标签")}</span>${suggestion.tags.map((tag) => { const value = String(tag); const added = currentTags.has(value.toLocaleLowerCase()); return `<div class="recommendation-tag"><input type="checkbox" data-recommendation-tag value="${escapeHtml(value)}" checked><button type="button" class="recommendation-tag-add" data-recommendation-tag-add="${escapeHtml(value)}" title="${escapeHtml(t("添加标签"))}" aria-label="${escapeHtml(`${added ? t("已应用") : t("添加标签")} ${value}`)}" aria-pressed="${added}" ${added ? "disabled" : ""}>#${escapeHtml(value)}</button></div>`; }).join("")}</div>` : ""}${suggestion.note ? `<div class="recommendation-note"><div class="recommendation-note-header"><span>${t("备注")}</span><button type="button" data-recommendation-note-add aria-pressed="${noteApplied}" ${noteApplied ? "disabled" : ""}>${noteApplied ? t("已应用") : t("添加备注")}</button></div><textarea data-recommendation-note rows="3">${escapeHtml(noteValue)}</textarea></div>` : ""}</div>` : "");
+  panel.querySelector("[data-recommendation-body]").innerHTML = localizeHtml(hasSuggestion ? `<div class="recommendation-items">${suggestion.collectionId ? `<label class="recommendation-option"><input type="checkbox" data-recommendation-collection checked><span>${t("推荐收藏集")}</span><strong>${escapeHtml(collectionPath(suggestion.collectionId))}</strong></label>` : ""}${suggestion.newCollection?.name ? `<div class="recommendation-new-collection"><div><span>${t("新收藏集")}</span><strong>${escapeHtml(recommendationCollectionPath(suggestion.newCollection))}</strong></div><button type="button" data-recommendation-create-collection>${t("创建并选中")}</button></div>` : ""}${suggestion.tags?.length ? `<div class="recommendation-tags"><span>${t("推荐标签")}</span>${suggestion.tags.map((tag) => { const value = String(tag); const added = currentTags.has(value.toLocaleLowerCase()); return `<div class="recommendation-tag"><input type="checkbox" data-recommendation-tag value="${escapeHtml(value)}" checked><button type="button" class="recommendation-tag-add" data-recommendation-tag-add="${escapeHtml(value)}" title="${escapeHtml(t(added ? "移除标签" : "添加标签"))}" aria-label="${escapeHtml(`${added ? t("移除标签") : t("添加标签")} ${value}`)}" aria-pressed="${added}">#${escapeHtml(value)}</button></div>`; }).join("")}</div>` : ""}${suggestion.note ? `<div class="recommendation-note"><div class="recommendation-note-header"><span>${t("备注")}</span><button type="button" data-recommendation-note-add aria-pressed="${noteApplied}" ${noteApplied ? "disabled" : ""}>${noteApplied ? t("已应用") : t("添加备注")}</button></div><textarea data-recommendation-note rows="3">${escapeHtml(noteValue)}</textarea></div>` : ""}</div>` : "");
   const aiButton = panel.querySelector("[data-recommendation-ai]");
   const applyButton = panel.querySelector("[data-recommendation-apply]");
   aiButton.hidden = !aiEnabled;
@@ -1070,12 +1083,14 @@ function renderRecommendations(form, result, mode = "local", status = "", busy =
     button.onclick = () => {
       const value = button.dataset.recommendationTagAdd?.trim();
       const tags = form._recommendationGetTags();
-      if (!value || tags.some((tag) => tag.toLocaleLowerCase() === value.toLocaleLowerCase())) return;
-      form._recommendationSetTags([...tags, value]);
+      if (!value) return;
+      const valueKey = value.toLocaleLowerCase();
+      const nextTags = tags.some((tag) => tag.toLocaleLowerCase() === valueKey)
+        ? tags.filter((tag) => tag.toLocaleLowerCase() !== valueKey)
+        : [...tags, value];
+      form._recommendationSetTags(nextTags);
       if (result?.input) result.input.tags = form._recommendationGetTags();
-      button.disabled = true;
-      button.setAttribute("aria-pressed", "true");
-      button.setAttribute("aria-label", `${t("已应用")} ${value}`);
+      syncRecommendationTagButtons(form);
     };
   });
   const noteInput = panel.querySelector("[data-recommendation-note]");
@@ -1786,7 +1801,7 @@ function sidebarMarkup() {
 
 function accountMenuMarkup() {
   const item = (icon, label, action) => `<button type="button" role="menuitem" data-account-action="${action}">${treeIcon(icon)}<span>${label}</span></button>`;
-  return `<div class="account-menu" role="menu" data-account-menu ${state.accountMenuOpen ? "" : "hidden"}>${item("settings", "设置", "settings")}<span class="menu-separator"></span>${item("extension", "浏览器扩展", "extension")}${item("install", "下载应用", "download")}<span class="menu-separator"></span>${item("help", "帮助与支持", "help")}${item("history", "博客", "blog")}${item("calendar", "更新内容?", "updates")}<span class="menu-separator"></span>${item("exit", "注销", "logout")}</div>`;
+  return `<div class="account-menu" role="menu" data-account-menu ${state.accountMenuOpen ? "" : "hidden"}>${item("settings", "设置", "settings")}<span class="menu-separator"></span>${item("exit", "注销", "logout")}</div>`;
 }
 
 const SETTINGS_NAV = [
@@ -4031,6 +4046,7 @@ function bind() {
     const syncTags = () => {
       tagValue.value = JSON.stringify(editTags);
       tagTokens.innerHTML = editTags.map((tag, index) => `<span class="edit-tag-token"><span>#</span><span>${escapeHtml(tag)}</span><button type="button" data-remove-edit-tag="${index}" aria-label="${t("删除标签")} ${escapeHtml(tag)}">×</button></span>`).join("");
+      syncRecommendationTagButtons(form);
     };
     const updateTagMenu = () => {
       const value = candidate();
