@@ -114,6 +114,7 @@ const EN_TEXT = Object.freeze({
 });
 
 const EXTRA_EN_TEXT = Object.freeze({
+  "系统推荐收藏集": "System suggested collection", "AI 推荐收藏集": "AI suggested collection", "新收藏集": "New collection", "创建并选中": "Create and select", "已创建并选中": "Created and selected",
   "应用建议": "Apply suggestions", "已应用": "Applied", "AI 配置": "AI configuration", "提供商": "Provider", "Cloudflare Workers AI": "Cloudflare Workers AI", "外部 OpenAI 兼容 API": "External OpenAI-compatible API", "模型": "Model", "免费额度": "Free quota", "API 地址": "API base URL", "API Key": "API key", "已配置，留空保持不变": "Configured; leave blank to keep", "输入 API Key": "Enter API key", "清除已保存的 API Key": "Clear saved API key", "Prompt": "Prompt", "保存 AI 设置": "Save AI settings", "恢复默认 Prompt": "Restore default prompt", "尚未配置可用 AI": "No usable AI is configured", "Worker 已配置 Workers AI": "Workers AI is configured on this Worker", "外部 API 已配置": "External API is configured", "请在下方配置 Workers AI。": "Configure Workers AI below.", "请在下方配置外部 OpenAI 兼容 API。": "Configure an external OpenAI-compatible API below.", "外部 API 会收到当前书签和相似书签的元数据。": "The external API receives the current bookmark and similar-bookmark metadata.", "自定义 Prompt 会保留固定 JSON 输出约束。": "Custom prompts keep the fixed JSON output contract.", "免费额度受 Cloudflare 账户限制，不代表无限免费。": "Free quota is subject to your Cloudflare account and is not unlimited.", "启用思考模式": "Enable thinking mode", "思考模式会增加等待时间和 Neurons 消耗，建议提高 max_tokens。": "Thinking mode takes longer and uses more Neurons; a higher max_tokens is recommended.", "最大输出 tokens（max_tokens）": "Maximum output tokens (max_tokens)", "控制单次 AI 请求的输出上限，范围为 128–4096。": "Controls the output limit for one AI request; range: 128–4096.", "AI 推荐说明": "AI recommendation details", "AI 建议可能需要更长时间；失败时会保留本地建议。": "AI suggestions may take longer; local suggestions are kept if AI fails.", "思考模式会增加等待时间和 Cloudflare Neurons 消耗。": "Thinking mode takes longer and uses more Cloudflare Neurons.", " 是单次输出上限，不是账户每日额度。": " is the output limit for one request, not your account's daily quota.", "如果思考模式在上限内没有返回最终 JSON，系统会自动关闭思考模式重试一次。两次都失败时不会覆盖当前内容；本地建议也不会自动覆盖当前内容。": "If thinking uses the limit before returning final JSON, the system retries once with thinking disabled. If both attempts fail, current content is not changed; local suggestions are never applied automatically.", "已自动关闭思考模式重试并生成建议": "Thinking mode was disabled for one automatic retry and suggestions were generated.", "模型未在 max_tokens 内返回最终 JSON，已保留本地建议。": "The model did not return final JSON within max_tokens; local suggestions were kept.", "模型在自动回退后仍未返回有效 JSON，已保留本地建议。": "The model still did not return valid JSON after automatic fallback; local suggestions were kept.", "Cloudflare 今日免费额度可能已用尽，请稍后再试或更换模型。": "Your Cloudflare free quota may be exhausted; try again later or choose another model.", "Cloudflare AI 暂时没有可用容量，请稍后再试。": "Cloudflare AI is temporarily out of capacity; try again later.", "该模型需要付费计划，请更换模型或检查账户。": "This model requires a paid plan; choose another model or check your account.", "外部 API Key 无效，请检查 AI 设置。": "The external API key is invalid; check AI settings.", "AI 服务尚未配置，请检查 AI 设置。": "AI is not configured; check AI settings.", "AI 服务不可用，已保留本地建议。": "AI is unavailable; local suggestions were kept.", "配置已保存": "Settings saved"
 });
 
@@ -983,6 +984,62 @@ function recommendationPanel(form) {
   return form.querySelector("[data-recommendations]");
 }
 
+function recommendationCollectionPath(proposal) {
+  const name = String(proposal?.name || "").trim();
+  return proposal?.parentId ? `${collectionPath(proposal.parentId)} / ${name}` : name;
+}
+
+function collectionAtLevel(name, parentId = null) {
+  const key = String(name || "").trim().toLocaleLowerCase();
+  const level = parentId || null;
+  return state.collections.find((item) => (item.parentId || null) === level && item.name.trim().toLocaleLowerCase() === key) || null;
+}
+
+async function createRecommendedCollection(form) {
+  const result = form._recommendationResult;
+  const suggestion = result?.ai;
+  const proposal = suggestion?.newCollection;
+  if (!proposal?.name) return;
+  const button = recommendationPanel(form)?.querySelector("[data-recommendation-create-collection]");
+  if (button) button.disabled = true;
+  try {
+    const parentId = proposal.parentId || null;
+    const existing = collectionAtLevel(proposal.name, parentId);
+    const collection = existing || await api("/v1/collections", { method: "POST", body: JSON.stringify({ name: proposal.name, parentId }) });
+    if (!existing) {
+      state.collections = [...state.collections, collection];
+      (form._recommendationCreatedCollections ||= []).push(collection.id);
+    }
+    form.elements.collectionId.innerHTML = collectionOptions(state.collections, collection.id);
+    form.elements.collectionId.value = collection.id;
+    form._recommendationSyncCollection?.();
+    suggestion.collectionId = collection.id;
+    suggestion.newCollection = null;
+    renderRecommendations(form, result, "ai", t("已创建并选中"));
+  } catch (error) {
+    if (button) button.disabled = false;
+    showError(error);
+  }
+}
+
+async function cleanupRecommendationCollections(form) {
+  const ids = [...new Set(form._recommendationCreatedCollections || [])];
+  form._recommendationCreatedCollections = [];
+  const removed = [];
+  for (const id of ids) {
+    const item = state.collections.find((entry) => entry.id === id);
+    if (!item || Number(state.collectionCounts[id] || 0) > 0) continue;
+    try {
+      await api(`/v1/collections/${encodeURIComponent(id)}?revision=${item.revision}`, { method: "DELETE" });
+      removed.push(id);
+    } catch (error) {
+      console.warn("Could not clean up an empty AI collection", error);
+    }
+  }
+  if (removed.length) state.collections = state.collections.filter((item) => !removed.includes(item.id));
+  return removed.length > 0;
+}
+
 function renderRecommendations(form, result, mode = "local", status = "", busy = false) {
   const panel = recommendationPanel(form);
   if (!panel) return;
@@ -991,21 +1048,24 @@ function renderRecommendations(form, result, mode = "local", status = "", busy =
   const noteValue = String(suggestion?.note || "");
   const noteField = form.elements.namedItem("note");
   const noteApplied = Boolean(noteValue && noteField && noteField.value.trim() === noteValue.trim());
-  const hasSuggestion = Boolean(suggestion?.collectionId || suggestion?.tags?.length || suggestion?.note);
+  const hasSuggestion = Boolean(suggestion?.collectionId || suggestion?.newCollection?.name || suggestion?.tags?.length || suggestion?.note);
+  const canApply = Boolean(suggestion?.collectionId || suggestion?.tags?.length || suggestion?.note);
   const aiEnabled = Boolean(state.preferences?.aiRecommendations && state.aiRecommendationsAvailable && validRecommendationLink(result?.input?.link || ""));
   panel.hidden = !recommendationsEnabled();
   panel.dataset.recommendationMode = mode;
+  panel.querySelector(".bookmark-recommendations-header strong").textContent = t(mode === "ai" ? "AI 推荐收藏集" : "系统推荐收藏集");
   panel.querySelector("[data-recommendation-status]").textContent = status || (!hasSuggestion ? t("没有足够相似的书签") : "");
-  panel.querySelector("[data-recommendation-body]").innerHTML = localizeHtml(hasSuggestion ? `<div class="recommendation-items">${suggestion.collectionId ? `<label class="recommendation-option"><input type="checkbox" data-recommendation-collection checked><span>${t("推荐收藏集")}</span><strong>${escapeHtml(collectionPath(suggestion.collectionId))}</strong></label>` : ""}${suggestion.tags?.length ? `<div class="recommendation-tags"><span>${t("推荐标签")}</span>${suggestion.tags.map((tag) => { const value = String(tag); const added = currentTags.has(value.toLocaleLowerCase()); return `<div class="recommendation-tag"><input type="checkbox" data-recommendation-tag value="${escapeHtml(value)}" checked><button type="button" class="recommendation-tag-add" data-recommendation-tag-add="${escapeHtml(value)}" title="${escapeHtml(t("添加标签"))}" aria-label="${escapeHtml(`${added ? t("已应用") : t("添加标签")} ${value}`)}" aria-pressed="${added}" ${added ? "disabled" : ""}>#${escapeHtml(value)}</button></div>`; }).join("")}</div>` : ""}${suggestion.note ? `<div class="recommendation-note"><div class="recommendation-note-header"><span>${t("备注")}</span><button type="button" data-recommendation-note-add aria-pressed="${noteApplied}" ${noteApplied ? "disabled" : ""}>${noteApplied ? t("已应用") : t("添加备注")}</button></div><textarea data-recommendation-note rows="3">${escapeHtml(noteValue)}</textarea></div>` : ""}</div>` : "");
+  panel.querySelector("[data-recommendation-body]").innerHTML = localizeHtml(hasSuggestion ? `<div class="recommendation-items">${suggestion.collectionId ? `<label class="recommendation-option"><input type="checkbox" data-recommendation-collection checked><span>${t("推荐收藏集")}</span><strong>${escapeHtml(collectionPath(suggestion.collectionId))}</strong></label>` : ""}${suggestion.newCollection?.name ? `<div class="recommendation-new-collection"><div><span>${t("新收藏集")}</span><strong>${escapeHtml(recommendationCollectionPath(suggestion.newCollection))}</strong></div><button type="button" data-recommendation-create-collection>${t("创建并选中")}</button></div>` : ""}${suggestion.tags?.length ? `<div class="recommendation-tags"><span>${t("推荐标签")}</span>${suggestion.tags.map((tag) => { const value = String(tag); const added = currentTags.has(value.toLocaleLowerCase()); return `<div class="recommendation-tag"><input type="checkbox" data-recommendation-tag value="${escapeHtml(value)}" checked><button type="button" class="recommendation-tag-add" data-recommendation-tag-add="${escapeHtml(value)}" title="${escapeHtml(t("添加标签"))}" aria-label="${escapeHtml(`${added ? t("已应用") : t("添加标签")} ${value}`)}" aria-pressed="${added}" ${added ? "disabled" : ""}>#${escapeHtml(value)}</button></div>`; }).join("")}</div>` : ""}${suggestion.note ? `<div class="recommendation-note"><div class="recommendation-note-header"><span>${t("备注")}</span><button type="button" data-recommendation-note-add aria-pressed="${noteApplied}" ${noteApplied ? "disabled" : ""}>${noteApplied ? t("已应用") : t("添加备注")}</button></div><textarea data-recommendation-note rows="3">${escapeHtml(noteValue)}</textarea></div>` : ""}</div>` : "");
   const aiButton = panel.querySelector("[data-recommendation-ai]");
   const applyButton = panel.querySelector("[data-recommendation-apply]");
   aiButton.hidden = !aiEnabled;
   aiButton.disabled = busy;
-  applyButton.hidden = !hasSuggestion;
+  applyButton.hidden = !canApply;
   applyButton.textContent = t(mode === "ai" ? "应用 AI 建议" : "应用本地建议");
-  applyButton.disabled = !hasSuggestion;
+  applyButton.disabled = !canApply;
   panel.querySelector("[data-recommendation-ai]").onclick = () => requestAiRecommendations(form);
   panel.querySelector("[data-recommendation-apply]").onclick = () => applyRecommendations(form);
+  panel.querySelector("[data-recommendation-create-collection]")?.addEventListener("click", () => createRecommendedCollection(form));
   panel.querySelectorAll("[data-recommendation-tag-add]").forEach((button) => {
     button.onclick = () => {
       const value = button.dataset.recommendationTagAdd?.trim();
@@ -3790,6 +3850,7 @@ function bind() {
   root.querySelectorAll("[data-edit]").forEach((button) => button.onclick = () => {
     const item = state.items.find((entry) => entry.id === button.dataset.edit);
     const form = editBookmarkDialog.querySelector("form");
+    form._recommendationCreatedCollections = [];
     form.elements.link.value = item.link;
     form.elements.title.value = item.title;
     form.elements.description.value = item.description;
@@ -4099,6 +4160,9 @@ function bind() {
   });
   root.querySelector("#add-bookmark").onclick = () => {
     const form = bookmarkDialog.querySelector("form");
+    form.reset();
+    form.elements.tags.value = "[]";
+    form._recommendationCreatedCollections = [];
     form.elements.collectionId.innerHTML = collectionOptions(state.collections, state.collectionId || state.preferences.defaultCollectionId);
     bindRecommendationForm(form, {
       getTags: () => {
@@ -4409,36 +4473,64 @@ collectionShareDialog.querySelector("#system-collection-share").onclick = () => 
 };
 
 bookmarkDialog.addEventListener("close", async () => {
-  if (bookmarkDialog.returnValue !== "create") return;
   const form = bookmarkDialog.querySelector("form");
-  const fields = new FormData(form);
-  await api("/v1/bookmarks", { method: "POST", body: JSON.stringify({ link: fields.get("link"), title: fields.get("title"), note: fields.get("note"), tags: JSON.parse(fields.get("tags") || "[]"), collectionId: fields.get("collectionId") }) });
-  form.reset();
+  if (bookmarkDialog.returnValue !== "create") {
+    if (await cleanupRecommendationCollections(form)) load().catch(showError);
+    return;
+  }
+  try {
+    const fields = new FormData(form);
+    await api("/v1/bookmarks", { method: "POST", body: JSON.stringify({ link: fields.get("link"), title: fields.get("title"), note: fields.get("note"), tags: JSON.parse(fields.get("tags") || "[]"), collectionId: fields.get("collectionId") }) });
+    form.reset();
+    form._recommendationCreatedCollections = [];
+  } catch (error) {
+    if (await cleanupRecommendationCollections(form)) load().catch(showError);
+    showError(error);
+    return;
+  }
   load().catch(showError);
 });
 
 editBookmarkDialog.addEventListener("close", async () => {
-  if (editBookmarkDialog.returnValue !== "save") return;
+  const form = editBookmarkDialog.querySelector("form");
+  if (editBookmarkDialog.returnValue !== "save") {
+    if (await cleanupRecommendationCollections(form)) load().catch(showError);
+    return;
+  }
   const item = state.items.find((entry) => entry.id === editBookmarkDialog.dataset.bookmarkId);
-  if (!item) return;
-  const fields = new FormData(editBookmarkDialog.querySelector("form"));
-  await mutate(`/v1/bookmarks/${item.id}`, {
-    method: "PATCH",
-    body: JSON.stringify({
-      revision: item.revision,
-      link: fields.get("link"),
-      title: fields.get("title"),
-      description: fields.get("description"),
-      note: fields.get("note"),
-      reminder: fields.get("reminder"),
-      cover: fields.get("cover") || "",
-      media: JSON.parse(fields.get("media") || "[]"),
-      collectionId: fields.get("collectionId"),
-      tags: JSON.parse(fields.get("tags") || "[]"),
-      favorite: fields.has("favorite"),
-      highlights: JSON.parse(editBookmarkDialog.dataset.highlights),
-    }),
-  });
+  if (!item) {
+    if (await cleanupRecommendationCollections(form)) load().catch(showError);
+    return;
+  }
+  try {
+    const fields = new FormData(form);
+    const saved = await mutate(`/v1/bookmarks/${item.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        revision: item.revision,
+        link: fields.get("link"),
+        title: fields.get("title"),
+        description: fields.get("description"),
+        note: fields.get("note"),
+        reminder: fields.get("reminder"),
+        cover: fields.get("cover") || "",
+        media: JSON.parse(fields.get("media") || "[]"),
+        collectionId: fields.get("collectionId"),
+        tags: JSON.parse(fields.get("tags") || "[]"),
+        favorite: fields.has("favorite"),
+        highlights: JSON.parse(editBookmarkDialog.dataset.highlights),
+      }),
+    });
+    if (!saved) {
+      if (await cleanupRecommendationCollections(form)) load().catch(showError);
+      return;
+    }
+    form._recommendationCreatedCollections = [];
+  } catch (error) {
+    if (await cleanupRecommendationCollections(form)) load().catch(showError);
+    showError(error);
+    return;
+  }
   load().catch(showError);
 });
 

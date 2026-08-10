@@ -156,10 +156,36 @@ test("AI recommendations return confirmed metadata without exposing provider det
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), {
     collectionId: "frontend",
+    newCollection: null,
     tags: ["React", "performance"],
     note: "关于 React 性能优化的参考资料。",
   });
   assert.match(prompt, /React performance/);
+});
+
+test("AI recommendations can propose a new collection and reject an unknown parent", async () => {
+  const store = new MemoryStore();
+  let responseText = JSON.stringify({ collectionId: null, newCollection: { name: "阅读清单", parentId: "missing" }, tags: ["reading"], note: "待阅读。" });
+  const api = createApi({
+    key: "test-key",
+    store,
+    ai: { async run() { return { response: responseText }; } },
+    aiModel: "test-model",
+  });
+  let response = await api.fetch(request("/v1/ai/recommendations", {
+    method: "POST",
+    body: JSON.stringify({ link: "https://example.com/read", collections: [{ id: "frontend", name: "前端" }] }),
+  }));
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { collectionId: null, newCollection: null, tags: ["reading"], note: "待阅读。" });
+
+  responseText = JSON.stringify({ collectionId: null, newCollection: { name: "阅读清单", parentId: "frontend" }, tags: [], note: "" });
+  response = await api.fetch(request("/v1/ai/recommendations", {
+    method: "POST",
+    body: JSON.stringify({ link: "https://example.com/read", collections: [{ id: "frontend", name: "前端" }] }),
+  }));
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { collectionId: null, newCollection: { name: "阅读清单", parentId: "frontend" }, tags: [], note: "" });
 });
 
 test("AI recommendations ignore reasoning JSON before the final answer", async () => {
@@ -179,7 +205,7 @@ test("AI recommendations ignore reasoning JSON before the final answer", async (
   }));
 
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { collectionId: "frontend", tags: ["reading"], note: "待阅读。" });
+  assert.deepEqual(await response.json(), { collectionId: "frontend", newCollection: null, tags: ["reading"], note: "待阅读。" });
 });
 
 test("Workers AI recommendations disable model reasoning for the JSON answer", async () => {
@@ -200,7 +226,7 @@ test("Workers AI recommendations disable model reasoning for the JSON answer", a
   }));
 
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { collectionId: null, tags: ["reading"], note: "待阅读。" });
+  assert.deepEqual(await response.json(), { collectionId: null, newCollection: null, tags: ["reading"], note: "待阅读。" });
 });
 
 test("Workers AI recommendations retry once without reasoning after an invalid answer", async () => {
@@ -226,7 +252,7 @@ test("Workers AI recommendations retry once without reasoning after an invalid a
   }));
 
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { collectionId: null, tags: ["reading"], note: "待阅读。", fallbackUsed: true });
+  assert.deepEqual(await response.json(), { collectionId: null, newCollection: null, tags: ["reading"], note: "待阅读。", fallbackUsed: true });
   assert.equal(calls.length, 2);
   assert.equal(calls[0].max_tokens, 800);
   assert.equal(calls[0].chat_template_kwargs.enable_thinking, true);
@@ -297,7 +323,7 @@ test("AI settings select an external provider, encrypt its key, and keep the def
     body: JSON.stringify({ link: "https://example.com/read", title: "Reading list" }),
   }));
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { collectionId: null, tags: ["reading"], note: "待阅读。" });
+  assert.deepEqual(await response.json(), { collectionId: null, newCollection: null, tags: ["reading"], note: "待阅读。" });
   assert.equal(externalRequest.url, "https://api.example/v1/chat/completions");
   assert.equal(externalRequest.init.headers.authorization, "Bearer secret-key");
   const payload = JSON.parse(externalRequest.init.body);
