@@ -1,5 +1,29 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
-  <rect width="64" height="64" rx="16" fill="#0d6efd"/>
-  <path d="M21 15a5 5 0 0 1 5-5h12a5 5 0 0 1 5 5v34L32 42 21 49V15Z" fill="white"/>
-  <path d="M27 18h10M27 25h10" stroke="#0d6efd" stroke-width="4" stroke-linecap="round"/>
+  <defs>
+    <linearGradient id="plum" x1="8" y1="3" x2="55" y2="61" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#DED2F5"/>
+      <stop offset=".42" stop-color="#9670BC"/>
+      <stop offset="1" stop-color="#3A2048"/>
+    </linearGradient>
+    <radialGradient id="bloom" cx="0" cy="0" r="1" gradientTransform="translate(17 8) rotate(48) scale(42)">
+      <stop stop-color="#fff" stop-opacity=".28"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="paper" x1="32" y1="14" x2="32" y2="50" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFEFA"/>
+      <stop offset="1" stop-color="#F4E9D9"/>
+    </linearGradient>
+    <filter id="glyphShadow" x="15" y="11" width="34" height="43" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="1.5" stdDeviation="1.25" flood-color="#25132E" flood-opacity=".28"/>
+    </filter>
+    <clipPath id="squircle"><rect width="64" height="64" rx="16"/></clipPath>
+  </defs>
+
+  <rect width="64" height="64" rx="16" fill="url(#plum)"/>
+  <rect width="64" height="64" rx="16" fill="url(#bloom)"/>
+  <path d="M-4 25C16 13 39 10 68 19V-4H-4v29Z" fill="#fff" fill-opacity=".1" clip-path="url(#squircle)"/>
+  <rect x=".75" y=".75" width="62.5" height="62.5" rx="15.25" stroke="#fff" stroke-opacity=".14" stroke-width="1.5"/>
+
+  <path d="M19 17.5a8.5 8.5 0 0 1 8.5-8.5h9a8.5 8.5 0 0 1 8.5 8.5V49L32 41.4 19 49V17.5ZM32 20a4 4 0 0 0-2.5 7.1L27.6 35h8.8l-1.9-7.9A4 4 0 0 0 32 20Z" fill="url(#paper)" fill-rule="evenodd" clip-rule="evenodd" filter="url(#glyphShadow)"/>
+  <path d="M27.5 10h9a7.5 7.5 0 0 1 7.3 5.8" stroke="#fff" stroke-opacity=".55" stroke-width="1.2" stroke-linecap="round"/>
 </svg>
