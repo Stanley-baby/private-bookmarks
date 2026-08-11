@@ -24,6 +24,17 @@ test("workspace controls keep full labels until the content becomes compact", ()
   assert.match(compactRules, /\.workspace-sort,\s*\n\s*\.view-trigger,\s*\n\s*\.workspace-tools > \.export \{ width: 36px;/);
 });
 
+test("bookmark editing keeps the list visible in a desktop split pane", () => {
+  assert.match(library, /editingId: ""/);
+  assert.match(library, /mountEditPanel\(editWasOpen\)/);
+  assert.match(library, /editFormIsDirty/);
+  assert.match(library, /editBookmarkDialog\.show\(\)/);
+  assert.doesNotMatch(library, /editBookmarkDialog\.showModal\(\)/);
+  assert.match(css, /\.library\.editing \{ grid-template-columns: var\(--sidebar-width\) minmax\(280px, 420px\) minmax\(0, 1fr\); \}/);
+  assert.match(css, /\.edit-panel \{ position: static;/);
+  assert.match(css, /@media \(max-width: 1100px\)[\s\S]*?\.edit-panel \{ position: fixed;/);
+});
+
 test("search filters use the reference 20px icons and per-filter artwork", () => {
   assert.match(declarations(".search-filter-icon .tree-svg"), /width: 20px; height: 20px/);
   for (const icon of ["article", "audio", "document", "image", "video", "highlights", "reminder", "public", "broken"]) {
