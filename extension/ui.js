@@ -66,3 +66,11 @@ export function collectionOptions(collections, selected = "unsorted") {
 export function escapeHtml(value = "") {
   return String(value).replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]);
 }
+
+export function shouldShowGlobalLoading(hasRenderedContent) {
+  return !hasRenderedContent;
+}
+
+export function isCurrentRequest(generation, currentGeneration) {
+  return generation === currentGeneration;
+}
