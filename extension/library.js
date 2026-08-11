@@ -79,7 +79,7 @@ function persistBackupHistory(history) {
 const state = {
   view: initialRoute.get("view") || "all", collectionId: initialRoute.get("collection"), query: initialRoute.get("search") || "", tag: "", selected: new Set(), favoriteCount: 0, tags: [],
   items: [], allItems: [], collections: [], collectionCounts: {}, trashCount: 0, trashedCollections: [], preferences: null, layout: "list",
-  collapsedCollections: new Set(), dragBookmark: null, dragCollection: null, searchTimer: null, sidebarWidth: null, cardMenuId: null, cardActionProxies: null,
+  collapsedCollections: new Set(), dragBookmark: null, dragCollection: null, searchTimer: null, sidebarWidth: null, cardMenuId: null, cardActionProxies: null, editingId: "", editSnapshot: "",
   searchMenuOpen: false, searchFilterGroup: null, sortMenuOpen: false, viewMenuOpen: false, themeMenuOpen: false, recentSearches: readSearchHistory(), groupMenuId: null, collectionMenuId: null, pickerCollectionMenuId: null, pickerGroupMenuId: null, inlineCollectionCreate: null, tagMenuOpen: false, tagItemMenu: null, collectionValueAction: null, collectionValueId: null, collectionSelection: null,
   selectionMoreOpen: false, selectionScreenshotWorking: false, sidebarOpen: false, accountMenuOpen: false, mediaUploadEnabled: false, aiRecommendationsAvailable: false, aiSettings: null, aiBusy: false,
   settingsOpen: initialSettingsRoute, settingsSection: initialSettingsSection || "app", settingsMenu: null, settingsNeedsReload: false, settingsSavePromise: null, connectionInfo: null,
@@ -1451,8 +1451,43 @@ function pickerCoverUrl(value, item) {
   return `https://rdl.ink/render/${encodeURIComponent(url)}?mode=crop&width=128&height=96&dpr=2`;
 }
 
+function editFormSnapshot() {
+  const form = editBookmarkDialog.querySelector("form");
+  if (!form) return "";
+  const fields = new FormData(form);
+  return JSON.stringify({
+    link: fields.get("link") || "",
+    title: fields.get("title") || "",
+    description: fields.get("description") || "",
+    note: fields.get("note") || "",
+    reminder: fields.get("reminder") || "",
+    cover: fields.get("cover") || "",
+    media: fields.get("media") || "[]",
+    collectionId: fields.get("collectionId") || "",
+    tags: fields.get("tags") || "[]",
+    favorite: fields.has("favorite"),
+    highlights: editBookmarkDialog.dataset.highlights || "[]",
+  });
+}
+
+function editFormIsDirty() {
+  return Boolean(state.editingId && state.editSnapshot && state.editSnapshot !== editFormSnapshot());
+}
+
+function syncEditPanelLayout(open = editBookmarkDialog.open) {
+  root.querySelector(".library")?.classList.toggle("editing", Boolean(open && state.editingId));
+}
+
+function mountEditPanel(wasOpen = editBookmarkDialog.open) {
+  const library = root.querySelector(".library");
+  if (!library) return;
+  if (editBookmarkDialog.parentElement !== library) library.append(editBookmarkDialog);
+  if (wasOpen && !editBookmarkDialog.open) editBookmarkDialog.show();
+  syncEditPanelLayout(wasOpen);
+}
+
 function activeEditItem() {
-  const id = editBookmarkDialog.dataset.bookmarkId;
+  const id = state.editingId || (editBookmarkDialog.open ? editBookmarkDialog.dataset.bookmarkId : "");
   return state.items.find((item) => item.id === id) || state.allItems.find((item) => item.id === id) || null;
 }
 
@@ -2894,6 +2929,7 @@ async function load() {
 function render() {
   if (state.settingsOpen) return renderSettings();
   document.title = languageIsEnglish() ? "Private Bookmarks" : "私有书签";
+  const editWasOpen = editBookmarkDialog.open;
   const items = sortedItems();
   const selection = items.filter((item) => state.selected.has(item.id));
   const duplicates = duplicateLinks(sidebarItems());
@@ -2904,6 +2940,7 @@ function render() {
   const cardMenu = cardMenuItem ? cardActionMenu(cardMenuItem) : "";
   root.innerHTML = localizeHtml(`<main class="library">${sidebarMarkup()}<section class="content"><header class="topbar"><label class="quick-search"><span>⌕</span><input id="search" value="${escapeHtml(state.query)}" placeholder="搜索" autocomplete="off"><kbd>⌘ K</kbd></label><div class="top-actions"><button id="check-links" class="top-action-icon" title="检查链接" aria-label="检查链接">${treeIcon("refresh")}</button><div class="theme-menu-wrap"><button id="theme" class="top-action-icon theme-trigger" title="主题：${themeOption().label}" aria-label="主题：${themeOption().label}" aria-haspopup="menu" aria-expanded="${state.themeMenuOpen}" data-theme-trigger>${treeIcon(themeOption().icon)}</button>${themeMenuMarkup()}</div><button id="import" class="top-action-icon" title="导入书签" aria-label="导入书签">${treeIcon("upload")}</button><button id="add-bookmark" class="primary add-bookmark">${treeIcon("add")}<span>添加</span></button></div></header><section class="workspace"><header class="workspace-head"><div class="workspace-title"><button id="select-all" class="select-all" title="选择全部" aria-label="选择全部" aria-pressed="${Boolean(items.length && selection.length === items.length)}"><span class="select-checkbox">${items.length && selection.length === items.length ? "✓" : ""}</span></button><h1>☁ ${escapeHtml(viewName())}</h1><span class="count">${items.length}</span></div><div class="workspace-tools"><select id="sort" aria-label="排序"><option value="manual" ${state.preferences?.sort === "manual" ? "selected" : ""}>手动排序</option><option value="title" ${state.preferences?.sort === "title" ? "selected" : ""}>标题 (A-Z)</option><option value="host" ${state.preferences?.sort === "host" ? "selected" : ""}>网站 (A-Z)</option><option value="created" ${state.preferences?.sort === "created" ? "selected" : ""}>最近添加</option></select><div class="view-switcher" role="group" aria-label="视图"><button data-layout="list" class="${state.layout === "list" ? "active" : ""}" title="列表视图" aria-pressed="${state.layout === "list"}">☷ 列表</button><button data-layout="grid" class="${state.layout === "grid" ? "active" : ""}" title="网格视图" aria-pressed="${state.layout === "grid"}">▦ 网格</button></div><button id="export" class="export" title="导出书签">⇩ 导出书签</button></div></header><section class="cards layout-${state.layout}" role="list">${collectionTrash}${items.length ? items.map((item, index) => card(item, index, duplicates)).join("") : collectionTrash || `<p class="empty">此视图中还没有书签。</p>`}${cardMenu}</section><div class="bookmark-count-footer" data-compact="false">${items.length} 个书签</div></section></section></main>`);
   const sidebar = root.querySelector(".sidebar");
+  mountEditPanel(editWasOpen);
   const resizer = document.createElement("div");
   resizer.className = "sidebar-resizer";
   resizer.setAttribute("role", "separator");
@@ -3864,7 +3901,14 @@ function bind() {
   prepareCardActionProxies();
   root.querySelectorAll("[data-edit]").forEach((button) => button.onclick = () => {
     const item = state.items.find((entry) => entry.id === button.dataset.edit);
+    if (!item) return;
     const form = editBookmarkDialog.querySelector("form");
+    if (editBookmarkDialog.open && state.editingId === item.id) {
+      if (button.dataset.editFocus === "tags") form.querySelector("#edit-tag-input")?.focus();
+      return;
+    }
+    if (editBookmarkDialog.open && editFormIsDirty() && !window.confirm("当前编辑尚未保存，切换会放弃修改。确定继续吗？")) return;
+    state.editingId = item.id;
     form._recommendationCreatedCollections = [];
     form.elements.link.value = item.link;
     form.elements.title.value = item.title;
@@ -4145,7 +4189,9 @@ function bind() {
     if (highlightsButton) highlightsButton.onclick = () => {
       editBookmarkDialog.dataset.highlights = JSON.stringify(editHighlights({ ...item, highlights: JSON.parse(editBookmarkDialog.dataset.highlights) }));
     };
-    editBookmarkDialog.showModal();
+    if (!editBookmarkDialog.open) editBookmarkDialog.show();
+    state.editSnapshot = editFormSnapshot();
+    syncEditPanelLayout();
     if (button.dataset.editFocus === "tags") queueMicrotask(() => form.querySelector("#edit-tag-input")?.focus());
   });
   root.querySelectorAll("[data-delete]").forEach((button) => button.onclick = async () => {
@@ -4509,11 +4555,16 @@ bookmarkDialog.addEventListener("close", async () => {
 
 editBookmarkDialog.addEventListener("close", async () => {
   const form = editBookmarkDialog.querySelector("form");
+  const bookmarkId = state.editingId || editBookmarkDialog.dataset.bookmarkId;
+  state.editingId = "";
+  state.editSnapshot = "";
+  editBookmarkDialog.dataset.bookmarkId = "";
+  syncEditPanelLayout(false);
   if (editBookmarkDialog.returnValue !== "save") {
     if (await cleanupRecommendationCollections(form)) load().catch(showError);
     return;
   }
-  const item = state.items.find((entry) => entry.id === editBookmarkDialog.dataset.bookmarkId);
+  const item = state.items.find((entry) => entry.id === bookmarkId);
   if (!item) {
     if (await cleanupRecommendationCollections(form)) load().catch(showError);
     return;
