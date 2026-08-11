@@ -32,8 +32,11 @@ export async function disconnect() {
 }
 
 export async function requestPagePermission(pageUrl) {
+  let url;
+  try { url = new URL(pageUrl); } catch { throw new TypeError("只能保存 HTTP(S) 页面"); }
+  if (!/^https?:$/.test(url.protocol)) throw new TypeError("只能保存 HTTP(S) 页面");
   if (!extensionStorage) return true;
-  const origin = new URL(pageUrl).origin;
+  const origin = url.origin;
   if (await chrome.permissions.contains({ origins: [`${origin}/*`] })) return true;
   return chrome.permissions.request({ origins: [`${origin}/*`] });
 }

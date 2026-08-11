@@ -4,7 +4,7 @@ import { canonicalImportLink, parseImportText } from "./import.js";
 import { disablePin, enablePin, lockNow, lockState, prepareLock, setAutoLock, startLockMonitor } from "./lock.js?v=20260808-pin2";
 import { renderMarkdown } from "./markdown.js";
 import { recommendBookmark } from "./recommendations.js";
-import { collectionOptions, connectionView, escapeHtml, lockView } from "./ui.js?v=20260808-pin2";
+import { collectionOptions, connectionView, escapeHtml, isCurrentRequest, lockView, shouldShowGlobalLoading } from "./ui.js?v=20260811-navigation3";
 
 const root = document.querySelector("#app");
 const collectionValueDialog = document.querySelector("#collection-value-dialog");
@@ -83,8 +83,23 @@ const state = {
   searchMenuOpen: false, searchFilterGroup: null, sortMenuOpen: false, viewMenuOpen: false, themeMenuOpen: false, recentSearches: readSearchHistory(), groupMenuId: null, collectionMenuId: null, pickerCollectionMenuId: null, pickerGroupMenuId: null, inlineCollectionCreate: null, tagMenuOpen: false, tagItemMenu: null, collectionValueAction: null, collectionValueId: null, collectionSelection: null,
   selectionMoreOpen: false, selectionScreenshotWorking: false, sidebarOpen: false, accountMenuOpen: false, mediaUploadEnabled: false, aiRecommendationsAvailable: false, aiSettings: null, aiBusy: false,
   settingsOpen: initialSettingsRoute, settingsSection: initialSettingsSection || "app", settingsMenu: null, settingsNeedsReload: false, settingsSavePromise: null, connectionInfo: null,
+  viewSwitching: false,
+  loading: false,
   importPreview: readImportProgress(), importBusy: false, backups: readBackupHistory(), backupSource: "local", backupBusy: false, backupLoading: false, backupIncludeMedia: false, cloudConnections: [], cloudBackups: { dropbox: [], google: [], onedrive: [] }, cloudBackupLoading: {}, cloudBackupErrors: {}, cloudBusy: false, lock: { enabled: false, locked: false, autoLock: "15" },
 };
+
+function setGlobalLoading(loading) {
+  if (!root) return;
+  state.loading = Boolean(loading);
+  root.setAttribute("aria-busy", String(state.loading));
+  root.classList.toggle("is-loading", state.loading);
+  let indicator = root.querySelector("[data-global-loading]");
+  if (state.loading && !indicator) {
+    root.insertAdjacentHTML("beforeend", `<div class="global-loading" data-global-loading role="status" aria-live="polite"><span class="global-loading-spinner" aria-hidden="true"></span><span>${t("正在加载…")}</span></div>`);
+  } else if (!state.loading) {
+    indicator?.remove();
+  }
+}
 
 function setSettingsRoute(open, section = state.settingsSection || "app") {
   const url = new URL(location.href);
@@ -104,7 +119,7 @@ function setSettingsRoute(open, section = state.settingsSection || "app") {
 const EN_TEXT = Object.freeze({
   " 个书签": " bookmarks",
   "默认模式": "Default mode", "基础模式": "Basic mode", "严格模式": "Strict mode",
-  "使用此封面": "Use this cover", "此书签还没有可用的候选封面。": "This bookmark has no candidate covers.", "正在创建…": "Creating…", "上传文件（需要配置 R2）": "Upload file (R2 required)", "正在上传封面…": "Uploading cover…", "已保存 ": "Saved ", "删除标签": "Remove tag", "编辑 Markdown": "Edit Markdown",
+  "使用此封面": "Use this cover", "此书签还没有可用的候选封面。": "This bookmark has no candidate covers.", "正在加载…": "Loading…", "正在创建…": "Creating…", "上传文件（需要配置 R2）": "Upload file (R2 required)", "正在上传封面…": "Uploading cover…", "已保存 ": "Saved ", "删除标签": "Remove tag", "编辑 Markdown": "Edit Markdown",
   "打开所有书签": "Open all bookmarks", "展开所有收藏集": "Expand all collections", "折叠所有收藏集": "Collapse all collections", "按名称排序所有收藏集": "Sort all collections by name", "删除所有空收藏集": "Delete all empty collections", "没有找到收藏集": "No collections found",
   "全部": "All",
   "应用": "App", "帐户": "Account", "订阅": "Subscription", "导入": "Import", "整合方式": "Integrations", "备份": "Backups", "帮助": "Help", "设置": "Settings", "私有书签": "Private Bookmarks", "私有实例": "Private instance", "实例名称": "Instance name", "实例地址": "Instance address", "访问密钥": "Access key", "已配置（仅存储在此设备）": "Configured (stored on this device only)", "头像": "Avatar", "固定实例图标": "Fixed instance icon", "认证方式": "Authentication", "访问密钥认证": "Access key authentication", "实例类型": "Instance type", "自托管实例": "Self-hosted instance", "数据统计": "Data", "书签数量": "Bookmarks", "收藏夹数量": "Collections", "废纸篓项目数": "Trash items", "媒体上传": "Media uploads", "已启用": "Enabled", "未配置": "Not configured", "断开当前设备": "Disconnect this device", "确认断开当前设备吗？": "Disconnect this device?", "档案": "File", "上传书签文件 (html、csv 或 txt)": "Upload bookmark file (html, csv, or txt)", "上传书签文件 (html、csv、txt 或 enex)": "Upload bookmark file (html, csv, txt, or enex)", "你可以从浏览器或服务的“导出书签”部分得到这个文件": "You can get this file from the browser or service's bookmark export section", "如何使用？": "How to use?", "上传文件…": "Upload file…", "导入预览": "Import preview", "文件": "File", "格式": "Format", "有效书签": "Valid bookmarks", "重复书签": "Duplicate bookmarks", "无效项目": "Invalid items", "跳过重复项目": "Skip duplicates", "导入这些书签": "Import these bookmarks", "恢复私有书签备份": "Restore Private Bookmarks backup", "备份会替换整个资料库": "This backup replaces the entire library", "当前快照已下载": "The current snapshot was downloaded", "正在解析…": "Parsing…", "正在导入…": "Importing…", "导入完成": "Import complete", "没有可导入的书签": "No bookmarks to import", "清除": "Clear", "条": " items", "个": " ",
@@ -114,6 +129,7 @@ const EN_TEXT = Object.freeze({
 });
 
 const EXTRA_EN_TEXT = Object.freeze({
+  "没有匹配的书签。": "No matching bookmarks.", "废纸篓为空。": "Trash is empty.", "此收藏夹还没有书签。": "This collection is empty.", "清除搜索": "Clear search", "返回所有书签": "Back to all bookmarks", "添加书签": "Add bookmark", "询问功能暂未接入。": "Ask is not connected yet.", "预览功能暂未接入。": "Preview is not connected yet.", "重试": "Retry", "修改收藏夹名称": "Rename collection", "更改收藏夹图标": "Change collection icon", "输入图标或 Emoji，留空恢复默认": "Enter an icon or emoji; leave blank for default",
   "系统推荐收藏集": "System suggested collection", "AI 推荐收藏集": "AI suggested collection", "新收藏集": "New collection", "创建并选中": "Create and select", "已创建并选中": "Created and selected",
   "应用建议": "Apply suggestions", "已应用": "Applied", "AI 配置": "AI configuration", "提供商": "Provider", "Cloudflare Workers AI": "Cloudflare Workers AI", "外部 OpenAI 兼容 API": "External OpenAI-compatible API", "模型": "Model", "免费额度": "Free quota", "API 地址": "API base URL", "API Key": "API key", "已配置，留空保持不变": "Configured; leave blank to keep", "输入 API Key": "Enter API key", "清除已保存的 API Key": "Clear saved API key", "Prompt": "Prompt", "保存 AI 设置": "Save AI settings", "恢复默认 Prompt": "Restore default prompt", "尚未配置可用 AI": "No usable AI is configured", "Worker 已配置 Workers AI": "Workers AI is configured on this Worker", "外部 API 已配置": "External API is configured", "请在下方配置 Workers AI。": "Configure Workers AI below.", "请在下方配置外部 OpenAI 兼容 API。": "Configure an external OpenAI-compatible API below.", "外部 API 会收到当前书签和相似书签的元数据。": "The external API receives the current bookmark and similar-bookmark metadata.", "自定义 Prompt 会保留固定 JSON 输出约束。": "Custom prompts keep the fixed JSON output contract.", "免费额度受 Cloudflare 账户限制，不代表无限免费。": "Free quota is subject to your Cloudflare account and is not unlimited.", "启用思考模式": "Enable thinking mode", "思考模式会增加等待时间和 Neurons 消耗，建议提高 max_tokens。": "Thinking mode takes longer and uses more Neurons; a higher max_tokens is recommended.", "最大输出 tokens（max_tokens）": "Maximum output tokens (max_tokens)", "控制单次 AI 请求的输出上限，范围为 128–4096。": "Controls the output limit for one AI request; range: 128–4096.", "AI 推荐说明": "AI recommendation details", "AI 建议可能需要更长时间；失败时会保留本地建议。": "AI suggestions may take longer; local suggestions are kept if AI fails.", "思考模式会增加等待时间和 Cloudflare Neurons 消耗。": "Thinking mode takes longer and uses more Cloudflare Neurons.", " 是单次输出上限，不是账户每日额度。": " is the output limit for one request, not your account's daily quota.", "如果思考模式在上限内没有返回最终 JSON，系统会自动关闭思考模式重试一次。两次都失败时不会覆盖当前内容；本地建议也不会自动覆盖当前内容。": "If thinking uses the limit before returning final JSON, the system retries once with thinking disabled. If both attempts fail, current content is not changed; local suggestions are never applied automatically.", "已自动关闭思考模式重试并生成建议": "Thinking mode was disabled for one automatic retry and suggestions were generated.", "模型未在 max_tokens 内返回最终 JSON，已保留本地建议。": "The model did not return final JSON within max_tokens; local suggestions were kept.", "模型在自动回退后仍未返回有效 JSON，已保留本地建议。": "The model still did not return valid JSON after automatic fallback; local suggestions were kept.", "Cloudflare 今日免费额度可能已用尽，请稍后再试或更换模型。": "Your Cloudflare free quota may be exhausted; try again later or choose another model.", "Cloudflare AI 暂时没有可用容量，请稍后再试。": "Cloudflare AI is temporarily out of capacity; try again later.", "该模型需要付费计划，请更换模型或检查账户。": "This model requires a paid plan; choose another model or check your account.", "外部 API Key 无效，请检查 AI 设置。": "The external API key is invalid; check AI settings.", "AI 服务尚未配置，请检查 AI 设置。": "AI is not configured; check AI settings.", "AI 服务不可用，已保留本地建议。": "AI is unavailable; local suggestions were kept.", "配置已保存": "Settings saved"
 });
@@ -130,11 +146,34 @@ const translationEntries = Object.entries({ ...EN_TEXT, ...EXTRA_EN_TEXT }).sort
 
 function translateText(text) {
   if (!languageIsEnglish()) return text;
-  return translationEntries.reduce((result, [source, translated]) => result.split(source).join(translated), text);
+  const value = String(text ?? "");
+  return translationEntries.find(([source]) => source === value)?.[1] || value;
 }
 
 function localizeHtml(markup) {
-  return translateText(markup);
+  if (!languageIsEnglish() || typeof document === "undefined") return markup;
+  const template = document.createElement("template");
+  template.innerHTML = markup;
+  const dynamic = ".bookmark-card, .card-title, .card-note, .card-description, .card-tags, .workspace-name, .collection-name, .collection-emoji, .collection-picker-item-name, .settings-profile-copy, .settings-import-preview, .recommendation-note, .recommendation-new-collection strong, .search-recent-item, .collection-trash-card";
+  const walker = document.createTreeWalker(template.content, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    if (node.parentElement?.closest(dynamic)) continue;
+    const source = node.nodeValue || "";
+    const value = source.trim();
+    if (!value) continue;
+    const translated = translateText(value);
+    if (translated !== value) node.nodeValue = source.replace(value, translated);
+  }
+  template.content.querySelectorAll("[title], [aria-label], [placeholder]").forEach((element) => {
+    if (element.closest(dynamic)) return;
+    for (const attribute of ["title", "aria-label", "placeholder"]) {
+      if (!element.hasAttribute(attribute)) continue;
+      const value = element.getAttribute(attribute) || "";
+      element.setAttribute(attribute, translateText(value));
+    }
+  });
+  return template.innerHTML;
 }
 
 const dialogTextSources = new WeakMap();
@@ -615,7 +654,7 @@ function enhanceSearch() {
   field.querySelector("kbd")?.remove();
   const group = document.createElement("div");
   group.className = "search-filter-group";
-  group.innerHTML = `<button type="button" class="search-filter-toggle" data-search-filter-toggle title="${t("搜索设置 / 筛选")}" aria-label="${t("搜索设置 / 筛选")}" aria-expanded="${state.searchMenuOpen}" tabindex="-1">${microIcon("microTune")}${microIcon("microArrow")}</button>`;
+  group.innerHTML = `<button type="button" class="search-filter-toggle" data-search-filter-toggle title="${t("搜索设置 / 筛选")}" aria-label="${t("搜索设置 / 筛选")}" aria-expanded="${state.searchMenuOpen}">${microIcon("microTune")}${microIcon("microArrow")}</button>`;
   field.append(group);
   shell.insertAdjacentHTML("beforeend", searchFilterMarkup());
 }
@@ -876,8 +915,12 @@ function bindViewMenu() {
 function selectionHeaderMarkup(selection) {
   const allSelected = selection.length === sortedItems().length;
   const title = state.collectionId ? viewName() : state.view === "all" ? "全部" : viewName();
+  const trashSelection = state.view === "trash";
   const moreMenu = state.selectionMoreOpen ? `<div class="selection-more-menu" role="menu" data-selection-more-menu><button type="button" role="menuitem" data-selection-more-action="screenshot" ${state.selectionScreenshotWorking ? "disabled" : ""}>${treeIcon("web")}<span>${state.selectionScreenshotWorking ? "正在创建页面截图…" : "创建页面截图"}</span></button><button type="button" role="menuitem" data-selection-more-action="refresh">${treeIcon("refresh")}<span>刷新预览</span></button><span class="menu-separator"></span><button type="button" role="menuitem" data-selection-more-action="favorite">${treeIcon("likeActive")}<span>添加到收藏夹</span></button><button type="button" role="menuitem" data-selection-more-action="unfavorite">${treeIcon("like")}<span>从收藏夹移除</span></button><span class="menu-separator"></span><button type="button" role="menuitem" data-selection-more-action="remove-tags">${treeIcon("tagAction")}<span>移除标签</span></button></div>` : "";
-  return `<header class="workspace-head workspace-selection-head" data-is-header="true"><div class="workspace-first-action"><div id="select-all" class="select-all selection-toggle button-dQdc" role="button" tabindex="0" title="选择所有" aria-label="选择所有" data-variant="active"><label class="selection-checkbox"><input tabindex="-1" type="checkbox" title="选择所有" ${allSelected ? "checked" : ""}></label></div></div><div class="workspace-name selection-name">${escapeHtml(title)}&nbsp;</div><div class="workspace-space"></div><button type="button" class="selection-action selection-move" title="移动" aria-label="移动" data-selection-move aria-haspopup="dialog">${treeIcon("moveTo")}<span>移动</span></button><button class="selection-action" title="添加标签" aria-label="添加标签" data-batch="tags">${treeIcon("tagAction")}<span>添加标签</span></button><button class="selection-action selection-danger" title="删除" aria-label="删除" data-batch="trash">${treeIcon("trash")}<span>删除</span></button><button id="export" class="selection-action" title="更多" aria-label="更多">${treeIcon("download")}<span>导出书签</span></button><button class="selection-action" title="直接在浏览器打开" aria-label="直接在浏览器打开" data-selection-open>${treeIcon("open")}<span>直接在浏览器打开</span></button><div class="selection-more-wrap"><button class="selection-action selection-more" title="更多" aria-label="更多" aria-expanded="${state.selectionMoreOpen}" data-selection-more>${treeIcon("moreHorizontal")}</button>${moreMenu}</div><div class="workspace-space"></div><button class="selection-action selection-cancel" title="取消" aria-label="取消" data-selection-clear>${treeIcon("selectionClose")}<span>取消</span></button></header>`;
+  const destructiveAction = trashSelection
+    ? `<button class="selection-action" title="恢复" aria-label="恢复" data-batch="restore">${treeIcon("add")}<span>恢复</span></button>`
+    : `<button class="selection-action selection-danger" title="删除" aria-label="删除" data-batch="trash">${treeIcon("trash")}<span>删除</span></button>`;
+  return `<header class="workspace-head workspace-selection-head" data-is-header="true"><div class="workspace-first-action"><div id="select-all" class="select-all selection-toggle button-dQdc" role="button" tabindex="0" title="选择所有" aria-label="选择所有" data-variant="active"><label class="selection-checkbox"><input tabindex="-1" type="checkbox" title="选择所有" ${allSelected ? "checked" : ""}></label></div></div><div class="workspace-name selection-name">${escapeHtml(title)}&nbsp;</div><div class="workspace-space"></div><button type="button" class="selection-action selection-move" title="移动" aria-label="移动" data-selection-move aria-haspopup="dialog">${treeIcon("moveTo")}<span>移动</span></button><button class="selection-action" title="添加标签" aria-label="添加标签" data-batch="tags">${treeIcon("tagAction")}<span>添加标签</span></button>${destructiveAction}<button id="export" class="selection-action" title="更多" aria-label="更多">${treeIcon("download")}<span>导出书签</span></button><button class="selection-action" title="直接在浏览器打开" aria-label="直接在浏览器打开" data-selection-open>${treeIcon("open")}<span>直接在浏览器打开</span></button><div class="selection-more-wrap"><button class="selection-action selection-more" title="更多" aria-label="更多" aria-expanded="${state.selectionMoreOpen}" data-selection-more>${treeIcon("moreHorizontal")}</button>${moreMenu}</div><div class="workspace-space"></div><button class="selection-action selection-cancel" title="取消" aria-label="取消" data-selection-clear>${treeIcon("selectionClose")}<span>取消</span></button></header>`;
 }
 
 function workspaceHeaderMarkup(items, selection) {
@@ -1672,6 +1715,7 @@ function bookmarkActionMarkup(item) {
   const enabled = buttonGroupPreference();
   const link = escapeHtml(item.link);
   const id = escapeHtml(item.id);
+  const inTrash = state.view === "trash";
   const action = (name, markup) => enabled[name] ? markup : "";
   return [
     action("current_tab", `<a role="button" href="${link}" title="直接在浏览器打开" aria-label="直接在浏览器打开" data-button="current_tab">${treeIcon("click")}</a>`),
@@ -1683,7 +1727,7 @@ function bookmarkActionMarkup(item) {
     action("important", `<button type="button" title="${item.favorite ? "从收藏夹移除" : "添加到收藏夹"}" aria-label="${item.favorite ? "从收藏夹移除" : "添加到收藏夹"}" data-button="important" data-favorite="${id}">${treeIcon(item.favorite ? "likeActive" : "like")}</button>`),
     action("tags", `<button type="button" title="编辑标签" aria-label="编辑标签" data-button="tags" data-edit="${id}" data-edit-focus="tags">${treeIcon("tag")}</button>`),
     action("edit", `<button type="button" title="编辑" aria-label="编辑" data-button="edit" data-edit="${id}">${treeIcon("edit")}</button>`),
-    action("remove", `<button type="button" title="删除" aria-label="删除" data-button="remove" data-delete="${id}">${treeIcon("trash")}</button>`),
+    action("remove", `<button type="button" title="${inTrash ? "恢复" : "删除"}" aria-label="${inTrash ? "恢复" : "删除"}" data-button="${inTrash ? "restore" : "remove"}" ${inTrash ? `data-restore-bookmark="${id}"` : `data-delete="${id}"`}>${treeIcon(inTrash ? "add" : "trash")}</button>`),
   ].join("");
 }
 
@@ -1702,6 +1746,20 @@ function bindCardMenuActions(menu) {
   if (!menu) return;
   menu.querySelectorAll("[data-card-menu-action]").forEach((button) => button.onclick = (event) => {
     event.stopPropagation();
+    if (button.dataset.button === "preview" || button.dataset.button === "web") {
+      event.preventDefault();
+      showError(new TypeError(t("预览功能暂未接入。")));
+      closeCardMenu();
+      return;
+    }
+    if (button.dataset.button === "ask") {
+      event.preventDefault();
+      const edit = [...root.querySelectorAll("[data-edit]")].find((candidate) => candidate.dataset.edit === button.dataset.ask);
+      closeCardMenu();
+      if (recommendationsEnabled() && edit) return edit.click();
+      showError(new TypeError(t("询问功能暂未接入。")));
+      return;
+    }
     const { copyLink, edit, editFocus, delete: remove, restoreBookmark } = button.dataset;
     closeCardMenu();
     if (copyLink) return navigator.clipboard.writeText(copyLink).catch(showError);
@@ -2900,35 +2958,70 @@ function bindSettings() {
   }
 }
 
-async function load() {
-  const path = queryPath();
-  const requests = [api("/v1/bootstrap"), api(path), path === "/v1/bookmarks?" ? null : api("/v1/bookmarks?"), api(tagQueryPath()).catch(() => [])];
-  if (state.view === "trash") requests.push(api("/v1/collections?trash=1"));
-  const [connectionInfo, boot, items, allItems, tags, trashedCollections = []] = await Promise.all([connection(), ...requests]);
-  state.connectionInfo = connectionInfo;
-  state.lock = await lockState();
-  setCoverUploadEnabled(boot.capabilities?.mediaUpload);
-  state.aiSettings = boot.ai || null;
-  state.aiRecommendationsAvailable = Boolean(boot.capabilities?.aiRecommendations);
-  state.collections = boot.collections;
-  state.collectionCounts = boot.collectionCounts || {};
-  state.trashCount = boot.trashCount || 0;
-  state.preferences = boot.preferences;
-  state.layout = layoutForScope(boot.preferences);
-  state.collapsedCollections = new Set(Array.isArray(boot.preferences.collapsedCollectionIds) ? boot.preferences.collapsedCollectionIds : []);
-  state.items = items;
-  state.allItems = allItems || items;
-  state.tags = Array.isArray(tags) ? tags : [];
-  state.favoriteCount = (allItems || items).filter((item) => item.favorite).length;
-  state.trashedCollections = trashedCollections;
-  if (state.settingsOpen && state.settingsSection === "backups") await refreshBackupSettings();
-  applyTheme();
-  render();
+let loadGeneration = 0;
+
+async function load({ viewOnly = false } = {}) {
+  const generation = ++loadGeneration;
+  const showLoading = shouldShowGlobalLoading(root?.querySelector(".library, .settings-shell"));
+  if (showLoading) setGlobalLoading(true);
+  try {
+    const path = queryPath();
+    if (viewOnly) {
+      const requests = [api(path), api(tagQueryPath()).catch(() => [])];
+      if (state.view === "trash") requests.push(api("/v1/collections?trash=1"));
+      const [items, tags, trashedCollections = []] = await Promise.all(requests);
+      if (!isCurrentRequest(generation, loadGeneration)) return;
+      state.items = items;
+      state.tags = Array.isArray(tags) ? tags : [];
+      state.trashedCollections = state.view === "trash" ? trashedCollections : [];
+      if (!state.allItems.length && state.view === "all" && !state.collectionId) state.allItems = items;
+      render();
+      return;
+    }
+    const requests = [api("/v1/bootstrap"), api(path), path === "/v1/bookmarks?" ? null : api("/v1/bookmarks?"), api(tagQueryPath()).catch(() => [])];
+    if (state.view === "trash") requests.push(api("/v1/collections?trash=1"));
+    const [connectionInfo, boot, items, allItems, tags, trashedCollections = []] = await Promise.all([connection(), ...requests]);
+    if (!isCurrentRequest(generation, loadGeneration)) return;
+    state.connectionInfo = connectionInfo;
+    state.lock = await lockState();
+    setCoverUploadEnabled(boot.capabilities?.mediaUpload);
+    state.aiSettings = boot.ai || null;
+    state.aiRecommendationsAvailable = Boolean(boot.capabilities?.aiRecommendations);
+    state.collections = boot.collections;
+    state.collectionCounts = boot.collectionCounts || {};
+    state.trashCount = boot.trashCount || 0;
+    state.preferences = boot.preferences;
+    state.layout = layoutForScope(boot.preferences);
+    state.collapsedCollections = new Set(Array.isArray(boot.preferences.collapsedCollectionIds) ? boot.preferences.collapsedCollectionIds : []);
+    state.items = items;
+    state.allItems = allItems || items;
+    state.tags = Array.isArray(tags) ? tags : [];
+    state.favoriteCount = (allItems || items).filter((item) => item.favorite).length;
+    state.trashedCollections = trashedCollections;
+    if (state.settingsOpen && state.settingsSection === "backups") await refreshBackupSettings();
+    applyTheme();
+    render();
+  } finally {
+    if (showLoading && isCurrentRequest(generation, loadGeneration)) setGlobalLoading(false);
+  }
+}
+
+function emptyStateMarkup() {
+  const searching = Boolean(state.query.trim());
+  const message = searching ? "没有匹配的书签。" : state.view === "trash" ? "废纸篓为空。" : state.collectionId ? "此收藏夹还没有书签。" : "此视图中还没有书签。";
+  const action = searching
+    ? `<button type="button" class="empty-action" data-empty-action="clear-search">清除搜索</button>`
+    : state.view === "trash"
+      ? `<button type="button" class="empty-action" data-empty-action="all">返回所有书签</button>`
+      : `<button type="button" class="primary empty-action" data-empty-action="add-bookmark">添加书签</button>`;
+  return `<div class="empty" role="status"><p>${t(message) === message ? message : t(message)}</p>${action}</div>`;
 }
 
 function render() {
   if (state.settingsOpen) return renderSettings();
   document.title = languageIsEnglish() ? "Private Bookmarks" : "私有书签";
+  const viewSwitching = state.viewSwitching;
+  state.viewSwitching = false;
   const editWasOpen = editBookmarkDialog.open;
   const items = sortedItems();
   const selection = items.filter((item) => state.selected.has(item.id));
@@ -2938,7 +3031,7 @@ function render() {
   const cardMenuItem = items.find((item) => item.id === state.cardMenuId);
   if (!cardMenuItem) state.cardMenuId = null;
   const cardMenu = cardMenuItem ? cardActionMenu(cardMenuItem) : "";
-  root.innerHTML = localizeHtml(`<main class="library">${sidebarMarkup()}<section class="content"><header class="topbar"><label class="quick-search"><span>⌕</span><input id="search" value="${escapeHtml(state.query)}" placeholder="搜索" autocomplete="off"><kbd>⌘ K</kbd></label><div class="top-actions"><button id="check-links" class="top-action-icon" title="检查链接" aria-label="检查链接">${treeIcon("refresh")}</button><div class="theme-menu-wrap"><button id="theme" class="top-action-icon theme-trigger" title="主题：${themeOption().label}" aria-label="主题：${themeOption().label}" aria-haspopup="menu" aria-expanded="${state.themeMenuOpen}" data-theme-trigger>${treeIcon(themeOption().icon)}</button>${themeMenuMarkup()}</div><button id="import" class="top-action-icon" title="导入书签" aria-label="导入书签">${treeIcon("upload")}</button><button id="add-bookmark" class="primary add-bookmark">${treeIcon("add")}<span>添加</span></button></div></header><section class="workspace"><header class="workspace-head"><div class="workspace-title"><button id="select-all" class="select-all" title="选择全部" aria-label="选择全部" aria-pressed="${Boolean(items.length && selection.length === items.length)}"><span class="select-checkbox">${items.length && selection.length === items.length ? "✓" : ""}</span></button><h1>☁ ${escapeHtml(viewName())}</h1><span class="count">${items.length}</span></div><div class="workspace-tools"><select id="sort" aria-label="排序"><option value="manual" ${state.preferences?.sort === "manual" ? "selected" : ""}>手动排序</option><option value="title" ${state.preferences?.sort === "title" ? "selected" : ""}>标题 (A-Z)</option><option value="host" ${state.preferences?.sort === "host" ? "selected" : ""}>网站 (A-Z)</option><option value="created" ${state.preferences?.sort === "created" ? "selected" : ""}>最近添加</option></select><div class="view-switcher" role="group" aria-label="视图"><button data-layout="list" class="${state.layout === "list" ? "active" : ""}" title="列表视图" aria-pressed="${state.layout === "list"}">☷ 列表</button><button data-layout="grid" class="${state.layout === "grid" ? "active" : ""}" title="网格视图" aria-pressed="${state.layout === "grid"}">▦ 网格</button></div><button id="export" class="export" title="导出书签">⇩ 导出书签</button></div></header><section class="cards layout-${state.layout}" role="list">${collectionTrash}${items.length ? items.map((item, index) => card(item, index, duplicates)).join("") : collectionTrash || `<p class="empty">此视图中还没有书签。</p>`}${cardMenu}</section><div class="bookmark-count-footer" data-compact="false">${items.length} 个书签</div></section></section></main>`);
+  root.innerHTML = localizeHtml(`<main class="library">${sidebarMarkup()}<section class="content"><header class="topbar"><label class="quick-search"><span>⌕</span><input id="search" value="${escapeHtml(state.query)}" placeholder="搜索" autocomplete="off"><kbd>⌘ K</kbd></label><div class="top-actions"><button id="check-links" class="top-action-icon" title="检查链接" aria-label="检查链接">${treeIcon("refresh")}</button><div class="theme-menu-wrap"><button id="theme" class="top-action-icon theme-trigger" title="主题：${themeOption().label}" aria-label="主题：${themeOption().label}" aria-haspopup="menu" aria-expanded="${state.themeMenuOpen}" data-theme-trigger>${treeIcon(themeOption().icon)}</button>${themeMenuMarkup()}</div><button id="import" class="top-action-icon" title="导入书签" aria-label="导入书签">${treeIcon("upload")}</button><button id="add-bookmark" class="primary add-bookmark">${treeIcon("add")}<span>添加</span></button></div></header><section class="workspace"><header class="workspace-head"><div class="workspace-title"><button id="select-all" class="select-all" title="选择全部" aria-label="选择全部" aria-pressed="${Boolean(items.length && selection.length === items.length)}"><span class="select-checkbox">${items.length && selection.length === items.length ? "✓" : ""}</span></button><h1>☁ ${escapeHtml(viewName())}</h1><span class="count">${items.length}</span></div><div class="workspace-tools"><select id="sort" aria-label="排序"><option value="manual" ${state.preferences?.sort === "manual" ? "selected" : ""}>手动排序</option><option value="title" ${state.preferences?.sort === "title" ? "selected" : ""}>标题 (A-Z)</option><option value="host" ${state.preferences?.sort === "host" ? "selected" : ""}>网站 (A-Z)</option><option value="created" ${state.preferences?.sort === "created" ? "selected" : ""}>最近添加</option></select><div class="view-switcher" role="group" aria-label="视图"><button data-layout="list" class="${state.layout === "list" ? "active" : ""}" title="列表视图" aria-pressed="${state.layout === "list"}">☷ 列表</button><button data-layout="grid" class="${state.layout === "grid" ? "active" : ""}" title="网格视图" aria-pressed="${state.layout === "grid"}">▦ 网格</button></div><button id="export" class="export" title="导出书签">⇩ 导出书签</button></div></header><section class="cards layout-${state.layout}${viewSwitching ? " no-card-animation" : ""}" role="list">${collectionTrash}${items.length ? items.map((item, index) => card(item, index, duplicates)).join("") : collectionTrash || emptyStateMarkup()}${cardMenu}</section><div class="bookmark-count-footer" data-compact="false">${items.length} 个书签</div></section></section></main>`);
   const sidebar = root.querySelector(".sidebar");
   mountEditPanel(editWasOpen);
   const resizer = document.createElement("div");
@@ -3217,6 +3310,22 @@ function bindSidebarResizer() {
   };
 }
 
+function updateViewChrome() {
+  const allActive = state.view === "all" && !state.collectionId;
+  root.querySelectorAll("[data-view]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.view === state.view && (button.dataset.view !== "all" || allActive));
+  });
+  root.querySelectorAll("[data-collection]").forEach((button) => {
+    button.closest(".collection-row, .nav-item")?.classList.toggle("active", button.dataset.collection === state.collectionId);
+  });
+  root.querySelectorAll("[data-search-query], [data-tag]").forEach((button) => button.classList.remove("active"));
+  const name = root.querySelector(".workspace-head .workspace-name");
+  if (name) name.textContent = viewName();
+  const open = root.querySelector(".workspace-open");
+  if (open) open.href = workspaceHref();
+  refreshSelectionUi({ refreshHeader: true });
+}
+
 function switchView(view, collectionId = null) {
   state.sidebarOpen = false;
   state.searchMenuOpen = false;
@@ -3231,8 +3340,10 @@ function switchView(view, collectionId = null) {
   state.tag = "";
   state.selected.clear();
   state.selectionMoreOpen = false;
+  state.viewSwitching = true;
   updateLibraryRoute("push");
-  load().catch(showError);
+  updateViewChrome();
+  load({ viewOnly: true }).catch(showError);
 }
 
 async function savePreferences(changes) {
@@ -3439,9 +3550,9 @@ async function collectionAction(action, collectionId) {
   }
   if (action === "rename") {
     const form = collectionValueDialog.querySelector("form");
-    collectionValueDialog.querySelector("h2").textContent = "修改收藏夹名称";
+    collectionValueDialog.querySelector("h2").textContent = t("修改收藏夹名称");
     form.elements.value.value = item.name;
-    form.elements.value.placeholder = "收藏夹名称";
+    form.elements.value.placeholder = t("收藏夹名称");
     form.elements.value.required = true;
     state.collectionValueAction = "rename";
     state.collectionValueId = item.id;
@@ -3451,9 +3562,9 @@ async function collectionAction(action, collectionId) {
   }
   if (action === "icon") {
     const form = collectionValueDialog.querySelector("form");
-    collectionValueDialog.querySelector("h2").textContent = "更改收藏夹图标";
+    collectionValueDialog.querySelector("h2").textContent = t("更改收藏夹图标");
     form.elements.value.value = state.preferences?.collectionIconByCollectionId?.[item.id] || "";
-    form.elements.value.placeholder = "输入图标或 Emoji，留空恢复默认";
+    form.elements.value.placeholder = t("输入图标或 Emoji，留空恢复默认");
     form.elements.value.required = false;
     state.collectionValueAction = "icon";
     state.collectionValueId = item.id;
@@ -3464,7 +3575,7 @@ async function collectionAction(action, collectionId) {
   if (action === "share") {
     const bookmarks = await api(`/v1/bookmarks?collection=${encodeURIComponent(item.id)}`);
     const text = [`${item.name}（${bookmarks.length}）`, ...bookmarks.map((bookmark) => `${bookmark.title || bookmark.link}\n${bookmark.link}`)].join("\n\n");
-    collectionShareDialog.querySelector("h2").textContent = `分享“${item.name}”`;
+    collectionShareDialog.querySelector("h2").textContent = `${t("分享收藏夹")}“${item.name}”`;
     collectionShareDialog.querySelector("textarea").value = text;
     collectionShareDialog.dataset.title = item.name;
     collectionShareDialog.querySelector("#system-collection-share").classList.toggle("hidden", !navigator.share);
@@ -3833,6 +3944,16 @@ function bind() {
   });
   root.querySelectorAll("[data-view]").forEach((button) => button.onclick = () => switchView(button.dataset.view));
   root.querySelectorAll("[data-collection]").forEach((button) => button.onclick = () => switchView("all", button.dataset.collection));
+  root.querySelectorAll("[data-empty-action]").forEach((button) => button.onclick = () => {
+    if (button.dataset.emptyAction === "clear-search") {
+      state.query = "";
+      state.selected.clear();
+      updateLibraryRoute();
+      return load().catch(showError);
+    }
+    if (button.dataset.emptyAction === "all") return switchView("all");
+    root.querySelector("#add-bookmark")?.click();
+  });
   root.querySelectorAll("[data-search-query]").forEach((button) => button.onclick = () => {
     state.tag = "";
     state.selected.clear();
@@ -3870,6 +3991,11 @@ function bind() {
     }
     renderSearchMenu();
   };
+  if (searchToggle) searchToggle.onkeydown = (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    searchToggle.click();
+  };
   bindSearchMenu();
   const search = root.querySelector("#search");
   const openSearchMenu = () => {
@@ -3897,6 +4023,18 @@ function bind() {
     const item = state.items.find((entry) => entry.id === button.dataset.favorite);
     await mutate(`/v1/bookmarks/${item.id}`, { method: "PATCH", body: JSON.stringify({ revision: item.revision, favorite: !item.favorite }) });
     load().catch(showError);
+  });
+  root.querySelectorAll("[data-ask]").forEach((button) => button.onclick = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const edit = [...root.querySelectorAll("[data-edit]")].find((candidate) => candidate.dataset.edit === button.dataset.ask);
+    if (recommendationsEnabled() && edit) return edit.click();
+    showError(new TypeError(t("询问功能暂未接入。")));
+  });
+  root.querySelectorAll('[data-button="preview"], [data-button="web"]').forEach((button) => button.onclick = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    showError(new TypeError(t("预览功能暂未接入。")));
   });
   prepareCardActionProxies();
   root.querySelectorAll("[data-edit]").forEach((button) => button.onclick = () => {
@@ -4782,7 +4920,21 @@ function showError(error) {
     if (window.confirm("此项目已在其他设备上更新。现在刷新最新内容吗？未保存的修改不会应用。")) load().catch(console.error);
     return;
   }
-  window.alert(error.message || "请求失败");
+  const message = error?.message || "请求失败";
+  const host = root?.querySelector(".content, .settings-main-scroll") || root;
+  if (!host) return;
+  host.querySelector("[data-inline-error]")?.remove();
+  const banner = document.createElement("div");
+  banner.className = "inline-error";
+  banner.dataset.inlineError = "";
+  banner.setAttribute("role", "alert");
+  banner.innerHTML = `<span>${escapeHtml(message)}</span><button type="button" data-error-retry>${t("重试")}</button><button type="button" class="inline-error-dismiss" data-error-dismiss aria-label="${t("关闭")}">×</button>`;
+  host.prepend(banner);
+  banner.querySelector("[data-error-retry]").onclick = () => {
+    banner.remove();
+    load().catch(showError);
+  };
+  banner.querySelector("[data-error-dismiss]").onclick = () => banner.remove();
 }
 
 window.addEventListener("unhandledrejection", (event) => {
