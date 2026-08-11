@@ -1856,7 +1856,7 @@ const SETTINGS_THEME_OPTIONS = [
 ];
 
 const LANGUAGE_OPTIONS = [
-  { value: "zh-Hans", label: "中文（汉语）" },
+  { value: "zh-Hans", label: "中文（简体）" },
   { value: "en", label: "English" },
 ];
 
