@@ -502,6 +502,13 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
   align-items: start;
   overflow: visible;
 }
+.cards.layout-masonry > .empty {
+  display: grid;
+  min-height: calc(100vh - 128px);
+  place-content: center;
+  justify-items: center;
+  grid-column: 1 / -1;
+}
 .layout-masonry .bookmark-card {
   display: flex;
   align-self: start;
