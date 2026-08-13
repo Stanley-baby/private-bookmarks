@@ -109,6 +109,21 @@ test("primary font sizes match the reference plugin", () => {
   ]) assert.match(declarations(selector), /font-size: 15px/);
 });
 
+test("P2 density tokens keep controls reachable and bookmark rows compact", () => {
+  assert.match(declarations(":root"), /font: 14px\/1\.4 .*Helvetica, Arial, sans-serif/);
+  assert.match(declarations(".topbar"), /height: 48px/);
+  assert.match(declarations(".workspace-head"), /min-height: 48px/);
+  assert.match(css, /\.tree-item, \.collection-row \{[^}]*min-height: 32px/);
+  assert.match(declarations(".quick-search"), /height: 32px/);
+  assert.match(declarations(".bookmark-card"), /min-height: 68px/);
+  assert.match(css, /\.card-cover \{[^}]*width: 56px; height: 48px/);
+  assert.match(css, /\.card-title \{[^}]*font-size: 15px;[^}]*line-height: 21px/);
+  assert.match(declarations(".bookmark-count-footer"), /height: 32px; min-height: 32px/);
+  assert.match(declarations(".empty"), /padding: 32px 16px/);
+  assert.match(css, /button:focus-visible, input:focus-visible/);
+  assert.match(css, /\.bookmark-card:hover \.card-actions/);
+});
+
 test("shared surfaces mark their host before rendering and keep distinct layouts", () => {
   assert.match(surface, /document\.documentElement\.dataset\.surface = surface/);
   assert.match(surface, /document\.body\.classList\.add\(marker\)/);
