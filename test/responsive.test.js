@@ -124,6 +124,37 @@ test("P2 density tokens keep controls reachable and bookmark rows compact", () =
   assert.match(css, /\.bookmark-card:hover \.card-actions/);
 });
 
+test("grid cards keep bounded columns, stable covers, readable clamped copy, and list invariants", () => {
+  const grid = declarations(".cards.layout-grid");
+  const gridCard = declarations(".layout-grid .bookmark-card");
+  const gridCover = declarations(".layout-grid .card-cover");
+  const gridTitle = declarations(".layout-grid .card-title");
+  const gridActions = declarations(".layout-grid .card-actions");
+
+  assert.match(grid, /grid-template-columns: repeat\(auto-fit, minmax\(min\(100%, 220px\), 1fr\)\)/);
+  assert.match(grid, /gap: 16px/);
+  assert.match(gridCard, /min-width: 0/);
+  assert.match(gridCard, /min-height: 288px/);
+  assert.match(gridCard, /border: 1px solid var\(--line\)/);
+  assert.match(gridCover, /aspect-ratio: 16 \/ 9/);
+  assert.match(css, /\.layout-grid \.card-cover img \{[^}]*object-fit: cover/);
+  assert.match(css, /\.layout-grid \.card-cover img\[src\$="icons\/bookmark\.svg"\] \{[^}]*object-fit: contain/);
+  assert.match(gridTitle, /font-size: 15px/);
+  assert.match(gridTitle, /line-height: 21px/);
+  assert.match(gridTitle, /-webkit-line-clamp: 2/);
+  assert.match(css, /\.layout-grid \.card-note, \.layout-grid \.card-description \{[^}]*-webkit-line-clamp: 2/);
+  assert.match(css, /\.layout-grid \.card-tags \{[^}]*font-size: 12px/);
+  assert.match(css, /\.layout-grid \.card-source \{[^}]*font-size: 12px/);
+  assert.match(css, /\.layout-grid \.bookmark-card:hover \{[^}]*transform: translateY\(-1px\)/);
+  assert.match(css, /\.layout-grid \.card-permalink:focus-visible \{[^}]*outline: 2px solid var\(--accent\)/);
+  assert.match(gridActions, /top: 8px/);
+  assert.match(css, /@media \(hover: none\) \{ \.bookmark-card \.card-actions \{ display: inline-grid; \} \}/);
+  assert.match(declarations(".bookmark-card"), /min-height: 68px/);
+  assert.match(css, /\.card-cover \{[^}]*width: 56px; height: 48px/);
+  assert.match(css, /body\.surface-sidepanel[\s\S]*?min-width: 0/);
+  assert.match(css, /@media \(max-width: 519px\) \{[\s\S]*?body\.surface-sidepanel \.cards\.layout-grid \{ grid-template-columns: minmax\(0, 1fr\); \}/);
+});
+
 test("shared surfaces mark their host before rendering and keep distinct layouts", () => {
   assert.match(surface, /document\.documentElement\.dataset\.surface = surface/);
   assert.match(surface, /document\.body\.classList\.add\(marker\)/);

@@ -459,17 +459,26 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .collection-trash-card > span:nth-child(2) { display: grid; gap: 2px; }
 .empty { padding: 32px 16px; color: var(--muted); text-align: center; }
 
-.cards.layout-grid { --grid-item-width: 254px; grid-template-columns: repeat(auto-fill, minmax(min(calc(50% - 32px), var(--grid-item-width)), 1fr)); gap: 16px; padding: 16px 16px 0; }
-.layout-grid .bookmark-card { display: block; min-height: 230px; padding: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 5px; }
-.layout-grid .bookmark-card:hover { box-shadow: 0 6px 18px #00000012; transform: translateY(-1px); }
+.cards.layout-grid { --grid-item-width: 254px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 16px; padding: 16px 16px 0; }
+.layout-grid .bookmark-card { display: grid; min-width: 0; min-height: 288px; padding: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: var(--page); grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+.layout-grid .bookmark-card:hover { box-shadow: 0 8px 24px color-mix(in srgb, var(--text), transparent 88%); transform: translateY(-1px); }
+.layout-grid .bookmark-card.selected { border-color: var(--accent); background: color-mix(in srgb, var(--page), var(--accent) 8%); }
+.layout-grid .bookmark-card.selected:hover { background: color-mix(in srgb, var(--page), var(--accent) 8%); }
 .layout-grid .card-select { top: 2px; left: 2px; width: 20px; height: 20px; padding: 0; }
 .layout-grid .card-main { grid-template-columns: 1fr; gap: 0; }
-.layout-grid .card-cover { width: 100%; height: auto; aspect-ratio: 16 / 9; border: 0; border-radius: 0; }
+.layout-grid .card-cover { width: 100%; height: auto; min-height: 0; aspect-ratio: 16 / 9; border: 0; border-radius: 0; }
 .layout-grid .card-cover img { width: 100%; height: 100%; object-fit: cover; }
-.layout-grid .card-copy { grid-template-rows: auto; min-height: 0; gap: 3px; padding: 9px 11px 12px; }
-.layout-grid .card-description { display: -webkit-box; min-height: 16px; white-space: normal; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-.layout-grid .card-tags { margin-top: 1px; }
+.layout-grid .card-cover img[src$="icons/bookmark.svg"] { object-fit: contain; padding: 24%; }
+.layout-grid .card-copy { grid-template-rows: auto minmax(0, 1fr) auto; min-height: 0; gap: 4px; padding: 12px; }
+.layout-grid .card-title { min-height: 42px; font-size: 15px; line-height: 21px; -webkit-line-clamp: 2; }
+.layout-grid .card-details { display: grid; height: auto; min-height: 0; gap: 2px; align-content: start; }
+.layout-grid .card-note, .layout-grid .card-description { min-height: 0; white-space: normal; -webkit-line-clamp: 2; }
+.layout-grid .card-tags { max-height: 18px; margin-top: 1px; gap: 6px; font-size: 12px; line-height: 18px; }
+.layout-grid .card-tag { flex: 0 0 auto; }
+.layout-grid .card-source { height: 18px; min-height: 18px; flex-wrap: nowrap; font-size: 12px; line-height: 18px; white-space: nowrap; }
+.layout-grid .card-source section { flex: 0 1 auto; }
 .layout-grid .card-actions { top: 8px; right: 8px; padding: 3px; border-radius: 7px; }
+.layout-grid .card-permalink:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 7px; }
 .layout-grid .collection-trash-card { display: grid; min-height: 76px; padding: 9px; }
 
 .cards.layout-simple { grid-template-columns: minmax(0, 1fr); }
@@ -876,6 +885,7 @@ dialog menu { display: flex; justify-content: end; gap: 6px; margin: 0; padding:
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
 @media (prefers-reduced-motion: reduce) {
   button:active:not(:disabled), a[role="button"]:active { transform: none; }
+  .layout-grid .bookmark-card, .layout-grid .bookmark-card:hover { animation: none; transform: none; }
   .global-loading-spinner { animation: none; }
   .cover-picker-body, .batch-tag-dialog[open], .default-view-dialog-body { animation: none; }
 }
@@ -884,6 +894,7 @@ dialog menu { display: flex; justify-content: end; gap: 6px; margin: 0; padding:
   .empty-action:hover { filter: brightness(1.04); }
 }
 @media (hover: none) { .bookmark-card .card-actions { display: inline-grid; } }
+@media (hover: none) { .layout-grid .card-actions { display: inline-grid; } }
 @media (max-width: 1100px) {
   .library.editing { grid-template-columns: var(--sidebar-width) minmax(0, 1fr); }
   .edit-panel { position: fixed; z-index: 20; inset: 0 0 0 auto; width: min(737px, calc(100vw - var(--sidebar-width))); height: 100dvh; box-shadow: -12px 0 35px #0002; }
@@ -921,6 +932,10 @@ dialog menu { display: flex; justify-content: end; gap: 6px; margin: 0; padding:
   .card-cover { width: 42px; height: 42px; }
   .card-actions button:first-child { display: none; }
   .connection { padding: 30px 26px; }
+}
+
+@media (max-width: 519px) {
+  body.surface-sidepanel .cards.layout-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* Action popups keep the same management shell as the full library. Chrome may
