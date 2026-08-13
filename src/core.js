@@ -1254,6 +1254,20 @@ export function createApi({ key, store, healthCheck, mediaBucket = null, backupB
 
       try {
         if (request.method === "GET" && pathname === "/v1/health") return json({ ok: true });
+        if ((request.method === "GET" || request.method === "POST") && (pathname === "/v1/sync/pull" || pathname === "/v1/sync")) {
+          if (typeof store.listSyncChanges !== "function") return error(501, "not_available", "Incremental sync is not configured");
+          const input = request.method === "POST" ? await readJson(request) : {};
+          const cursor = request.method === "GET" ? searchParams.get("cursor") : input.cursor;
+          const limit = request.method === "GET" ? searchParams.get("limit") : input.limit;
+          return json(await store.listSyncChanges({ cursor, limit }));
+        }
+        if (request.method === "POST" && pathname === "/v1/sync/push") {
+          if (typeof store.applySyncChanges !== "function") return error(501, "not_available", "Incremental sync is not configured");
+          const input = await readJson(request);
+          if (!Array.isArray(input?.changes)) return error(400, "invalid_sync", "Sync changes must be an array");
+          const result = await store.applySyncChanges(input.changes.slice(0, 500));
+          return json(result);
+        }
         if (request.method === "GET" && pathname === "/v1/export") return json(await store.exportData());
         if (request.method === "GET" && pathname === "/v1/cloud/connections") {
           if (!store.listCloudConnections) return error(501, "oauth_not_available", "Cloud OAuth storage is not configured");

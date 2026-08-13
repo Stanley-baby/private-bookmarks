@@ -6,6 +6,7 @@ compatibility_date = "2026-07-27"
 binding = "DB"
 database_name = "private-bookmarks"
 database_id = "51db7b1c-4455-4490-88d9-be3f08295923"
+migrations_dir = "migrations"
 
 [[r2_buckets]]
 binding = "COVERS"
@@ -18,4 +19,29 @@ binding = "AI"
 AI_MODEL = "@cf/zai-org/glm-4.7-flash"
 
 [triggers]
+crons = ["0 3 * * *"]
+
+# Staging is a separate Worker and storage plane. Keep these names/IDs
+# distinct from the production bindings above; deploy with `--env staging`.
+[env.staging]
+name = "private-bookmarks-staging"
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "private-bookmarks-staging"
+database_id = "e194bd78-bce6-4c5d-b220-265726f2ff18"
+migrations_dir = "migrations"
+
+[[env.staging.r2_buckets]]
+binding = "COVERS"
+bucket_name = "private-bookmarks-covers-staging"
+
+[env.staging.ai]
+binding = "AI"
+
+[env.staging.vars]
+AI_MODEL = "@cf/zai-org/glm-4.7-flash"
+ENVIRONMENT = "staging"
+
+[env.staging.triggers]
 crons = ["0 3 * * *"]

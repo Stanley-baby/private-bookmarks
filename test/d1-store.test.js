@@ -32,7 +32,7 @@ class Statement {
 class D1TestDatabase {
   constructor() {
     this.database = new DatabaseSync(":memory:");
-    for (const file of ["0001_initial.sql", "0002_trash_source.sql", "0003_collection_trash_source.sql", "0004_reminder.sql", "0005_bookmark_type.sql", "0006_bookmark_language.sql", "0007_backups.sql", "0008_cloud_connections.sql"]) this.database.exec(readFileSync(new URL(`../migrations/${file}`, import.meta.url), "utf8"));
+    for (const file of ["0001_initial.sql", "0002_trash_source.sql", "0003_collection_trash_source.sql", "0004_reminder.sql", "0005_bookmark_type.sql", "0006_bookmark_language.sql", "0007_backups.sql", "0008_cloud_connections.sql", "0009_sync.sql", "0010_permanent_tombstones.sql"]) this.database.exec(readFileSync(new URL(`../migrations/${file}`, import.meta.url), "utf8"));
   }
 
   prepare(sql) {
@@ -142,6 +142,26 @@ test("D1 updates reject stale bookmark revisions", async () => {
   const bookmark = await store.createBookmark({ link: "https://example.com/conflict", title: "Conflict", description: "", note: "", cover: "", media: [], collectionId: "unsorted", tags: [], highlights: [], favorite: false });
   assert.ok((await store.updateBookmark(bookmark.id, bookmark.revision, { note: "new" })).bookmark);
   assert.ok((await store.updateBookmark(bookmark.id, bookmark.revision, { note: "stale" })).conflict);
+});
+
+test("D1 incremental sync applies independent records and reports stale revisions", async () => {
+  const store = new D1Store(new D1TestDatabase());
+  const first = { id: "11111111-1111-4111-8111-111111111111", link: "https://example.com/sync", title: "Sync", description: "", note: "", collectionId: "unsorted", tags: [], createdAt: "2026-08-12T00:00:00.000Z", updatedAt: "2026-08-12T00:00:00.000Z", revision: 1 };
+  const created = await store.applySyncChanges([{ entity: "bookmark", baseRevision: 0, record: first }]);
+  assert.equal(created.applied[0].record.title, "Sync");
+
+  const permanent = await store.applySyncChanges([{ entity: "bookmark", baseRevision: 1, record: { ...first, deletedAt: "2026-08-12T00:00:02.000Z", permanentDeletedAt: "2026-08-12T00:00:02.000Z", revision: 2 } }]);
+  assert.equal(permanent.applied[0].record.permanentDeletedAt, "2026-08-12T00:00:02.000Z");
+
+  const result = await store.applySyncChanges([
+    { entity: "bookmark", baseRevision: 1, record: { ...first, title: "Stale", revision: 2 } },
+    { entity: "collection", baseRevision: 0, record: { id: "22222222-2222-4222-8222-222222222222", name: "Synced", parentId: null, createdAt: "2026-08-12T00:00:01.000Z", updatedAt: "2026-08-12T00:00:01.000Z", revision: 1 } },
+  ]);
+  assert.equal(result.conflicts.length, 1);
+  assert.equal(result.applied[0].entity, "collection");
+  const page = await store.listSyncChanges();
+  assert.equal(page.changes.some((change) => change.record.id === first.id), true);
+  assert.equal(page.changes.some((change) => change.record.id === "22222222-2222-4222-8222-222222222222"), true);
 });
 
 test("D1 stores bookmark metadata and clears reminders", async () => {

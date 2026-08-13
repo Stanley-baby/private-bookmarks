@@ -466,6 +466,19 @@ test("export API returns a portable backup", async () => {
   assert.equal((await response.json()).format, "private-bookmarks/v1");
 });
 
+test("sync API requires auth and forwards incremental push and pull", async () => {
+  const store = new MemoryStore();
+  store.applySyncChanges = async (changes) => ({ applied: changes, conflicts: [] });
+  store.listSyncChanges = async ({ cursor, limit }) => ({ changes: [], cursor, limit, hasMore: false });
+  const api = createApi({ key: "test-key", store });
+  assert.equal((await api.fetch(new Request("https://example.com/v1/sync/pull"))).status, 401);
+  const headers = { "content-type": "application/json", "x-private-bookmarks-key": "test-key" };
+  const push = await api.fetch(new Request("https://example.com/v1/sync/push", { method: "POST", headers, body: JSON.stringify({ changes: [{ entity: "bookmark", record: { id: "one" } }] }) }));
+  assert.equal((await push.json()).applied.length, 1);
+  const pull = await api.fetch(new Request("https://example.com/v1/sync/pull?cursor=next&limit=20", { headers }));
+  assert.deepEqual(await pull.json(), { changes: [], cursor: "next", limit: "20", hasMore: false });
+});
+
 test("media API stores validated images and serves them with a signed URL", async () => {
   const bucket = new MemoryBucket();
   const api = createApi({ key: "test-key", store: new MemoryStore(), mediaBucket: bucket });

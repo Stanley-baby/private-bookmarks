@@ -4,7 +4,20 @@
   "type": "module",
   "scripts": {
     "check": "node --check src/core.js && node --check src/d1-store.js && node --check src/health.js && node --check worker.js && node --check extension/api.js && node --check extension/background.js && node --check extension/content.js && node --check extension/import.js && node --check extension/lock.js && node --check extension/popup.js && node --check extension/library.js && node --check extension/recommendations.js && node --check extension/ui.js",
+    "dev:extension": "wxt",
+    "build:extension": "wxt build",
     "dev:ui": "python3 -m http.server 4173 --bind 127.0.0.1 --directory extension",
     "test": "node --test"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@wxt-dev/module-react": "^1.2.2",
+    "typescript": "^7.0.2",
+    "wxt": "^0.21.4"
+  },
+  "dependencies": {
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
   }
 }

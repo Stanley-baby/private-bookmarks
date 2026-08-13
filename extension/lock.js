@@ -1,5 +1,6 @@
 const LOCK_KEY = "privateBookmarksLock";
 const CONNECTION_KEY = "instanceConnection";
+const BACKGROUND_CONNECTION_KEY = "instanceConnectionBackground";
 const SESSION_KEY = "privateBookmarksUnlocked";
 const PBKDF2_ITERATIONS = 210000;
 const extensionStorage = globalThis.chrome?.storage?.local;
@@ -89,7 +90,10 @@ function equalBytes(left, right) {
 export async function lockConfig() {
   const config = await getLocal(LOCK_KEY);
   if (!config) return null;
-  return config.version === 1 && config.salt && config.verifier && config.iv && config.ciphertext && Number(config.iterations) > 0 ? config : { invalid: true };
+  const valid = config.version === 1 && config.salt && config.verifier && Number(config.iterations) > 0;
+  const encryptedConnection = Boolean(config.iv && config.ciphertext);
+  const uiOnly = !config.iv && !config.ciphertext;
+  return valid && (encryptedConnection || uiOnly) ? config : { invalid: true };
 }
 
 export async function legacyConnection() {
@@ -97,11 +101,16 @@ export async function legacyConnection() {
   return value && typeof value.endpoint === "string" && typeof value.key === "string" ? value : null;
 }
 
+async function backgroundConnection() {
+  const value = await getLocal(BACKGROUND_CONNECTION_KEY);
+  return value && typeof value.endpoint === "string" && typeof value.key === "string" ? value : null;
+}
+
 export async function activeConnection() {
   const config = await lockConfig();
   if (!config) return legacyConnection();
-  const status = await lockState();
-  if (status.locked) return null;
+  const stored = await backgroundConnection() || await legacyConnection();
+  if (stored) return stored;
   const session = await getSession();
   return session?.connection || null;
 }
@@ -121,13 +130,13 @@ export async function lockState() {
   const cooldownUntil = Number(config.cooldownUntil) || 0;
   const session = await getSession();
   const timeout = autoLockMs(config.autoLock);
-  if (session?.connection && timeout && now - Number(session.lastActivityAt || 0) >= timeout) {
+  if (session && timeout && now - Number(session.lastActivityAt || 0) >= timeout) {
     await removeSession();
     return { enabled: true, locked: true, autoLock: autoLockValue(config.autoLock), cooldownUntil };
   }
   return {
     enabled: true,
-    locked: !session?.connection || cooldownUntil > now,
+    locked: !session || cooldownUntil > now,
     autoLock: autoLockValue(config.autoLock),
     cooldownUntil,
   };
@@ -139,7 +148,7 @@ export async function touchActivity() {
   const status = await lockState();
   if (status.locked) return status;
   const session = await getSession();
-  if (session?.connection) await setSession({ ...session, lastActivityAt: Date.now() });
+  if (session?.unlocked || session?.connection) await setSession({ ...session, lastActivityAt: Date.now() });
   return status;
 }
 
@@ -159,29 +168,51 @@ export async function unlock(pin) {
     await setLocal(LOCK_KEY, { ...config, failedAttempts: nextAttempts, cooldownUntil: delay ? now + delay : 0 });
     throw pinError("PIN 码不正确", "invalid_pin", { attempts: nextAttempts, retryAfter: delay });
   }
-  let connection;
-  try {
-    const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv: base64ToBytes(config.iv) }, key, base64ToBytes(config.ciphertext));
-    connection = JSON.parse(decoder.decode(plaintext));
-  } catch {
-    throw pinError("无法解锁本地连接，请忘记 PIN 后重新连接", "pin_corrupt");
+  let connection = await legacyConnection();
+  if (config.iv && config.ciphertext) {
+    try {
+      const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv: base64ToBytes(config.iv) }, key, base64ToBytes(config.ciphertext));
+      connection = JSON.parse(decoder.decode(plaintext));
+      if (connection?.endpoint && connection?.key) {
+        await setLocal(BACKGROUND_CONNECTION_KEY, connection);
+        await setLocal(CONNECTION_KEY, connection);
+      }
+    } catch {
+      throw pinError("无法解锁本地连接，请忘记 PIN 后重新连接", "pin_corrupt");
+    }
   }
   await setLocal(LOCK_KEY, { ...config, failedAttempts: 0, cooldownUntil: 0 });
-  await setSession({ connection, lastActivityAt: now });
+  await setSession({ ...(connection ? { connection } : {}), unlocked: true, lastActivityAt: now });
   monitorNotified = false;
   return connection;
 }
 
 export async function enablePin(pin, autoLock = "15", connection) {
   if (!validPin(pin)) throw pinError("PIN 码必须是 6–12 位数字", "invalid_pin_format");
-  if (!connection?.endpoint || !connection?.key) throw pinError("请先连接私有实例", "connection_required");
+  const migrateConnection = arguments.length >= 3;
+  const storedConnection = connection || await legacyConnection();
+  if (storedConnection && (!storedConnection.endpoint || !storedConnection.key)) throw pinError("私有实例连接无效", "invalid_connection");
   const salt = crypto.getRandomValues(new Uint8Array(16));
-  const iv = crypto.getRandomValues(new Uint8Array(12));
   const { key, verifier } = await derivePin(pin, salt);
-  const ciphertext = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, encoder.encode(JSON.stringify({ endpoint: connection.endpoint, key: connection.key }))));
-  await setLocal(LOCK_KEY, { version: 1, salt: bytesToBase64(salt), verifier: bytesToBase64(verifier), iterations: PBKDF2_ITERATIONS, iv: bytesToBase64(iv), ciphertext: bytesToBase64(ciphertext), autoLock: autoLockValue(autoLock), failedAttempts: 0, cooldownUntil: 0 });
-  await removeLocal(CONNECTION_KEY);
-  await setSession({ connection: { endpoint: connection.endpoint, key: connection.key }, lastActivityAt: Date.now() });
+  const config = { version: 1, salt: bytesToBase64(salt), verifier: bytesToBase64(verifier), iterations: PBKDF2_ITERATIONS, autoLock: autoLockValue(autoLock), failedAttempts: 0, cooldownUntil: 0 };
+  if (migrateConnection && storedConnection) {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ciphertext = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, encoder.encode(JSON.stringify({ endpoint: storedConnection.endpoint, key: storedConnection.key }))));
+    Object.assign(config, { iv: bytesToBase64(iv), ciphertext: bytesToBase64(ciphertext) });
+    await setLocal(BACKGROUND_CONNECTION_KEY, { endpoint: storedConnection.endpoint, key: storedConnection.key });
+    await removeLocal(CONNECTION_KEY);
+  }
+  await setLocal(LOCK_KEY, config);
+  await setSession({ ...(storedConnection ? { connection: { endpoint: storedConnection.endpoint, key: storedConnection.key } } : {}), unlocked: true, lastActivityAt: Date.now() });
+}
+
+export async function changePin(currentPin, nextPin) {
+  const config = await lockConfig();
+  if (!config) throw pinError("应用锁尚未启用", "pin_not_enabled");
+  if (!validPin(nextPin)) throw pinError("PIN 码必须是 6–12 位数字", "invalid_pin_format");
+  const connection = await unlock(currentPin);
+  if (config.iv && config.ciphertext) await enablePin(nextPin, config.autoLock, connection || await legacyConnection());
+  else await enablePin(nextPin, config.autoLock);
 }
 
 export async function setAutoLock(value) {
@@ -197,15 +228,18 @@ export async function lockNow() {
 
 export async function disablePin(pin) {
   const connection = await unlock(pin);
-  await setLocal(CONNECTION_KEY, connection);
+  if (connection) await setLocal(CONNECTION_KEY, connection);
+  await removeLocal(BACKGROUND_CONNECTION_KEY);
   await removeLocal(LOCK_KEY);
   await removeSession();
   monitorNotified = false;
 }
 
 export async function forgetPin() {
+  const connection = await backgroundConnection();
+  if (connection) await setLocal(CONNECTION_KEY, connection);
+  await removeLocal(BACKGROUND_CONNECTION_KEY);
   await removeLocal(LOCK_KEY);
-  await removeLocal(CONNECTION_KEY);
   await removeSession();
   monitorNotified = false;
 }

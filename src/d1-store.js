@@ -26,6 +26,24 @@ function now() {
   return new Date().toISOString();
 }
 
+function readSyncCursor(value) {
+  if (!value) return { updatedAt: "", id: "" };
+  if (typeof value === "object") return { updatedAt: String(value.updatedAt || ""), id: String(value.id || "") };
+  try {
+    return readSyncCursor(JSON.parse(decodeURIComponent(String(value))));
+  } catch {
+    return { updatedAt: "", id: "" };
+  }
+}
+
+export function encodeSyncCursor(value) {
+  return encodeURIComponent(JSON.stringify({ updatedAt: String(value?.updatedAt || ""), id: String(value?.id || "") }));
+}
+
+export function decodeSyncCursor(value) {
+  return readSyncCursor(value);
+}
+
 function parse(value, fallback) {
   try {
     return JSON.parse(value);
@@ -36,6 +54,13 @@ function parse(value, fallback) {
 
 function bookmark(row) {
   if (!row) return null;
+  const cover = row.cover || "";
+  let coverRef;
+  try {
+    const url = new URL(cover);
+    const match = url.pathname.match(/^\/v1\/media\/([0-9a-f-]{36})$/i);
+    if (match) coverRef = { id: match[1], url: cover };
+  } catch { /* legacy or malformed covers remain displayable as-is */ }
   return {
     id: row.id,
     link: row.link,
@@ -45,7 +70,8 @@ function bookmark(row) {
     description: row.description,
     note: row.note,
     reminder: row.reminder || "",
-    cover: row.cover,
+    cover,
+    ...(coverRef ? { coverRef } : {}),
     media: parse(row.media_json, []),
     collectionId: row.collection_id,
     tags: parse(row.tags_json, []),
@@ -61,6 +87,7 @@ function bookmark(row) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     deletedAt: row.deleted_at,
+    ...(row.permanent_deleted_at ? { permanentDeletedAt: row.permanent_deleted_at, purgedAt: row.permanent_deleted_at } : {}),
     deletedByCollectionId: row.deleted_by_collection_id,
   };
 }
@@ -437,6 +464,71 @@ export class D1Store {
       this.db.prepare("DELETE FROM bookmarks WHERE deleted_at IS NOT NULL AND deleted_at < ?").bind(before),
       this.db.prepare("DELETE FROM collections WHERE deleted_at IS NOT NULL AND deleted_at < ?").bind(before),
     ]);
+  }
+
+  async listSyncChanges({ cursor = null, limit = 200 } = {}) {
+    const since = readSyncCursor(cursor);
+    const size = Math.max(1, Math.min(500, Number(limit) || 200));
+    const predicate = "(updated_at > ? OR (updated_at = ? AND id > ?))";
+    const [bookmarkRows, collectionRows] = await Promise.all([
+      this.db.prepare(`SELECT * FROM bookmarks WHERE ${predicate} ORDER BY updated_at, id LIMIT ?`).bind(since.updatedAt, since.updatedAt, since.id, size).all(),
+      this.db.prepare(`SELECT * FROM collections WHERE ${predicate} ORDER BY updated_at, id LIMIT ?`).bind(since.updatedAt, since.updatedAt, since.id, size).all(),
+    ]);
+    const changes = [
+      ...(bookmarkRows.results || []).map((row) => ({ entity: "bookmark", record: bookmark(row) })),
+      ...(collectionRows.results || []).map((row) => ({ entity: "collection", record: collection(row) })),
+    ].sort((a, b) => String(a.record.updatedAt).localeCompare(String(b.record.updatedAt)) || String(a.record.id).localeCompare(String(b.record.id)));
+    const page = changes.slice(0, size);
+    const last = page.at(-1)?.record;
+    const nextCursor = last ? encodeSyncCursor(last) : encodeSyncCursor(since);
+    return { changes: page, cursor: nextCursor, hasMore: changes.length > page.length || bookmarkRows.results.length === size || collectionRows.results.length === size };
+  }
+
+  async applySyncChanges(changes = []) {
+    if (!Array.isArray(changes)) throw new TypeError("Sync changes must be an array");
+    const applied = [];
+    const conflicts = [];
+    for (const item of changes) {
+      const entity = item?.entity || (item?.record?.collectionId ? "bookmark" : "collection");
+      const record = item?.record || item;
+      if (!record?.id || !["bookmark", "collection"].includes(entity)) continue;
+      const current = entity === "bookmark" ? await this.getBookmark(record.id) : await this.getCollection(record.id);
+      const baseRevision = Number.isInteger(item?.baseRevision) ? item.baseRevision : Number(record.revision || 1) - 1;
+      if (current && current.revision !== baseRevision) {
+        conflicts.push({ entity, id: record.id, local: record, remote: current });
+        continue;
+      }
+      const timestamp = now();
+      if (entity === "collection") {
+        if (!current) {
+          await this.db.prepare(`INSERT INTO collections (id, parent_id, name, position, revision, created_at, updated_at, deleted_at, deleted_by_collection_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(record.id, record.parentId || null, String(record.name || "Untitled"), Number(record.position) || 0, Number(record.revision) || 1, record.createdAt || timestamp, record.updatedAt || timestamp, record.deletedAt || null, record.deletedByCollectionId || null).run();
+        } else {
+          await this.db.prepare(`UPDATE collections SET parent_id = ?, name = ?, position = ?, revision = ?, created_at = ?, updated_at = ?, deleted_at = ?, deleted_by_collection_id = ? WHERE id = ? AND revision = ?`)
+            .bind(record.parentId || null, String(record.name || "Untitled"), Number(record.position) || 0, Math.max(current.revision + 1, Number(record.revision) || 0), record.createdAt || current.createdAt, record.updatedAt || timestamp, record.deletedAt || null, record.deletedByCollectionId || null, record.id, baseRevision).run();
+        }
+        applied.push({ entity, record: await this.getCollection(record.id) });
+        continue;
+      }
+      if (!current) {
+        const collectionId = record.collectionId || "unsorted";
+        if (!(await this.getCollection(collectionId))) {
+          conflicts.push({ entity, id: record.id, local: record, remote: null });
+          continue;
+        }
+        await this.db.prepare(`INSERT INTO bookmarks
+          (id, link, type, language, title, description, note, reminder, cover, media_json, collection_id, tags_json, highlights_json, favorite, position, health_status, health_checked_at, health_final_url, revision, created_at, updated_at, deleted_at, deleted_by_collection_id, permanent_deleted_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(
+          record.id, record.link || "", record.type || "link", record.language || "", record.title || "", record.description || "", record.note || "", record.reminder || null, record.cover || "", JSON.stringify(record.media || []), collectionId, JSON.stringify(record.tags || []), JSON.stringify(record.highlights || []), record.favorite ? 1 : 0, Number(record.position) || 0, record.health?.status || "unknown", record.health?.checkedAt || null, record.health?.finalUrl || null, Number(record.revision) || 1, record.createdAt || timestamp, record.updatedAt || timestamp, record.deletedAt || null, record.deletedByCollectionId || null, record.permanentDeletedAt || record.purgedAt || null,
+        ).run();
+      } else {
+        await this.db.prepare(`UPDATE bookmarks SET link = ?, type = ?, language = ?, title = ?, description = ?, note = ?, reminder = ?, cover = ?, media_json = ?, collection_id = ?, tags_json = ?, highlights_json = ?, favorite = ?, position = ?, health_status = ?, health_checked_at = ?, health_final_url = ?, revision = ?, created_at = ?, updated_at = ?, deleted_at = ?, deleted_by_collection_id = ?, permanent_deleted_at = ? WHERE id = ? AND revision = ?`).bind(
+          record.link || "", record.type || "link", record.language || "", record.title || "", record.description || "", record.note || "", record.reminder || null, record.cover || "", JSON.stringify(record.media || []), record.collectionId || current.collectionId, JSON.stringify(record.tags || []), JSON.stringify(record.highlights || []), record.favorite ? 1 : 0, Number(record.position) || 0, record.health?.status || "unknown", record.health?.checkedAt || null, record.health?.finalUrl || null, Math.max(current.revision + 1, Number(record.revision) || 0), record.createdAt || current.createdAt, record.updatedAt || timestamp, record.deletedAt || null, record.deletedByCollectionId || null, record.permanentDeletedAt || record.purgedAt || null, record.id, baseRevision,
+        ).run();
+      }
+      applied.push({ entity, record: await this.getBookmark(record.id) });
+    }
+    return { applied, conflicts };
   }
 
   async createBackup({ id = crypto.randomUUID(), kind = "manual", includeMedia = false, mediaCopied = false, mediaCount = 0, libraryBytes = 0, librarySha256 = "", manifestSha256 = "", createdAt = now() } = {}) {

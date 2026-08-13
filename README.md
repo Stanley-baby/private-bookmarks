@@ -11,6 +11,17 @@ An independent Chrome and Edge bookmark extension with a private Cloudflare Work
 5. Set a long random access key: `npx wrangler secret put ACCESS_KEY`.
 6. Deploy: `npx wrangler deploy`.
 
+### Isolated staging
+
+`wrangler.toml` defines a separate `private-bookmarks-staging` Worker, D1 database, and R2 bucket. Production remains the default environment; staging commands must include `--env staging`:
+
+```sh
+npx wrangler d1 migrations apply DB --remote --env staging
+npx wrangler deploy --env staging
+```
+
+The staging workflow runs for `staging/**` and `codex/**` pushes, or by manually dispatching a selected branch. It validates TypeScript, tests, syntax, extension build, and an isolated staging dry-run before migration/deploy. Configure these GitHub Actions secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and a separate `ACCESS_KEY_STAGING`; optional OAuth/AI encryption secrets use the `_STAGING` suffix. Never reuse production access keys or OAuth secrets in staging.
+
 The cover editor uploads JPG, PNG, GIF, WebP, and AVIF files up to 5 MB to the configured R2 bucket. Cloud backups use the same bucket under the isolated `backups/<backup-id>/` prefix (or an optional `BACKUPS` binding). Media-enabled backups copy only this instance's uploaded `/v1/media/<uuid>` objects, verify SHA-256 checksums on restore, and can be downloaded as a store-only ZIP. If no R2 bucket is bound, media upload and server-side backups remain unavailable while the rest of the library still works.
 
 To enable third-party cloud backup, register OAuth applications with Dropbox, Google Drive, and/or Microsoft identity, then set the corresponding Worker secrets/vars before deploying:
@@ -33,6 +44,24 @@ Bookmark recommendations can be enabled in **Settings → App**. “Recommended 
 The current system Prompt is shown as the default in the AI settings. You can edit it and save it, or restore the default; custom Prompts keep a fixed JSON output contract so recommendation parsing remains safe. The static UI server (`npm run dev:ui`) cannot run the AI endpoint; use `npx wrangler dev --remote` for local Worker debugging, and keep the `[ai]` binding in `wrangler.toml` enabled. Set `OAUTH_ENCRYPTION_KEY` to a separate random secret when possible; it is used to encrypt stored external AI keys.
 
 ## Load the extension
+
+Build the WXT + React extension, then load the generated directory:
+
+```sh
+npm run build:extension
+```
+
+Open `chrome://extensions` or `edge://extensions`, enable Developer mode, choose **Load unpacked**, then select `.output/chrome-mv3/`.
+
+The previous vanilla implementation remains in `extension/` while features are migrated.
+
+On first launch, the generated extension can create an empty local IndexedDB library, restore its JSON backup, or import the currently configured Cloudflare library once. The local library works without a backend; Cloudflare synchronization and WebDAV backup are later migration stages.
+
+Cloudflare incremental sync is optional and disabled by default. Apply all D1 migrations (including `0009_sync.sql`) and deploy the Worker before enabling it in the generated extension. Local bookmark and collection changes are queued offline, synchronized on UI open and with a configurable background alarm, and stale record revisions appear in the conflict panel. Deleted records remain as sync tombstones for 90 days.
+
+WebDAV backup is also optional. Its endpoint must use HTTPS and is stored with the credentials only in the browser's local IndexedDB settings. Backups run manually, about five minutes after local edits, and daily; the default retention is 10 files (configurable from 3 to 50). JSON is the default format, while an optional independent password encrypts the file with PBKDF2-SHA256 and AES-GCM. Restore always downloads a pre-restore safety snapshot; merge keeps differing records as recovery copies instead of silently overwriting them.
+
+## Load the legacy extension
 
 Open `chrome://extensions` or `edge://extensions`, enable Developer mode, choose **Load unpacked**, then select `extension/`.
 

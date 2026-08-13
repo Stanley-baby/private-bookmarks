@@ -26,7 +26,13 @@ export async function connect(endpoint, key) {
 }
 
 export async function disconnect() {
-  if (await lockConfig()) return forgetPin();
+  if (await lockConfig()) {
+    await forgetPin();
+    if (extensionStorage) return extensionStorage.remove([CONNECTION_KEY, "instanceConnectionBackground"]);
+    localStorage.removeItem(CONNECTION_KEY);
+    localStorage.removeItem("instanceConnectionBackground");
+    return;
+  }
   if (extensionStorage) await extensionStorage.remove(CONNECTION_KEY);
   else localStorage.removeItem(CONNECTION_KEY);
 }
@@ -42,8 +48,6 @@ export async function requestPagePermission(pageUrl) {
 }
 
 export async function api(path, init = {}) {
-  const status = await lockState();
-  if (status.enabled && status.locked) throw Object.assign(new TypeError("应用已锁定，请输入 PIN 码"), { code: "locked" });
   const config = await activeConnection();
   if (!config) throw new TypeError("请先连接私有实例");
   const response = await fetch(`${config.endpoint}${path}`, {
@@ -57,6 +61,17 @@ export async function api(path, init = {}) {
   const body = response.status === 204 ? null : await response.json();
   if (!response.ok) throw Object.assign(new Error(body?.message || "Request failed"), { status: response.status, code: body?.code });
   return body;
+}
+
+export async function uploadCover(bytes, contentType, id) {
+  return api("/v1/media", {
+    method: "POST",
+    body: bytes,
+    headers: {
+      "content-type": contentType,
+      ...(id ? { "x-private-bookmarks-id": id } : {}),
+    },
+  });
 }
 
 export async function saveBookmark(bookmark) {
