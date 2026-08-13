@@ -31,6 +31,7 @@ jobs:
         with:
           node-version: 24
       - run: npm ci
+      - run: npx wxt prepare
       - run: npx tsc --noEmit
       - run: npm test
       - run: npm run check
