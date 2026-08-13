@@ -2823,7 +2823,7 @@ function showLockScreen() {
     const url = new URL(location.href);
     url.searchParams.delete("settings");
     history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
-    connectionView(root, () => load().catch(showError));
+    load().catch(showError);
   });
 }
 
@@ -3138,7 +3138,7 @@ async function disconnectCurrentDevice(confirmFirst = false) {
   const url = new URL(location.href);
   url.searchParams.delete("settings");
   history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
-  connectionView(root, () => load().catch(showError));
+  load().catch(showError);
 }
 
 function positionSidebarMenus() {
@@ -4964,7 +4964,7 @@ window.addEventListener("popstate", () => {
 await prepareLock();
 const initialLock = await lockState();
 if (initialLock.enabled && initialLock.locked) showLockScreen();
-else if (await connection()) {
+else {
   startLockMonitor(showLockScreen);
   load().catch(showError);
-} else connectionView(root, () => load().catch(showError));
+}

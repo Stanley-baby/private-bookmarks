@@ -52,6 +52,8 @@ function coverReference(value) {
 }
 
 export function normalizeBookmark(input, existing, now = new Date().toISOString(), id = crypto.randomUUID()) {
+  const link = input.link ?? existing?.link;
+  if (!link) throw new TypeError("书签需要有效链接");
   const hasCover = Object.prototype.hasOwnProperty.call(input, "cover");
   const cover = hasCover ? validateCover(input.cover) : existing?.cover || "";
   let coverRef = Object.prototype.hasOwnProperty.call(input, "coverRef") ? coverReference(input.coverRef) : existing?.coverRef;
@@ -59,12 +61,19 @@ export function normalizeBookmark(input, existing, now = new Date().toISOString(
   if (hasCover && !cover) coverRef = undefined;
   return {
     id: input.id || id,
-    link: new URL(input.link).href,
-    title: String(input.title || input.link).trim(),
-    description: String(input.description || "").trim(),
-    note: String(input.note || "").trim(),
-    collectionId: input.collectionId || "unsorted",
-    tags: [...new Set((input.tags || []).map(String).map((tag) => tag.trim()).filter(Boolean))],
+    link: new URL(link).href,
+    title: String(input.title ?? existing?.title ?? link).trim(),
+    description: String(input.description ?? existing?.description ?? "").trim(),
+    note: String(input.note ?? existing?.note ?? "").trim(),
+    collectionId: input.collectionId || existing?.collectionId || "unsorted",
+    tags: [...new Set((input.tags ?? existing?.tags ?? []).map(String).map((tag) => tag.trim()).filter(Boolean))],
+    ...(input.type !== undefined || existing?.type !== undefined ? { type: String(input.type ?? existing?.type ?? "link") } : {}),
+    ...(input.language !== undefined || existing?.language !== undefined ? { language: String(input.language ?? existing?.language ?? "") } : {}),
+    ...(input.favorite !== undefined || Object.prototype.hasOwnProperty.call(existing || {}, "favorite") ? { favorite: Boolean(input.favorite ?? existing?.favorite) } : {}),
+    ...(input.reminder !== undefined || Object.prototype.hasOwnProperty.call(existing || {}, "reminder") ? { reminder: String(input.reminder ?? existing?.reminder ?? "") } : {}),
+    ...(input.highlights !== undefined || Object.prototype.hasOwnProperty.call(existing || {}, "highlights") ? { highlights: Array.isArray(input.highlights) ? input.highlights : (existing?.highlights || []) } : {}),
+    ...(input.media !== undefined || Object.prototype.hasOwnProperty.call(existing || {}, "media") ? { media: Array.isArray(input.media) ? input.media : (existing?.media || []) } : {}),
+    ...(input.health !== undefined || Object.prototype.hasOwnProperty.call(existing || {}, "health") ? { health: input.health || existing?.health || { status: "unknown", checkedAt: null, finalUrl: "" } } : {}),
     cover,
     ...(coverRef ? { coverRef } : {}),
     createdAt: existing?.createdAt || input.createdAt || now,
@@ -86,6 +95,8 @@ export function applyBookmarkBatch(input, action, now = new Date().toISOString()
     item.tags = action.mode === "remove"
       ? item.tags.filter((tag) => !keys.has(String(tag).toLocaleLowerCase()))
       : [...item.tags, ...tags].filter((tag, index, all) => all.findIndex((value) => String(value).toLocaleLowerCase() === String(tag).toLocaleLowerCase()) === index);
+  } else if (action.type === "favorite") {
+    item.favorite = Boolean(action.favorite);
   } else if (action.type === "trash") {
     item.deletedAt = now;
     delete item.purgedAt;
