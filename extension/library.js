@@ -1454,7 +1454,9 @@ function coverDpr() {
 }
 
 function gridCoverUrl(item, width = masonryGridWidth()) {
-  const source = item.cover === "<screenshot>" ? item.link : item.cover || item.link;
+  if (!item.cover) return "icons/bookmark.svg";
+  if (item.cover.startsWith("data:")) return item.cover;
+  const source = item.cover === "<screenshot>" ? item.link : item.cover;
   if (!source) return "icons/bookmark.svg";
   return `https://rdl.ink/render/${encodeURIComponent(source)}?mode=fillmax&fill=solid&format=webp&width=${width}&ar=16:9&dpr=${coverDpr()}`;
 }
