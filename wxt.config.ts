@@ -4,6 +4,7 @@ export default defineConfig({
   srcDir: "src",
   entrypointsDir: "entrypoints",
   publicDir: "wxt/public",
+  watchOptions: { ignored: ["**/.output/**"] },
   manifestVersion: 3,
   modules: ["@wxt-dev/module-react"],
   manifest: {
@@ -12,7 +13,6 @@ export default defineConfig({
     description: "__MSG_appDesc__",
     default_locale: "en",
     permissions: ["activeTab", "alarms", "contextMenus", "scripting", "sidePanel", "storage"],
-    optional_permissions: ["tabs"],
     optional_host_permissions: ["https://*/*"],
     omnibox: { keyword: "pb" },
     commands: {
