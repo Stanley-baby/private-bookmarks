@@ -15,7 +15,7 @@
 }
 
 * { box-sizing: border-box; }
-body { min-width: 320px; min-height: 100vh; margin: 0; color: var(--text); background: var(--page); }
+body { min-width: 320px; min-height: 100vh; margin: 0; color: var(--text); background: var(--page); font: inherit; }
 button, input, select, textarea { font: inherit; }
 button { border: 0; border-radius: 4px; padding: 5px 7px; color: inherit; background: transparent; cursor: pointer; transition: transform 140ms var(--ease-out-strong); }
 button:active:not(:disabled), a[role="button"]:active { transform: scale(.97); }
@@ -921,6 +921,77 @@ dialog menu { display: flex; justify-content: end; gap: 6px; margin: 0; padding:
   .card-cover { width: 42px; height: 42px; }
   .card-actions button:first-child { display: none; }
   .connection { padding: 30px 26px; }
+}
+
+/* Action popups keep the same management shell as the full library. Chrome may
+   cap the outer popup, so the shell scrolls horizontally instead of dropping
+   the navigation column. */
+body.surface-popup {
+  min-width: 700px;
+  min-height: 600px;
+  overflow: auto;
+}
+
+body.surface-popup .library {
+  --sidebar-width: 250px;
+  min-width: 700px;
+  padding: 0;
+  grid-template-columns: 250px minmax(360px, 1fr);
+}
+
+body.surface-popup .sidebar {
+  position: static;
+  width: auto;
+  max-width: none;
+  transform: none;
+  box-shadow: none;
+}
+
+body.surface-popup .content { min-width: 360px; overflow: auto; }
+body.surface-popup .mobile-sidebar-toggle,
+body.surface-popup .mobile-sidebar-close { display: none; }
+body.surface-popup .sidebar-resizer { display: block; }
+body.surface-popup .empty { padding-block: 24px; }
+body.surface-popup .bookmark-count-footer { height: 32px; min-height: 32px; }
+
+/* Side panels use the full available width. At narrow widths navigation becomes
+   an existing hamburger-controlled drawer rather than disappearing. */
+body.surface-sidepanel {
+  min-width: 0;
+  min-height: 100vh;
+  overflow: hidden;
+  padding: 0;
+}
+
+body.surface-sidepanel .library {
+  --sidebar-width: clamp(240px, 30vw, 280px);
+  min-width: 0;
+}
+
+body.surface-sidepanel .content { min-width: 0; overflow: auto; }
+
+@media (max-width: 519px) {
+  body.surface-sidepanel .library { grid-template-columns: 1fr; }
+  body.surface-sidepanel .sidebar {
+    position: fixed;
+    z-index: 20;
+    inset: 0 auto 0 0;
+    width: min(280px, 85vw);
+    max-width: none;
+    transform: translateX(-100%);
+    box-shadow: 12px 0 32px rgba(0, 0, 0, .16);
+  }
+  body.surface-sidepanel .library.sidebar-open .sidebar { transform: translateX(0); }
+  body.surface-sidepanel .library.sidebar-open::after {
+    position: fixed;
+    z-index: 19;
+    inset: 0;
+    content: "";
+    background: rgba(0, 0, 0, .24);
+  }
+  body.surface-sidepanel .sidebar-resizer { display: none; }
+  body.surface-sidepanel .mobile-sidebar-toggle { display: grid; }
+  body.surface-sidepanel .mobile-sidebar-close { display: grid; }
 }
 
 [data-font-size="large"] { font-size: 15.75px; }

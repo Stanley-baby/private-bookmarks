@@ -4,6 +4,9 @@ import test from "node:test";
 
 const css = readFileSync(new URL("../extension/style.css", import.meta.url), "utf8");
 const library = readFileSync(new URL("../extension/library.js", import.meta.url), "utf8");
+const surface = readFileSync(new URL("../src/legacy/surface.js", import.meta.url), "utf8");
+const popup = readFileSync(new URL("../src/entrypoints/popup.html", import.meta.url), "utf8");
+const sidepanel = readFileSync(new URL("../src/entrypoints/sidepanel.html", import.meta.url), "utf8");
 
 function declarations(selector) {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -94,6 +97,7 @@ test("import settings route matches the reference upload surface", () => {
 
 test("primary font sizes match the reference plugin", () => {
   assert.match(declarations(":root"), /font: 14px\/1\.4 /);
+  assert.match(declarations("body"), /font: inherit/);
   assert.match(declarations('[data-font-size="large"]'), /font-size: 15\.75px/);
   assert.match(declarations(".settings-shell"), /font: 15px\/21px /);
 
@@ -103,4 +107,18 @@ test("primary font sizes match the reference plugin", () => {
     ".settings-button-group-menu",
     ".settings-button-option",
   ]) assert.match(declarations(selector), /font-size: 15px/);
+});
+
+test("shared surfaces mark their host before rendering and keep distinct layouts", () => {
+  assert.match(surface, /document\.documentElement\.dataset\.surface = surface/);
+  assert.match(surface, /document\.body\.classList\.add\(marker\)/);
+  assert.match(popup, /<body data-surface="popup">/);
+  assert.match(sidepanel, /<body data-surface="sidepanel">/);
+  assert.match(css, /body\.surface-popup[\s\S]*?min-width: 700px/);
+  assert.match(css, /body\.surface-popup \.library[\s\S]*?grid-template-columns: 250px minmax\(360px, 1fr\)/);
+  assert.match(css, /body\.surface-sidepanel \.library[\s\S]*?--sidebar-width: clamp\(240px, 30vw, 280px\)/);
+  assert.match(css, /@media \(max-width: 519px\)[\s\S]*?body\.surface-sidepanel \.library\.sidebar-open \.sidebar/);
+  assert.match(library, /function openFullPage\(route = "library\.html"\)/);
+  assert.match(library, /isPopupSurface\(\)\s*\? openFullPage\("library\.html\?settings=import"\)/);
+  assert.match(library, /isPopupSurface\(\)\s*\? openFullPage\("library\.html\?settings=backups"\)/);
 });

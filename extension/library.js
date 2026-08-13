@@ -23,6 +23,21 @@ const initialRoute = new URL(location.href).searchParams;
 const initialSetting = initialRoute.get("settings");
 const initialSettingsSection = ["app", "account", "import"].includes(initialSetting) ? initialSetting : initialSetting === "backups" ? "backups" : initialSetting === "pin" ? "pin" : "";
 const initialSettingsRoute = Boolean(initialSettingsSection);
+
+function surfaceName() {
+  return document.body?.dataset.surface || document.documentElement?.dataset.surface || "library";
+}
+
+function isPopupSurface() {
+  return surfaceName() === "popup";
+}
+
+function openFullPage(route = "library.html") {
+  const href = globalThis.chrome?.runtime?.getURL?.(route) || new URL(route, location.href).href;
+  if (globalThis.chrome?.tabs?.create) return globalThis.chrome.tabs.create({ url: href });
+  return globalThis.open?.(href, "_blank", "noopener");
+}
+
 const DEFAULT_BUTTON_GROUP = Object.freeze({ select: true, current_tab: false, new_tab: true, preview: false, web: false, copy: false, ask: false, important: false, tags: false, edit: true, remove: true });
 const BUTTON_GROUP_OPTIONS = [
   ["select", "选择", "selectAll"], ["current_tab", "直接在浏览器打开", "click"], ["new_tab", "在新标签页中打开", "open"],
@@ -3119,6 +3134,7 @@ async function accountAction(action) {
     state.sortMenuOpen = false;
     state.viewMenuOpen = false;
     state.themeMenuOpen = false;
+    if (isPopupSurface()) return openFullPage("library.html?settings=app");
     setSettingsRoute(true);
     return;
   }
@@ -3756,7 +3772,9 @@ function bindWorkspaceHeader() {
     const item = state.items.find((entry) => state.selected.has(entry.id));
     if (item?.link) window.open(item.link, "_blank", "noopener");
   };
-  root.querySelector("#export").onclick = () => api("/v1/export").then(downloadBackup).catch(showError);
+  root.querySelector("#export").onclick = () => isPopupSurface()
+    ? openFullPage("library.html?settings=backups")
+    : api("/v1/export").then(downloadBackup).catch(showError);
   updateSelectAllControl();
 }
 
@@ -4372,7 +4390,9 @@ function bind() {
     });
     bookmarkDialog.showModal();
   };
-  root.querySelector("#import").onclick = () => setSettingsRoute(true, "import");
+  root.querySelector("#import").onclick = () => isPopupSurface()
+    ? openFullPage("library.html?settings=import")
+    : setSettingsRoute(true, "import");
   root.querySelector("#check-links").onclick = async () => { await api("/v1/health-checks", { method: "POST", body: JSON.stringify({ collectionId: state.collectionId }) }); load().catch(showError); };
   root.querySelector("[data-theme-trigger]")?.addEventListener("click", (event) => {
     event.stopPropagation();
