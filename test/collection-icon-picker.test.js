@@ -7,7 +7,7 @@ const html = readFileSync(new URL("../extension/library.html", import.meta.url),
 const css = readFileSync(new URL("../extension/style.css", import.meta.url), "utf8");
 
 test("close icon matches the reference path", () => {
-  const closePath = '<path fill-rule="evenodd" d="m10.95 10.25 6.4 6.4c.2.2.2.52 0 .7-.2.2-.5.2-.7 0l-6.4-6.4-6.4 6.4c-.2-.2-.52 0-.7 0-.2-.18-.2-.5 0-.7l6.4-6.4-6.4-6.4c-.2-.2-.2-.5 0-.7.18-.2.5-.2.7 0l6.4 6.4 6.4-6.4c-.2-.2-.52 0-.7 0-.2.2-.2.5 0 .7l-6.4 6.4Z"></path>';
+  const closePath = '<path fill-rule="evenodd" d="m10.95 10.25 6.4 6.4c.2.2.2.52 0 .7-.2.2-.5.2-.7 0l-6.4-6.4-6.4 6.4c-.2.2-.52.2-.7 0-.2-.18-.2-.5 0-.7l6.4-6.4-6.4-6.4c-.2-.2-.2-.5 0-.7.18-.2.5-.2.7 0l6.4 6.4 6.4-6.4c.2-.2.5-.2.7 0 .2.2.2.5 0 .7l-6.4 6.4Z"></path>';
   assert.ok(library.includes(`close: '${closePath}'`));
 });
 
@@ -28,8 +28,8 @@ test("collection icon picker keeps the reference catalog and modal geometry", ()
   assert.match(css, /\.collection-icon-picker \{[^}]*height: 90dvh/);
   assert.match(css, /\.collection-icon-picker-header \{[^}]*flex: 0 0 48px/);
   assert.match(css, /\.collection-icon-picker-grid \{[^}]*minmax\(40px/);
-  assert.match(css, /\.collection-icon-picker-item \{[^}]*height: 44px/);
-  assert.match(css, /\.collection-icon-picker-item img \{[^}]*width: 28px; height: 28px/);
+  assert.match(css, /\.collection-icon-picker-item \{[^}]*display: block[^}]*height: 44px/);
+  assert.match(css, /\.collection-icon-picker-item img \{[^}]*width: 28px; height: 28px; margin: 0 -2\.5px/);
 });
 
 test("collection icon search, save, and image rendering share one helper", () => {
