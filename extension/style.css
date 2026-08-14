@@ -854,7 +854,8 @@ dialog menu { display: flex; justify-content: end; gap: 6px; margin: 0; padding:
 .collection-icon-picker::backdrop { background: rgba(0, 0, 0, .35); }
 .collection-icon-picker[open] { animation: collection-icon-picker-modal-in 180ms var(--ease-out-strong); backface-visibility: hidden; }
 .collection-icon-picker-body { display: flex; height: 100%; flex-direction: column; }
-.collection-icon-picker-header { display: flex; flex: 0 0 48px; align-items: center; gap: 4px; padding: 8px 16px; white-space: nowrap; }
+.collection-icon-picker-header { display: flex; flex: 0 0 48px; align-items: center; padding: 8px 16px; white-space: nowrap; }
+.collection-icon-picker-header > :not(:last-child):not(.collection-icon-picker-space) { margin-right: 4px; }
 .collection-icon-picker-header strong { min-width: 0; overflow: clip; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; font-weight: 600; line-height: 22.4px; }
 .collection-icon-picker-space { min-width: 0; flex: 1 1 0%; }
 .collection-icon-picker-header button, .collection-icon-picker-upload { display: inline-grid; width: 36px; height: 28px; min-height: 28px; flex-shrink: 0; align-items: center; justify-content: center; padding: 0 8px; border: 0; border-radius: 4px; color: light-dark(#4d4d4d, #d6d6d6); background: transparent; font-weight: 400; line-height: 28px; outline: 0; appearance: none; }
@@ -862,11 +863,14 @@ dialog menu { display: flex; justify-content: end; gap: 6px; margin: 0; padding:
 .collection-icon-picker-header button:active, .collection-icon-picker-upload:active { background: var(--active); }
 .collection-icon-picker-header button:focus-visible, .collection-icon-picker-upload:focus-within { box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 .5px var(--accent); }
 .collection-icon-picker-header .tree-svg { width: 20px; height: 20px; pointer-events: none; }
+.collection-icon-picker-header .collection-icon-picker-delete { width: auto; }
 .collection-icon-picker-delete, .collection-icon-picker-upload { color: var(--accent) !important; font-weight: 600 !important; }
 .collection-icon-picker-upload { cursor: pointer; grid-auto-flow: column; }
+.collection-icon-picker-upload-icon { display: block; width: 20px; height: 20px; }
+.collection-icon-picker-upload-icon .tree-svg { display: block; width: 20px; height: 20px; }
 .collection-icon-picker-upload input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; clip-path: inset(50%); }
 .collection-icon-picker-header #collection-icon-picker-back { display: none; }
-.collection-icon-picker-header #collection-icon-picker-close { margin-right: -8px; }
+.collection-icon-picker-last-action { display: block; flex-shrink: 0; margin-right: -8px; }
 .collection-icon-picker-search { display: flex !important; flex: 0 0 44px; height: 44px; margin: 0; padding: 8px 16px !important; align-items: center; gap: 0 !important; color: inherit !important; background: transparent; font: 14px/19.6px -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif !important; font-weight: 400 !important; }
 .collection-icon-picker-search-field { display: flex; width: 100%; height: 28px; align-items: center; gap: 8px; padding: 0 0 0 8px; color: inherit; background: var(--field); border-radius: 4px; }
 .collection-icon-picker-search-field:has(input:focus) { background: var(--page); box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 .5px color-mix(in srgb, var(--accent), transparent 50%); }

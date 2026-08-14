@@ -1,4 +1,5 @@
 import { api, connection, disconnect } from "./api.js?v=20260808-pin2";
+import { COLLECTION_ICON_DEFAULT_CATALOG, fetchCollectionIconCatalog, readCollectionIconCache, writeCollectionIconCache } from "./collection-icon-catalog.js";
 import { bookmarkType, dateFilterSuggestions, duplicateLinks, languageFilterSuggestions, matchesSearchFilters, parseSearchQuery } from "./filters.js";
 import { canonicalImportLink, parseImportText } from "./import.js";
 import { disablePin, enablePin, lockNow, lockState, prepareLock, setAutoLock, startLockMonitor } from "./lock.js?v=20260808-pin2";
@@ -353,12 +354,8 @@ function microIcon(name) {
   return `<svg class="search-micro-icon" viewBox="0 0 10 10" aria-hidden="true">${treeIcons[name]}</svg>`;
 }
 
-const COLLECTION_ICON_CATALOG = Object.freeze([
-  { category: "Colors circle", path: "colors", files: ["ios1", "ios10", "ios11", "ios2", "ios3", "ios4", "ios5", "ios6", "ios7", "ios8", "ios9", "m1", "m10", "m11", "m12", "m13", "m14", "m15", "m16", "m17", "m18", "m19", "m2", "m3", "m4", "m5", "m6", "m7", "m8", "m9"] },
-  { category: "Flat fun", path: "bb", files: ["browser", "calculator", "calendar", "contacts", "folder", "maps", "messages", "music", "notes", "photo", "picture", "shop", "time", "twitter"] },
-  { category: "Hockey", path: "hockey-18", files: ["12i", "13i", "14i", "15i", "16i", "19i", "1i", "21i", "22i", "25i", "2i", "30i", "31i", "32i", "33i", "37i", "39i", "40i", "4i", "5i", "6i", "8i"] },
-  { category: "Landscape", path: "landscape-15", files: ["i1", "i10", "i11", "i12", "i13", "i14", "i15", "i16", "i17", "i18", "i19", "i2", "i20", "i21", "i22", "i23", "i24", "i25", "i26", "i27", "i28", "i29", "i3", "i30", "i31", "i32", "i33", "i34", "i35", "i36", "i37", "i38", "i39", "i4", "i40", "i41", "i42", "i43", "i44", "i45", "i46", "i47", "i48", "i49", "i5", "i50", "i6", "i7", "i8", "i9"] },
-].map((group) => ({ ...group, icons: group.files.map((name) => ({ name: `${name}.png`, url: `https://up.raindrop.io/collection/templates/${group.path}/${name}.png` })) })));
+let collectionIconCatalog = COLLECTION_ICON_DEFAULT_CATALOG;
+let collectionIconCatalogRequest = null;
 
 const COLLECTION_ICON_DATA_URL = /^data:image\/(?:jpeg|png|gif|webp|avif);base64,[a-z\d+/]+={0,2}$/i;
 
@@ -1323,7 +1320,7 @@ function collectionPickerRows(query, selectedId) {
 
 function collectionIconPickerRows(query) {
   const value = String(query || "").trim().toLocaleLowerCase();
-  const groups = COLLECTION_ICON_CATALOG.map((group) => {
+  const groups = collectionIconCatalog.map((group) => {
     const icons = group.icons.filter((icon) => !value || `${group.category} ${icon.name}`.toLocaleLowerCase().includes(value));
     if (!icons.length) return "";
     return `<section class="collection-icon-picker-section"><h3>${escapeHtml(group.category)}</h3><div class="collection-icon-picker-grid">${icons.map((icon) => `<button type="button" class="collection-icon-picker-item" role="option" data-collection-icon-value="${escapeHtml(icon.url)}" aria-label="${escapeHtml(`${group.category} ${icon.name}`)}" title="${escapeHtml(icon.name)}"><img data-collection-icon-image src="${escapeHtml(icon.url)}" alt="" loading="lazy"></button>`).join("")}</div></section>`;
@@ -1335,6 +1332,19 @@ function renderCollectionIconPicker(query = "") {
   const content = collectionIconPickerDialog?.querySelector("#collection-icon-picker-content");
   if (!content) return;
   content.innerHTML = collectionIconPickerRows(query);
+}
+
+function refreshCollectionIconCatalog() {
+  if (collectionIconCatalogRequest) return collectionIconCatalogRequest;
+  collectionIconCatalogRequest = fetchCollectionIconCatalog()
+    .then((catalog) => {
+      collectionIconCatalog = catalog;
+      writeCollectionIconCache(globalThis.localStorage, catalog);
+      if (collectionIconPickerDialog?.open) renderCollectionIconPicker(collectionIconPickerDialog.querySelector("#collection-icon-picker-search")?.value || "");
+    })
+    .catch(() => {})
+    .finally(() => { collectionIconCatalogRequest = null; });
+  return collectionIconCatalogRequest;
 }
 
 const COLLECTION_ICON_UPLOAD_MAX_BYTES = 5 * 1024 * 1024;
@@ -1419,8 +1429,10 @@ function openCollectionIconPicker(item) {
     search.oninput = null;
     collectionIconPickerDialog.querySelector("#collection-icon-picker-content").onclick = null;
   };
+  collectionIconCatalog = readCollectionIconCache(globalThis.localStorage) || COLLECTION_ICON_DEFAULT_CATALOG;
   renderCollectionIconPicker();
   collectionIconPickerDialog.showModal();
+  refreshCollectionIconCatalog();
   queueMicrotask(() => search.focus());
 }
 

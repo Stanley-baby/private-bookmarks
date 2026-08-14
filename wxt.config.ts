@@ -13,6 +13,7 @@ export default defineConfig({
     description: "__MSG_appDesc__",
     default_locale: "en",
     permissions: ["activeTab", "alarms", "contextMenus", "scripting", "sidePanel", "storage"],
+    host_permissions: ["https://api.raindrop.io/*"],
     optional_host_permissions: ["https://*/*"],
     omnibox: { keyword: "pb" },
     commands: {
