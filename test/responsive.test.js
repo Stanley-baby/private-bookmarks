@@ -27,6 +27,15 @@ test("workspace controls keep full labels until the content becomes compact", ()
   assert.match(compactRules, /\.workspace-sort,\s*\n\s*\.view-trigger,\s*\n\s*\.workspace-tools > \.export \{ width: 36px;/);
 });
 
+test("compact workspace controls share one 36 by 32 icon box", () => {
+  const compactRules = css.match(/@container \(width < 600px\) \{([\s\S]*?)\n\}/)?.[1] || "";
+
+  assert.match(compactRules, /\.workspace-sort,\s*\n\s*\.view-trigger,\s*\n\s*\.workspace-tools > \.export \{[^}]*min-width: 36px;[^}]*height: 32px;[^}]*min-height: 32px;/);
+  assert.match(compactRules, /\.workspace-tools > \.export \{[^}]*grid-template-rows: 32px;/);
+  assert.doesNotMatch(compactRules, /\.workspace-tools > \.export \{[^}]*grid-template-rows: 28px;/);
+  assert.match(css, /\.workspace-sort-icon \.tree-svg,\s*\.view-trigger \.tree-svg,\s*\.workspace-tools > \.export \.tree-svg \{[^}]*width: 20px; height: 20px/);
+});
+
 test("bookmark editing keeps the list visible in a desktop split pane", () => {
   assert.match(library, /editingId: ""/);
   assert.match(library, /mountEditPanel\(editWasOpen\)/);

@@ -727,6 +727,27 @@ function viewName() {
   return t(({ all: "所有书签", favorites: "星标", broken: "失效链接", unknown: "待检查", trash: "废纸篓" })[state.view]);
 }
 
+const WORKSPACE_FILTER_ICONS = Object.freeze({ important: "like", note: "note", highlights: "highlights", reminder: "reminder", type: "type", created: "calendar", lang: "public", info: "info", url: "link", broken: "broken", duplicate: "duplicates", notag: "tag", tag: "searchTag" });
+
+function workspaceIconMarkup() {
+  let icon = "search";
+  let emoji = "";
+  if (state.collectionId) {
+    const item = state.collections.find((entry) => entry.id === state.collectionId);
+    if (state.collectionId === "unsorted") icon = "inboxActive";
+    else if (item) {
+      emoji = String(item.icon || state.preferences?.collectionIconByCollectionId?.[item.id] || "").trim();
+      if (!emoji) icon = "defaultCollection";
+    } else icon = "defaultCollection";
+  } else if (state.tag) icon = "searchTag";
+  else {
+    const filters = parseSearchQuery(state.query).filters;
+    const filter = filters.find(({ excluded }) => !excluded) || filters[0];
+    icon = WORKSPACE_FILTER_ICONS[filter?.kind] || ({ all: "cloudActive", favorites: "like", trash: "trash", broken: "broken", unknown: "link" }[state.view] || "search");
+  }
+  return `<div class="workspace-cloud icon-vkJU icon-yhAy"><span class="workspace-icon icon-VKRw${emoji ? " collection-emoji" : ""}">${emoji ? escapeHtml(emoji) : treeIcon(icon)}</span></div>`;
+}
+
 function workspaceHref() {
   const params = new URLSearchParams();
   if (state.collectionId) params.set("collection", state.collectionId);
@@ -944,7 +965,7 @@ function workspaceHeaderMarkup(items, selection) {
   const view = viewOption();
   const firstAction = selection.length
     ? `<div class="workspace-first-action"><div id="select-all" class="select-all selection-toggle button-dQdc" role="button" tabindex="0" title="选择所有" aria-label="选择所有" data-variant="active"><label class="selection-checkbox"><input tabindex="-1" type="checkbox" title="选择所有" ${allSelected ? "checked" : ""}></label></div></div><span class="selection-count" aria-live="polite">${selection.length}</span>`
-    : `<div class="workspace-first-action"><div id="select-all" class="select-all button-dQdc button-JeZa" role="button" tabindex="0" title="选择所有" aria-label="选择所有" data-variant="default" data-accent="default" data-size="default" data-selectable="true"><div class="workspace-cloud icon-vkJU icon-yhAy"><span class="workspace-icon icon-VKRw">${treeIcon(state.view === "all" && !state.collectionId ? "cloudActive" : "cloud")}</span></div><label class="select-checkbox select-U4Ec" title="选择所有"><input tabindex="-1" type="checkbox" ${allSelected ? "checked" : ""}></label></div></div><div class="workspace-name">${escapeHtml(viewName())}</div><a class="workspace-open" href="${escapeHtml(workspaceHref())}" target="_blank" rel="noopener" title="在新标签页中打开" aria-label="在新标签页中打开">${microIcon("microOpen")}</a>`;
+    : `<div class="workspace-first-action"><div id="select-all" class="select-all button-dQdc button-JeZa" role="button" tabindex="0" title="选择所有" aria-label="选择所有" data-variant="default" data-accent="default" data-size="default" data-selectable="true">${workspaceIconMarkup()}<label class="select-checkbox select-U4Ec" title="选择所有"><input tabindex="-1" type="checkbox" ${allSelected ? "checked" : ""}></label></div></div><div class="workspace-name">${escapeHtml(viewName())}</div><a class="workspace-open" href="${escapeHtml(workspaceHref())}" target="_blank" rel="noopener" title="在新标签页中打开" aria-label="在新标签页中打开">${microIcon("microOpen")}</a>`;
   const selectionActions = selection.length
     ? `<div class="selection-actions"><button title="添加星标" data-batch="favorite">★</button><button title="取消星标" data-batch="unfavorite">☆</button><button title="编辑标签" data-batch="tags">#</button><select id="move-to" aria-label="移动到"><option value="">移动到…</option>${state.collections.map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("")}</select>${state.view === "trash" ? `<button data-batch="restore">恢复</button>` : `<button class="danger" data-batch="trash">删除</button>`}<button id="export" class="export" title="导出书签" aria-label="导出书签">${treeIcon("download")}<span>导出书签</span></button><button data-selection-clear title="取消选择" aria-label="取消选择">×</button></div>`
     : `<div class="workspace-tools"><div class="workspace-sort" role="button" tabindex="0" title="排序" aria-label="排序" aria-haspopup="menu" aria-expanded="${state.sortMenuOpen}" data-sort-trigger><span class="workspace-sort-icon">${treeIcon(sort?.icon || "sortCreated")}</span><span class="workspace-tool-label workspace-sort-label">${sort?.label || "排序"}</span></div><div class="view-switcher" role="group" aria-label="视图"><button class="view-trigger active" data-view-trigger title="视图" aria-label="视图" aria-haspopup="menu" aria-expanded="${state.viewMenuOpen}">${treeIcon(view.icon)}<span class="workspace-tool-label">${view.label}</span></button></div><button id="export" class="export" title="更多" aria-label="导出书签">${treeIcon("download")}<span class="workspace-tool-label">导出书签</span></button></div>`;
