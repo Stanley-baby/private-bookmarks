@@ -106,3 +106,10 @@ test("icon picker exposes an explicit catalog refresh action", () => {
   assert.match(library, /normalizeCollectionIconCatalog/);
   assert.match(library, /writeCollectionIconCache/);
 });
+
+test("icon catalog refresh is disabled in local mode instead of throwing", () => {
+  assert.match(library, /const hasConnection = Boolean\(state\.connectionInfo\);/);
+  assert.match(library, /refresh\.disabled = !hasConnection;/);
+  assert.match(library, /refresh\.title = hasConnection \? "手动更新图标目录" : "连接私有实例后可用";/);
+  assert.match(css, /\.collection-icon-picker-header \.collection-icon-picker-refresh:disabled \{[^}]*cursor: not-allowed[^}]*opacity: \.45/);
+});

@@ -1418,12 +1418,15 @@ function openCollectionIconPicker(item) {
   collectionIconPickerDialog.querySelector("[data-collection-icon-upload-icon]").innerHTML = treeIcon("add");
   back.onclick = () => collectionIconPickerDialog.close();
   close.onclick = () => collectionIconPickerDialog.close();
-  refresh.onclick = async () => {
-    if (refresh.disabled) return;
+  const hasConnection = Boolean(state.connectionInfo);
+  refresh.disabled = !hasConnection;
+  refresh.title = hasConnection ? "手动更新图标目录" : "连接私有实例后可用";
+  refresh.setAttribute("aria-label", refresh.title);
+  refresh.onclick = hasConnection ? async () => {
     refresh.disabled = true;
     try { await refreshCollectionIconCatalog(); } catch (error) { showError(error); }
     finally { refresh.disabled = false; }
-  };
+  } : null;
   search.value = "";
   search.oninput = () => renderCollectionIconPicker(search.value);
   remove.onclick = () => saveCollectionIconValue(item.id, "").then(() => collectionIconPickerDialog.close()).catch(showError);
