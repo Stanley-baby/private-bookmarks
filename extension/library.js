@@ -331,6 +331,7 @@ const treeIcons = {
 treeIcons.check = '<path fill-rule="evenodd" d="m8.126 13.168.686-.058-3-3-.624.78 3 3 .37.297.316-.355 7-8-.748-.664z"></path>';
 treeIcons.blank = '';
 treeIcons.microExpand = '<path d="M1.938 3 5 6.5 8.063 3H9.5L5 8 .5 3z"></path>';
+treeIcons.tag = treeIcons.searchTag;
 treeIcons.cloud = treeIcons.all;
 treeIcons.cloudActive = '<path d="M14.95 3.973a6.597 6.597 0 0 1 2.042 4.44 5 5 0 0 1-1.775 9.582L15 18H5a5 5 0 0 1-1.99-9.588 6.59 6.59 0 0 1 2.04-4.439c2.734-2.63 7.166-2.63 9.9 0Z"></path>';
 treeIcons.inboxActive = '<path d="M17 2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h14Zm0 1H3a1 1 0 0 0-.993.883L2 4v5h4.5a.5.5 0 0 1 .5.5c0 1.742 1.632 2.5 3 2.5s3-.758 3-2.5a.5.5 0 0 1 .41-.492L13.5 9H18V4a1 1 0 0 0-.883-.993L17 3Z"></path>';
@@ -722,15 +723,14 @@ function positionViewMenu() {
   menu.style.setProperty("--top", `${top}px`);
 }
 
-function viewName() {
+function viewName(items = visibleItems()) {
+  if (state.query.trim() || state.tag) return `找到 ${items.length} 个书签`;
   if (state.collectionId) return state.collections.find((item) => item.id === state.collectionId)?.name || "收藏夹";
   return t(({ all: "所有书签", favorites: "星标", broken: "失效链接", unknown: "待检查", trash: "废纸篓" })[state.view]);
 }
 
-const WORKSPACE_FILTER_ICONS = Object.freeze({ important: "like", note: "note", highlights: "highlights", reminder: "reminder", type: "type", created: "calendar", lang: "public", info: "info", url: "link", broken: "broken", duplicate: "duplicates", notag: "tag", tag: "searchTag" });
-
 function workspaceIconMarkup() {
-  let icon = "search";
+  let icon = state.view === "all" ? "cloudActive" : ({ favorites: "like", trash: "trash", broken: "broken", unknown: "link" }[state.view] || "search");
   let emoji = "";
   if (state.collectionId) {
     const item = state.collections.find((entry) => entry.id === state.collectionId);
@@ -739,11 +739,6 @@ function workspaceIconMarkup() {
       emoji = String(item.icon || state.preferences?.collectionIconByCollectionId?.[item.id] || "").trim();
       if (!emoji) icon = "defaultCollection";
     } else icon = "defaultCollection";
-  } else if (state.tag) icon = "searchTag";
-  else {
-    const filters = parseSearchQuery(state.query).filters;
-    const filter = filters.find(({ excluded }) => !excluded) || filters[0];
-    icon = WORKSPACE_FILTER_ICONS[filter?.kind] || ({ all: "cloudActive", favorites: "like", trash: "trash", broken: "broken", unknown: "link" }[state.view] || "search");
   }
   return `<div class="workspace-cloud icon-vkJU icon-yhAy"><span class="workspace-icon icon-VKRw${emoji ? " collection-emoji" : ""}">${emoji ? escapeHtml(emoji) : treeIcon(icon)}</span></div>`;
 }
@@ -965,7 +960,7 @@ function workspaceHeaderMarkup(items, selection) {
   const view = viewOption();
   const firstAction = selection.length
     ? `<div class="workspace-first-action"><div id="select-all" class="select-all selection-toggle button-dQdc" role="button" tabindex="0" title="选择所有" aria-label="选择所有" data-variant="active"><label class="selection-checkbox"><input tabindex="-1" type="checkbox" title="选择所有" ${allSelected ? "checked" : ""}></label></div></div><span class="selection-count" aria-live="polite">${selection.length}</span>`
-    : `<div class="workspace-first-action"><div id="select-all" class="select-all button-dQdc button-JeZa" role="button" tabindex="0" title="选择所有" aria-label="选择所有" data-variant="default" data-accent="default" data-size="default" data-selectable="true">${workspaceIconMarkup()}<label class="select-checkbox select-U4Ec" title="选择所有"><input tabindex="-1" type="checkbox" ${allSelected ? "checked" : ""}></label></div></div><div class="workspace-name">${escapeHtml(viewName())}</div><a class="workspace-open" href="${escapeHtml(workspaceHref())}" target="_blank" rel="noopener" title="在新标签页中打开" aria-label="在新标签页中打开">${microIcon("microOpen")}</a>`;
+    : `<div class="workspace-first-action"><div id="select-all" class="select-all button-dQdc button-JeZa" role="button" tabindex="0" title="选择所有" aria-label="选择所有" data-variant="default" data-accent="default" data-size="default" data-selectable="true">${workspaceIconMarkup()}<label class="select-checkbox select-U4Ec" title="选择所有"><input tabindex="-1" type="checkbox" ${allSelected ? "checked" : ""}></label></div></div><div class="workspace-name">${escapeHtml(viewName(items))}</div><a class="workspace-open" href="${escapeHtml(workspaceHref())}" target="_blank" rel="noopener" title="在新标签页中打开" aria-label="在新标签页中打开">${microIcon("microOpen")}</a>`;
   const selectionActions = selection.length
     ? `<div class="selection-actions"><button title="添加星标" data-batch="favorite">★</button><button title="取消星标" data-batch="unfavorite">☆</button><button title="编辑标签" data-batch="tags">#</button><select id="move-to" aria-label="移动到"><option value="">移动到…</option>${state.collections.map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("")}</select>${state.view === "trash" ? `<button data-batch="restore">恢复</button>` : `<button class="danger" data-batch="trash">删除</button>`}<button id="export" class="export" title="导出书签" aria-label="导出书签">${treeIcon("download")}<span>导出书签</span></button><button data-selection-clear title="取消选择" aria-label="取消选择">×</button></div>`
     : `<div class="workspace-tools"><div class="workspace-sort" role="button" tabindex="0" title="排序" aria-label="排序" aria-haspopup="menu" aria-expanded="${state.sortMenuOpen}" data-sort-trigger><span class="workspace-sort-icon">${treeIcon(sort?.icon || "sortCreated")}</span><span class="workspace-tool-label workspace-sort-label">${sort?.label || "排序"}</span></div><div class="view-switcher" role="group" aria-label="视图"><button class="view-trigger active" data-view-trigger title="视图" aria-label="视图" aria-haspopup="menu" aria-expanded="${state.viewMenuOpen}">${treeIcon(view.icon)}<span class="workspace-tool-label">${view.label}</span></button></div><button id="export" class="export" title="更多" aria-label="导出书签">${treeIcon("download")}<span class="workspace-tool-label">导出书签</span></button></div>`;
@@ -1918,7 +1913,7 @@ function sidebarMarkup() {
   const duplicates = duplicateLinks(items);
   const typeCounts = items.reduce((counts, item) => counts.set(bookmarkType(item), (counts.get(bookmarkType(item)) || 0) + 1), new Map());
   const quick = (id, icon, label, count, query) => count > 0
-    ? `<button class="quick-filter tree-item ${state.query.trim() === query ? "active" : ""}" data-search-query="${escapeHtml(query)}"><span class="tree-expand"></span><span class="tree-icon">${icon === "?" ? "?" : treeIcon(icon, icon === "tag")}</span><span class="tree-title">${label}</span>${sidebarCount(count)}</button>`
+    ? `<button class="quick-filter tree-item ${state.query.trim() === query ? "active" : ""}" data-search-query="${escapeHtml(query)}"><span class="tree-expand"></span><span class="tree-icon">${icon === "?" ? "?" : treeIcon(icon)}</span><span class="tree-title">${label}</span>${sidebarCount(count)}</button>`
     : "";
   const nav = (active, icon, label, count, attribute) => `<button class="nav-item tree-item ${active ? "active" : ""}" ${attribute}><span class="tree-expand"></span><span class="tree-icon">${treeIcon(label === "星标" ? "star" : icon)}</span><span class="tree-title">${label}</span>${sidebarCount(count)}</button>`;
   const types = SEARCH_TYPE_OPTIONS.map(([type, label]) => quick(type, type, label, typeCounts.get(type) || 0, `type:${type}`)).join("");
@@ -3068,7 +3063,7 @@ function render() {
   const cardMenuItem = items.find((item) => item.id === state.cardMenuId);
   if (!cardMenuItem) state.cardMenuId = null;
   const cardMenu = cardMenuItem ? cardActionMenu(cardMenuItem) : "";
-  root.innerHTML = localizeHtml(`<main class="library">${sidebarMarkup()}<section class="content"><header class="topbar"><label class="quick-search"><span>⌕</span><input id="search" value="${escapeHtml(state.query)}" placeholder="搜索" autocomplete="off"><kbd>⌘ K</kbd></label><div class="top-actions"><button id="check-links" class="top-action-icon"${state.connectionInfo ? "" : " disabled"} title="${state.connectionInfo ? t("检查链接") : t("连接私有实例后可用")}" aria-label="${state.connectionInfo ? t("检查链接") : t("连接私有实例后可用")}">${treeIcon("refresh")}</button><div class="theme-menu-wrap"><button id="theme" class="top-action-icon theme-trigger" title="主题：${themeOption().label}" aria-label="主题：${themeOption().label}" aria-haspopup="menu" aria-expanded="${state.themeMenuOpen}" data-theme-trigger>${treeIcon(themeOption().icon)}</button>${themeMenuMarkup()}</div><button id="import" class="top-action-icon" title="导入书签" aria-label="导入书签">${treeIcon("upload")}</button><button id="add-bookmark" class="primary add-bookmark">${treeIcon("add")}<span>添加</span></button></div></header><section class="workspace"><header class="workspace-head"><div class="workspace-title"><button id="select-all" class="select-all" title="选择全部" aria-label="选择全部" aria-pressed="${Boolean(items.length && selection.length === items.length)}"><span class="select-checkbox">${items.length && selection.length === items.length ? "✓" : ""}</span></button><h1>☁ ${escapeHtml(viewName())}</h1><span class="count">${items.length}</span></div><div class="workspace-tools"><select id="sort" aria-label="排序"><option value="manual" ${state.preferences?.sort === "manual" ? "selected" : ""}>手动排序</option><option value="title" ${state.preferences?.sort === "title" ? "selected" : ""}>标题 (A-Z)</option><option value="host" ${state.preferences?.sort === "host" ? "selected" : ""}>网站 (A-Z)</option><option value="created" ${state.preferences?.sort === "created" ? "selected" : ""}>最近添加</option></select><div class="view-switcher" role="group" aria-label="视图"><button data-layout="list" class="${state.layout === "list" ? "active" : ""}" title="列表视图" aria-pressed="${state.layout === "list"}">☷ 列表</button><button data-layout="grid" class="${state.layout === "grid" ? "active" : ""}" title="网格视图" aria-pressed="${state.layout === "grid"}">▦ 网格</button></div><button id="export" class="export" title="导出书签">⇩ 导出书签</button></div></header><section class="cards layout-${state.layout}${viewSwitching ? " no-card-animation" : ""}" role="list">${collectionTrash}${items.length ? items.map((item, index) => card(item, index, duplicates)).join("") : collectionTrash || emptyStateMarkup()}${cardMenu}</section><div class="bookmark-count-footer" data-compact="false">${items.length} 个书签</div></section></section></main>`);
+  root.innerHTML = localizeHtml(`<main class="library">${sidebarMarkup()}<section class="content"><header class="topbar"><label class="quick-search"><span>⌕</span><input id="search" value="${escapeHtml(state.query)}" placeholder="搜索" autocomplete="off"><kbd>⌘ K</kbd></label><div class="top-actions"><button id="check-links" class="top-action-icon"${state.connectionInfo ? "" : " disabled"} title="${state.connectionInfo ? t("检查链接") : t("连接私有实例后可用")}" aria-label="${state.connectionInfo ? t("检查链接") : t("连接私有实例后可用")}">${treeIcon("refresh")}</button><div class="theme-menu-wrap"><button id="theme" class="top-action-icon theme-trigger" title="主题：${themeOption().label}" aria-label="主题：${themeOption().label}" aria-haspopup="menu" aria-expanded="${state.themeMenuOpen}" data-theme-trigger>${treeIcon(themeOption().icon)}</button>${themeMenuMarkup()}</div><button id="import" class="top-action-icon" title="导入书签" aria-label="导入书签">${treeIcon("upload")}</button><button id="add-bookmark" class="primary add-bookmark">${treeIcon("add")}<span>添加</span></button></div></header><section class="workspace"><header class="workspace-head"><div class="workspace-title"><button id="select-all" class="select-all" title="选择全部" aria-label="选择全部" aria-pressed="${Boolean(items.length && selection.length === items.length)}"><span class="select-checkbox">${items.length && selection.length === items.length ? "✓" : ""}</span></button><h1>☁ ${escapeHtml(viewName(items))}</h1><span class="count">${items.length}</span></div><div class="workspace-tools"><select id="sort" aria-label="排序"><option value="manual" ${state.preferences?.sort === "manual" ? "selected" : ""}>手动排序</option><option value="title" ${state.preferences?.sort === "title" ? "selected" : ""}>标题 (A-Z)</option><option value="host" ${state.preferences?.sort === "host" ? "selected" : ""}>网站 (A-Z)</option><option value="created" ${state.preferences?.sort === "created" ? "selected" : ""}>最近添加</option></select><div class="view-switcher" role="group" aria-label="视图"><button data-layout="list" class="${state.layout === "list" ? "active" : ""}" title="列表视图" aria-pressed="${state.layout === "list"}">☷ 列表</button><button data-layout="grid" class="${state.layout === "grid" ? "active" : ""}" title="网格视图" aria-pressed="${state.layout === "grid"}">▦ 网格</button></div><button id="export" class="export" title="导出书签">⇩ 导出书签</button></div></header><section class="cards layout-${state.layout}${viewSwitching ? " no-card-animation" : ""}" role="list">${collectionTrash}${items.length ? items.map((item, index) => card(item, index, duplicates)).join("") : collectionTrash || emptyStateMarkup()}${cardMenu}</section><div class="bookmark-count-footer" data-compact="false">${items.length} 个书签</div></section></section></main>`);
   const sidebar = root.querySelector(".sidebar");
   mountEditPanel(editWasOpen);
   const resizer = document.createElement("div");
@@ -3995,6 +3990,8 @@ function bind() {
     root.querySelector("#add-bookmark")?.click();
   });
   root.querySelectorAll("[data-search-query]").forEach((button) => button.onclick = () => {
+    state.view = "all";
+    state.collectionId = null;
     state.tag = "";
     state.selected.clear();
     commitSearch(button.dataset.searchQuery === state.query ? "" : button.dataset.searchQuery, false, "push");

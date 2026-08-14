@@ -8,16 +8,22 @@ const css = readFileSync(new URL("../extension/style.css", import.meta.url), "ut
 test("workspace header derives its icon from the active scope", () => {
   assert.match(library, /function workspaceIconMarkup\(\)/);
   assert.match(library, /state\.collectionId === "unsorted"/);
-  assert.match(library, /favorites: "like"/);
-  assert.match(library, /trash: "trash"/);
-  assert.match(library, /broken: "broken"/);
-  assert.match(library, /unknown: "link"/);
   assert.match(library, /collectionIconByCollectionId/);
   assert.match(library, /item\.icon/);
   assert.match(library, /emoji \? " collection-emoji" : ""/);
+  assert.match(library, /treeIcons\.tag = treeIcons\.searchTag;/);
+  assert.doesNotMatch(library, /treeIcon\(icon, icon === "tag"\)/);
   assert.match(css, /\.workspace-icon\.collection-emoji \{[^}]*line-height: 20px;[^}]*place-items: center/);
-  assert.match(library, /state\.tag/);
-  assert.match(library, /parseSearchQuery\(state\.query\)/);
+  const iconMarkup = library.match(/function workspaceIconMarkup\(\) \{([\s\S]*?)\n\}/)?.[1] || "";
+  assert.doesNotMatch(iconMarkup, /state\.tag|parseSearchQuery\(state\.query\)/);
+  assert.match(iconMarkup, /state\.view === "all"/);
   assert.match(library, /workspaceIconMarkup\(\)/);
   assert.doesNotMatch(library, /state\.view === "all" && !state\.collectionId \? "cloudActive" : "cloud"/);
+});
+
+test("quick filters reset stale navigation scope before searching", () => {
+  const handler = library.match(/root\.querySelectorAll\("\[data-search-query\]"\)\.forEach\(\(button\) => button\.onclick = \(\) => \{([\s\S]*?)\n  \}\);\n  root\.querySelectorAll\("\[data-tag\]"\)/)?.[1] || "";
+  assert.match(library, /quick\("untagged", "tag", "没有标签"[\s\S]*"notag:true"\)/);
+  assert.match(handler, /state\.view = "all";[\s\S]*state\.collectionId = null;[\s\S]*state\.tag = "";[\s\S]*state\.selected\.clear\(\);[\s\S]*commitSearch/);
+  assert.match(library, /找到 \$\{items\.length\} 个书签/);
 });
