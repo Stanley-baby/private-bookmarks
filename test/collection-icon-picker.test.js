@@ -11,6 +11,8 @@ test("collection icon picker keeps the reference catalog and modal geometry", ()
   assert.match(html, /id="collection-icon-picker-search"[^>]+placeholder="搜索图标\.\.\."/);
   assert.match(html, /data-collection-icon-delete/);
   assert.match(html, /id="collection-icon-picker-upload"/);
+  assert.match(library, /back\.innerHTML = treeIcon\("back"\);/);
+  assert.match(library, /close\.innerHTML = treeIcon\("close"\);/);
   assert.match(library, /category: "Colors circle"/);
   assert.match(library, /category: "Flat fun"/);
   assert.match(library, /category: "Hockey"/);
@@ -20,7 +22,9 @@ test("collection icon picker keeps the reference catalog and modal geometry", ()
   assert.match(css, /\.collection-icon-picker \{[^}]*width: min\(500px/);
   assert.match(css, /\.collection-icon-picker \{[^}]*height: 90dvh/);
   assert.match(css, /\.collection-icon-picker-header \{[^}]*flex: 0 0 48px/);
-  assert.match(css, /\.collection-icon-picker-grid \{[^}]*minmax\(48px/);
+  assert.match(css, /\.collection-icon-picker-grid \{[^}]*minmax\(40px/);
+  assert.match(css, /\.collection-icon-picker-item \{[^}]*height: 44px/);
+  assert.match(css, /\.collection-icon-picker-item img \{[^}]*width: 28px; height: 28px/);
 });
 
 test("collection icon search, save, and image rendering share one helper", () => {

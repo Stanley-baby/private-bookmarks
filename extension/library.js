@@ -1396,6 +1396,8 @@ function openCollectionIconPicker(item) {
   const close = collectionIconPickerDialog.querySelector("#collection-icon-picker-close");
   const upload = collectionIconPickerDialog.querySelector("#collection-icon-picker-upload");
   const remove = collectionIconPickerDialog.querySelector("[data-collection-icon-delete]");
+  back.innerHTML = treeIcon("back");
+  close.innerHTML = treeIcon("close");
   collectionIconPickerDialog.querySelector(".collection-icon-picker-search-icon").innerHTML = treeIcon("search");
   collectionIconPickerDialog.querySelector("[data-collection-icon-upload-icon]").innerHTML = treeIcon("add");
   back.onclick = () => collectionIconPickerDialog.close();
