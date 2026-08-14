@@ -155,14 +155,29 @@ test("grid cards keep bounded columns, stable covers, readable clamped copy, and
   assert.match(css, /@media \(max-width: 519px\) \{[\s\S]*?body\.surface-sidepanel \.cards\.layout-grid \{ grid-template-columns: minmax\(0, 1fr\); \}/);
 });
 
-test("masonry empty state spans and centers the available content area", () => {
-  const empty = declarations(".cards.layout-masonry > .empty");
+test("empty states share centered geometry across layouts and surfaces", () => {
+  const workspace = declarations(".workspace:has(.cards > .empty)");
+  const cards = declarations(".cards:has(> .empty)");
+  const empty = declarations(".cards:has(> .empty) > .empty");
 
+  assert.match(workspace, /display: grid/);
+  assert.match(workspace, /grid-template-rows: 48px minmax\(0, 1fr\) 32px/);
+  assert.match(workspace, /min-height: calc\(100dvh - 48px\)/);
+  assert.match(cards, /min-height: 0/);
+  assert.match(cards, /padding: 0/);
+  assert.match(cards, /grid-template-rows: minmax\(0, 1fr\)/);
+  assert.match(cards, /align-items: stretch/);
   assert.match(empty, /display: grid/);
+  assert.match(empty, /align-self: stretch/);
   assert.match(empty, /place-content: center/);
   assert.match(empty, /justify-items: center/);
   assert.match(empty, /grid-column: 1 \/ -1/);
-  assert.match(empty, /min-height: calc\(100vh - 128px\)/);
+  assert.match(empty, /min-height: 0/);
+  assert.match(empty, /padding: 32px 16px/);
+  assert.doesNotMatch(css, /\.cards\.layout-masonry > \.empty/);
+  assert.match(css, /\.library \{[^}]*height: 100vh/);
+  assert.match(css, /body\.surface-popup \{[\s\S]*?min-height: 600px/);
+  assert.match(css, /body\.surface-sidepanel \{[\s\S]*?min-height: 100vh/);
 });
 
 test("shared surfaces mark their host before rendering and keep distinct layouts", () => {
