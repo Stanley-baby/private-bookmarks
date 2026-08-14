@@ -8,6 +8,7 @@ import { collectionOptions, connectionView, escapeHtml, isCurrentRequest, lockVi
 
 const root = document.querySelector("#app");
 const collectionValueDialog = document.querySelector("#collection-value-dialog");
+const collectionIconPickerDialog = document.querySelector("#collection-icon-picker-dialog");
 const collectionShareDialog = document.querySelector("#collection-share-dialog");
 const bookmarkDialog = document.querySelector("#bookmark-dialog");
 const editBookmarkDialog = document.querySelector("#edit-bookmark-dialog");
@@ -136,7 +137,7 @@ const EN_TEXT = Object.freeze({
   "默认模式": "Default mode", "基础模式": "Basic mode", "严格模式": "Strict mode",
   "使用此封面": "Use this cover", "此书签还没有可用的候选封面。": "This bookmark has no candidate covers.", "正在加载…": "Loading…", "正在创建…": "Creating…", "上传文件（需要配置 R2）": "Upload file (R2 required)", "正在上传封面…": "Uploading cover…", "已保存 ": "Saved ", "删除标签": "Remove tag", "编辑 Markdown": "Edit Markdown",
   "打开所有书签": "Open all bookmarks", "展开所有收藏集": "Expand all collections", "折叠所有收藏集": "Collapse all collections", "按名称排序所有收藏集": "Sort all collections by name", "删除所有空收藏集": "Delete all empty collections", "没有找到收藏集": "No collections found",
-  "全部": "All",
+  "全部": "All", "搜索图标...": "Search icons...", "没有找到图标": "No icons found",
   "应用": "App", "帐户": "Account", "订阅": "Subscription", "导入": "Import", "整合方式": "Integrations", "备份": "Backups", "帮助": "Help", "设置": "Settings", "私有书签": "Private Bookmarks", "私有实例": "Private instance", "实例名称": "Instance name", "实例地址": "Instance address", "访问密钥": "Access key", "已配置（仅存储在此设备）": "Configured (stored on this device only)", "头像": "Avatar", "固定实例图标": "Fixed instance icon", "认证方式": "Authentication", "访问密钥认证": "Access key authentication", "实例类型": "Instance type", "自托管实例": "Self-hosted instance", "数据统计": "Data", "书签数量": "Bookmarks", "收藏夹数量": "Collections", "废纸篓项目数": "Trash items", "媒体上传": "Media uploads", "已启用": "Enabled", "未配置": "Not configured", "断开当前设备": "Disconnect this device", "确认断开当前设备吗？": "Disconnect this device?", "档案": "File", "上传书签文件 (html、csv 或 txt)": "Upload bookmark file (html, csv, or txt)", "上传书签文件 (html、csv、txt 或 enex)": "Upload bookmark file (html, csv, txt, or enex)", "你可以从浏览器或服务的“导出书签”部分得到这个文件": "You can get this file from the browser or service's bookmark export section", "如何使用？": "How to use?", "上传文件…": "Upload file…", "导入预览": "Import preview", "文件": "File", "格式": "Format", "有效书签": "Valid bookmarks", "重复书签": "Duplicate bookmarks", "无效项目": "Invalid items", "跳过重复项目": "Skip duplicates", "导入这些书签": "Import these bookmarks", "恢复私有书签备份": "Restore Private Bookmarks backup", "备份会替换整个资料库": "This backup replaces the entire library", "当前快照已下载": "The current snapshot was downloaded", "正在解析…": "Parsing…", "正在导入…": "Importing…", "导入完成": "Import complete", "没有可导入的书签": "No bookmarks to import", "清除": "Clear", "条": " items", "个": " ",
   "语言": "Language", "界面样式": "Interface theme", "字体大小": "Font size", "大": "Large", "默认视图模式": "Default view", "默认视图已更改": "Default view changed", "新收藏夹现在将使用": "New collections will now use", "视图模式。": "view mode.", "是否将此更改应用于所有现有收藏夹？": "Apply this change to all existing collections?", "保持不变": "Keep unchanged", "全部更新": "Update all", "列表": "List", "卡片": "Cards", "标题": "Title", "心情看板": "Moodboard", "点击书签时": "When clicking bookmarks", "在新标签页中打开": "Open in new tab", "在当前标签页中打开": "Open in current tab", "按钮组": "Button group", "搜索": "Search", "按相关性排序": "Sort by relevance", "排序标签": "Sort tags", "按名称": "By name", "按书签数量": "By bookmark count", "失效链接": "Broken links", "嵌套收藏": "Nested collections", "旧视图": "Legacy view", "询问 AI": "Ask AI", "推荐的收藏集和标签": "Recommended collections and tags", "AI 推荐标签和备注": "AI suggested tags and note", "仅 Pro 可用。AI 功能暂未接入。": "Only available for Pro. AI is not connected yet.", "AI 功能暂未接入。": "AI is not connected yet.", "推荐功能使用本地已有书签，不会上传数据。": "Recommendations use existing bookmark data and do not upload it.", "AI 版需要在 Worker 中配置 Workers AI。": "The AI version requires a Workers AI binding on the Worker.",
   "所有书签": "All bookmarks", "未分类": "Unsorted", "星标": "Favorites", "待检查": "Pending check", "废纸篓": "Trash", "收藏": "Collections", "快速过滤…": "Quick filters…", "备注": "Notes", "高亮": "Highlights", "提醒": "Reminders", "重复书签": "Duplicates", "没有标签": "Untagged", "标签": "Tags", "链接": "Links", "文章": "Articles", "图片": "Images", "视频": "Videos", "音频": "Audio", "文档": "Documents", "建议的": "Suggested", "最近使用的": "Recently used", "删除最近项": "Remove recent item", "搜索帮助": "Search help", "排序": "Sort", "网站": "Website", "视图": "View", "封面": "Cover", "图标": "Icon", "左": "Left", "右": "Right", "书签信息": "Bookmark info", "描述": "Description", "在列表中显示": "Show in list", "在卡片中显示": "Show in cards", "在标题中显示": "Show in titles", "在心情看板中显示": "Show in moodboard", "应用到全部": "Apply to all", "添加": "Add", "导出书签": "Export bookmarks", "检查链接": "Check links", "导入书签": "Import bookmarks", "直接在浏览器打开": "Open in browser", "移动": "Move", "添加标签": "Add tags", "删除": "Delete", "取消": "Cancel", "更多": "More", "选择所有": "Select all", "创建页面截图": "Create page screenshot", "正在创建页面截图…": "Creating page screenshot…", "刷新预览": "Refresh preview", "添加到收藏夹": "Add to favorites", "从收藏夹移除": "Remove from favorites", "移除标签": "Remove tags", "此视图中还没有书签。": "No bookmarks in this view.", "主题：": "Theme: ", "主题": "Theme", "浅色": "Light", "深色": "Dark", "跟随系统": "System", "日落": "Sunset", "Default mode": "Default mode", "中文（汉语）": "中文（汉语）", "新标签": "New tag", "显示": "Show", "隐藏标签": "Hide tags", "按名称排序标签": "Sort tags by name", "按书签数排序标签": "Sort tags by count", "显示侧边栏": "Show sidebar", "关闭侧边栏": "Close sidebar",
@@ -193,7 +194,7 @@ function localizeHtml(markup) {
 
 const dialogTextSources = new WeakMap();
 const dialogAttributeSources = new WeakMap();
-const dialogDynamicSelector = "#cover-picker-items, #collection-picker-list, #batch-tag-menu, #edit-tag-menu, #edit-tag-tokens, #edit-note-preview";
+const dialogDynamicSelector = "#cover-picker-items, #collection-picker-list, #collection-icon-picker-content, #batch-tag-menu, #edit-tag-menu, #edit-tag-tokens, #edit-note-preview";
 
 function localizeDialogs() {
   document.querySelectorAll("dialog").forEach((dialog) => {
@@ -352,6 +353,32 @@ function microIcon(name) {
   return `<svg class="search-micro-icon" viewBox="0 0 10 10" aria-hidden="true">${treeIcons[name]}</svg>`;
 }
 
+const COLLECTION_ICON_CATALOG = Object.freeze([
+  { category: "Colors circle", path: "colors", files: ["ios1", "ios10", "ios11", "ios2", "ios3", "ios4", "ios5", "ios6", "ios7", "ios8", "ios9", "m1", "m10", "m11", "m12", "m13", "m14", "m15", "m16", "m17", "m18", "m19", "m2", "m3", "m4", "m5", "m6", "m7", "m8", "m9"] },
+  { category: "Flat fun", path: "bb", files: ["browser", "calculator", "calendar", "contacts", "folder", "maps", "messages", "music", "notes", "photo", "picture", "shop", "time", "twitter"] },
+  { category: "Hockey", path: "hockey-18", files: ["12i", "13i", "14i", "15i", "16i", "19i", "1i", "21i", "22i", "25i", "2i", "30i", "31i", "32i", "33i", "37i", "39i", "40i", "4i", "5i", "6i", "8i"] },
+  { category: "Landscape", path: "landscape-15", files: ["i1", "i10", "i11", "i12", "i13", "i14", "i15", "i16", "i17", "i18", "i19", "i2", "i20", "i21", "i22", "i23", "i24", "i25", "i26", "i27", "i28", "i29", "i3", "i30", "i31", "i32", "i33", "i34", "i35", "i36", "i37", "i38", "i39", "i4", "i40", "i41", "i42", "i43", "i44", "i45", "i46", "i47", "i48", "i49", "i5", "i50", "i6", "i7", "i8", "i9"] },
+].map((group) => ({ ...group, icons: group.files.map((name) => ({ name: `${name}.png`, url: `https://up.raindrop.io/collection/templates/${group.path}/${name}.png` })) })));
+
+const COLLECTION_ICON_DATA_URL = /^data:image\/(?:jpeg|png|gif|webp|avif);base64,[a-z\d+/]+={0,2}$/i;
+
+function isCollectionIconImage(value) {
+  return Boolean(httpUrl(value) || COLLECTION_ICON_DATA_URL.test(String(value || "").trim()));
+}
+
+function collectionIconValue(id) {
+  const item = state.collections.find((entry) => entry.id === id);
+  return String(item?.icon || state.preferences?.collectionIconByCollectionId?.[id] || "").trim();
+}
+
+function collectionIconMarkup(value, active = false, unsorted = false) {
+  const icon = String(value || "").trim();
+  const fallback = treeIcon(unsorted ? (active ? "inboxActive" : "inbox") : (active ? "defaultCollectionActive" : "defaultCollection"));
+  if (!icon) return fallback;
+  if (!isCollectionIconImage(icon)) return `<span class="collection-emoji">${escapeHtml(icon)}</span>`;
+  return `<span class="collection-image-icon"><img data-collection-icon-image src="${escapeHtml(icon)}" alt="" loading="lazy"><span class="collection-image-fallback">${fallback}</span></span>`;
+}
+
 const MICRO_TYPE_ICONS = Object.freeze({ article: "microArticle", audio: "microAudio", document: "microDocument", image: "microImage", video: "microVideo" });
 
 function bookmarkTypeIcon(type) {
@@ -441,9 +468,9 @@ function collectionTree(groupId, parentId = null, depth = 0) {
     const control = selecting
       ? `<button class="collection-toggle collection-checkbox ${selected ? "selected" : ""}" data-select-collection="${item.id}" aria-label="${selected ? "取消选择" : "选择"}${escapeHtml(item.name)}">${selected ? "✓" : ""}</button>`
       : `<button class="collection-toggle ${hasChildren ? (collapsed ? "collapsed" : "") : "placeholder"}" ${hasChildren ? `data-toggle-collection="${item.id}" aria-label="${collapsed ? "展开" : "收起"}${escapeHtml(item.name)}" aria-expanded="${!collapsed}"` : "tabindex=\"-1\""}>${treeIcon("arrow")}</button>`;
-    const icon = state.preferences?.collectionIconByCollectionId?.[item.id];
+    const icon = collectionIconValue(item.id);
     const collectionActive = state.collectionId === item.id;
-    return `<div class="collection-branch"><div class="collection-row ${collectionActive ? "active" : ""}" style="--depth:${depth}" data-drop-collection="${item.id}" ${editable && !selecting ? `data-drag-collection="${item.id}" draggable="true"` : ""}>${control}<button class="collection-link" ${selecting ? `data-select-collection="${item.id}"` : `data-collection="${item.id}"`}><span class="collection-icon">${icon ? `<span class="collection-emoji">${escapeHtml(icon)}</span>` : treeIcon(collectionActive ? "defaultCollectionActive" : "defaultCollection")}</span><span class="collection-name">${escapeHtml(item.name)}</span>${sidebarCount(count, "collection-count")}</button>${editable && !selecting ? `<span class="collection-actions"><button data-collection-menu="${item.id}" title="收藏集选项" aria-label="${escapeHtml(item.name)}选项">${treeIcon("moreHorizontal")}</button></span>` : ""}</div>${collectionMenu(item)}${inlineCollectionRow("sidebar", groupId, item.id, depth + 1)}${hasChildren && (!collapsed || selecting) ? collectionTree(groupId, item.id, depth + 1) : ""}</div>`;
+    return `<div class="collection-branch"><div class="collection-row ${collectionActive ? "active" : ""}" style="--depth:${depth}" data-drop-collection="${item.id}" ${editable && !selecting ? `data-drag-collection="${item.id}" draggable="true"` : ""}>${control}<button class="collection-link" ${selecting ? `data-select-collection="${item.id}"` : `data-collection="${item.id}"`}><span class="collection-icon">${collectionIconMarkup(icon, collectionActive)}</span><span class="collection-name">${escapeHtml(item.name)}</span>${sidebarCount(count, "collection-count")}</button>${editable && !selecting ? `<span class="collection-actions"><button data-collection-menu="${item.id}" title="收藏集选项" aria-label="${escapeHtml(item.name)}选项">${treeIcon("moreHorizontal")}</button></span>` : ""}</div>${collectionMenu(item)}${inlineCollectionRow("sidebar", groupId, item.id, depth + 1)}${hasChildren && (!collapsed || selecting) ? collectionTree(groupId, item.id, depth + 1) : ""}</div>`;
   }).join("");
 }
 
@@ -736,11 +763,11 @@ function workspaceIconMarkup() {
     const item = state.collections.find((entry) => entry.id === state.collectionId);
     if (state.collectionId === "unsorted") icon = "inboxActive";
     else if (item) {
-      emoji = String(item.icon || state.preferences?.collectionIconByCollectionId?.[item.id] || "").trim();
+      emoji = collectionIconValue(item.id);
       if (!emoji) icon = "defaultCollection";
     } else icon = "defaultCollection";
   }
-  return `<div class="workspace-cloud icon-vkJU icon-yhAy"><span class="workspace-icon icon-VKRw${emoji ? " collection-emoji" : ""}">${emoji ? escapeHtml(emoji) : treeIcon(icon)}</span></div>`;
+  return `<div class="workspace-cloud icon-vkJU icon-yhAy"><span class="workspace-icon icon-VKRw${emoji ? " collection-emoji" : ""}">${emoji ? collectionIconMarkup(emoji, true, state.collectionId === "unsorted") : treeIcon(icon)}</span></div>`;
 }
 
 function workspaceHref() {
@@ -1276,8 +1303,8 @@ function collectionPickerRowsSource(query, selectedId) {
       ? `<span class="collection-picker-arrow ${collapsed ? "collapsed" : ""}" data-picker-toggle-collection="${item.id}" title="${arrowTitle}${escapeHtml(collectionName(item.id))}" aria-label="${arrowTitle}${escapeHtml(collectionName(item.id))}">${treeIcon("arrow")}</span>`
       : `<span class="collection-picker-arrow placeholder"></span>`;
     const active = item.id === selectedId;
-    const iconName = item.id === "unsorted" ? (active ? "inboxActive" : "inbox") : active ? "defaultCollectionActive" : "defaultCollection";
-    return `<div class="collection-picker-row" style="--depth:${depth}"><button type="button" role="option" class="collection-picker-item ${active ? "active" : ""}" aria-selected="${active}" data-pick-collection="${item.id}">${arrow}<span class="collection-picker-icon">${treeIcon(iconName)}</span><span class="collection-picker-item-name">${escapeHtml(collectionName(item.id))}</span>${count > 0 ? `<small class="collection-picker-count">${count}</small>` : ""}</button><button type="button" class="collection-picker-more" data-picker-collection-menu="${item.id}" title="更多" aria-label="${escapeHtml(collectionName(item.id))}更多" aria-expanded="${state.pickerCollectionMenuId === item.id}">${treeIcon("moreHorizontal")}</button>${menu(item)}</div>`;
+    const iconValue = collectionIconValue(item.id);
+    return `<div class="collection-picker-row" style="--depth:${depth}"><button type="button" role="option" class="collection-picker-item ${active ? "active" : ""}" aria-selected="${active}" data-pick-collection="${item.id}">${arrow}<span class="collection-picker-icon">${collectionIconMarkup(iconValue, active, item.id === "unsorted")}</span><span class="collection-picker-item-name">${escapeHtml(collectionName(item.id))}</span>${count > 0 ? `<small class="collection-picker-count">${count}</small>` : ""}</button><button type="button" class="collection-picker-more" data-picker-collection-menu="${item.id}" title="更多" aria-label="${escapeHtml(collectionName(item.id))}更多" aria-expanded="${state.pickerCollectionMenuId === item.id}">${treeIcon("moreHorizontal")}</button>${menu(item)}</div>`;
   };
   if (value) {
     const matches = state.collections.filter((item) => collectionName(item.id).toLocaleLowerCase().includes(value));
@@ -1293,6 +1320,114 @@ function collectionPickerRowsSource(query, selectedId) {
 function collectionPickerRows(query, selectedId) {
   return localizeHtml(collectionPickerRowsSource(query, selectedId));
 }
+
+function collectionIconPickerRows(query) {
+  const value = String(query || "").trim().toLocaleLowerCase();
+  const groups = COLLECTION_ICON_CATALOG.map((group) => {
+    const icons = group.icons.filter((icon) => !value || `${group.category} ${icon.name}`.toLocaleLowerCase().includes(value));
+    if (!icons.length) return "";
+    return `<section class="collection-icon-picker-section"><h3>${escapeHtml(group.category)}</h3><div class="collection-icon-picker-grid">${icons.map((icon) => `<button type="button" class="collection-icon-picker-item" role="option" data-collection-icon-value="${escapeHtml(icon.url)}" aria-label="${escapeHtml(`${group.category} ${icon.name}`)}" title="${escapeHtml(icon.name)}"><img data-collection-icon-image src="${escapeHtml(icon.url)}" alt="" loading="lazy"></button>`).join("")}</div></section>`;
+  }).join("");
+  return groups || `<p class="collection-icon-picker-empty">${t("没有找到图标")}</p>`;
+}
+
+function renderCollectionIconPicker(query = "") {
+  const content = collectionIconPickerDialog?.querySelector("#collection-icon-picker-content");
+  if (!content) return;
+  content.innerHTML = collectionIconPickerRows(query);
+}
+
+const COLLECTION_ICON_UPLOAD_MAX_BYTES = 5 * 1024 * 1024;
+const COLLECTION_ICON_UPLOAD_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp", "image/avif"]);
+
+function readCollectionIconFile(file) {
+  if (!file || !COLLECTION_ICON_UPLOAD_TYPES.has(file.type)) throw new TypeError("请选择 JPG、PNG、GIF、WebP 或 AVIF 图片");
+  if (file.size > COLLECTION_ICON_UPLOAD_MAX_BYTES) throw new TypeError("图片不能超过 5 MB");
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new TypeError("图片读取失败"));
+    reader.onload = () => {
+      const value = String(reader.result || "");
+      if (!COLLECTION_ICON_DATA_URL.test(value)) return reject(new TypeError("请选择有效的图片文件"));
+      resolve(value);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function refreshCollectionIconSurfaces(collectionId) {
+  renderSidebar();
+  const iconValue = collectionIconValue(collectionId);
+  const active = state.collectionId === collectionId;
+  const workspaceIcon = root.querySelector(".workspace-icon");
+  if (workspaceIcon && state.collectionId === collectionId) {
+    workspaceIcon.classList.toggle("collection-emoji", Boolean(iconValue && !isCollectionIconImage(iconValue)));
+    workspaceIcon.innerHTML = collectionIconMarkup(iconValue, active);
+  }
+  root.querySelectorAll("[data-card-collection]").forEach((link) => {
+    if (link.dataset.cardCollection !== collectionId) return;
+    const pathIcon = link.querySelector(".card-path-icon");
+    if (pathIcon) pathIcon.innerHTML = collectionIconMarkup(iconValue, false, collectionId === "unsorted");
+  });
+  const editForm = editBookmarkDialog?.querySelector("form");
+  if (editForm?.elements.collectionId?.value === collectionId) {
+    const editIcon = editForm.querySelector(".edit-collection-icon");
+    if (editIcon) editIcon.innerHTML = collectionIconMarkup(iconValue, false, collectionId === "unsorted");
+  }
+}
+
+async function saveCollectionIconValue(collectionId, value) {
+  const icons = { ...(state.preferences?.collectionIconByCollectionId || {}) };
+  const icon = String(value || "").trim();
+  if (icon) {
+    if (!isCollectionIconImage(icon)) throw new TypeError("请选择有效的图片图标");
+    icons[collectionId] = icon;
+  } else {
+    delete icons[collectionId];
+  }
+  await savePreferences({ collectionIconByCollectionId: icons });
+  refreshCollectionIconSurfaces(collectionId);
+}
+
+function openCollectionIconPicker(item) {
+  if (!item || !collectionIconPickerDialog) return;
+  const search = collectionIconPickerDialog.querySelector("#collection-icon-picker-search");
+  const back = collectionIconPickerDialog.querySelector("#collection-icon-picker-back");
+  const close = collectionIconPickerDialog.querySelector("#collection-icon-picker-close");
+  const upload = collectionIconPickerDialog.querySelector("#collection-icon-picker-upload");
+  const remove = collectionIconPickerDialog.querySelector("[data-collection-icon-delete]");
+  collectionIconPickerDialog.querySelector(".collection-icon-picker-search-icon").innerHTML = treeIcon("search");
+  collectionIconPickerDialog.querySelector("[data-collection-icon-upload-icon]").innerHTML = treeIcon("add");
+  back.onclick = () => collectionIconPickerDialog.close();
+  close.onclick = () => collectionIconPickerDialog.close();
+  search.value = "";
+  search.oninput = () => renderCollectionIconPicker(search.value);
+  remove.onclick = () => saveCollectionIconValue(item.id, "").then(() => collectionIconPickerDialog.close()).catch(showError);
+  upload.onchange = (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    readCollectionIconFile(file).then((value) => saveCollectionIconValue(item.id, value)).then(() => collectionIconPickerDialog.close()).catch(showError);
+  };
+  collectionIconPickerDialog.querySelector("#collection-icon-picker-content").onclick = (event) => {
+    const button = event.target.closest("[data-collection-icon-value]");
+    if (!button) return;
+    saveCollectionIconValue(item.id, button.dataset.collectionIconValue).then(() => collectionIconPickerDialog.close()).catch(showError);
+  };
+  collectionIconPickerDialog.onclose = () => {
+    search.oninput = null;
+    collectionIconPickerDialog.querySelector("#collection-icon-picker-content").onclick = null;
+  };
+  renderCollectionIconPicker();
+  collectionIconPickerDialog.showModal();
+  queueMicrotask(() => search.focus());
+}
+
+document.addEventListener("error", (event) => {
+  const image = event.target?.closest?.("img[data-collection-icon-image]");
+  if (!image) return;
+  image.hidden = true;
+  image.parentElement?.classList.add("is-failed");
+}, true);
 
 function openMovePicker() {
   const search = collectionPickerDialog.querySelector("#collection-picker-search");
@@ -1734,7 +1869,7 @@ function card(item, index, duplicates = new Set()) {
   const important = item.favorite ? `<section data-inline="true" class="card-important">${microIcon("microImportantActive")}</section>` : "";
   const reminder = item.reminder ? `<section data-inline="true" class="card-reminder">${microIcon("microReminder")} ${escapeHtml(dateTimeLabel(item.reminder))}</section>` : "";
   const highlights = item.highlights.length ? `<section data-inline="true" class="card-highlights">${microIcon("microComment")} ${item.highlights.length} 条高亮</section>` : "";
-  const source = `<section><a class="card-path" href="#" data-card-collection="${escapeHtml(item.collectionId)}"><span class="card-path-icon">${treeIcon(item.collectionId === "unsorted" ? "inbox" : "defaultCollection")}</span>${escapeHtml(masonryView ? collectionName(item.collectionId) : collectionPath(item.collectionId))}</a></section>${important}${status}${duplicate}${typeIcon}<section>${escapeHtml(host(item.link))}</section>${item.createdAt ? `<section>${dateLabel(item.createdAt)}</section>` : ""}${reminder}${highlights}`;
+  const source = `<section><a class="card-path" href="#" data-card-collection="${escapeHtml(item.collectionId)}"><span class="card-path-icon">${collectionIconMarkup(collectionIconValue(item.collectionId), false, item.collectionId === "unsorted")}</span>${escapeHtml(masonryView ? collectionName(item.collectionId) : collectionPath(item.collectionId))}</a></section>${important}${status}${duplicate}${typeIcon}<section>${escapeHtml(host(item.link))}</section>${item.createdAt ? `<section>${dateLabel(item.createdAt)}</section>` : ""}${reminder}${highlights}`;
   const actionMarkup = bookmarkActionMarkup(item);
   const selectControl = buttonGroupEnabled("select") ? `<label class="card-select" title="选择"><input aria-label="选择${escapeHtml(item.title || item.link)}" type="checkbox" data-select="${item.id}" ${selected}></label>` : "";
   const menuOpen = state.cardMenuId === item.id ? " card-menu-open" : "";
@@ -3059,7 +3194,7 @@ function render() {
   const selection = items.filter((item) => state.selected.has(item.id));
   const duplicates = duplicateLinks(sidebarItems());
   if (!selection.length) state.selectionMoreOpen = false;
-  const collectionTrash = state.view === "trash" ? state.trashedCollections.map((item) => `<article class="bookmark-card collection-trash-card"><span class="collection-trash-icon">${treeIcon("defaultCollection")}</span><span><strong>${escapeHtml(item.name)}</strong><span class="card-meta">收藏夹及其下级项目</span></span><button data-restore-collection="${item.id}" title="恢复收藏夹" aria-label="恢复收藏夹">${treeIcon("add")}</button></article>`).join("") : "";
+  const collectionTrash = state.view === "trash" ? state.trashedCollections.map((item) => `<article class="bookmark-card collection-trash-card"><span class="collection-trash-icon">${collectionIconMarkup(collectionIconValue(item.id))}</span><span><strong>${escapeHtml(item.name)}</strong><span class="card-meta">收藏夹及其下级项目</span></span><button data-restore-collection="${item.id}" title="恢复收藏夹" aria-label="恢复收藏夹">${treeIcon("add")}</button></article>`).join("") : "";
   const cardMenuItem = items.find((item) => item.id === state.cardMenuId);
   if (!cardMenuItem) state.cardMenuId = null;
   const cardMenu = cardMenuItem ? cardActionMenu(cardMenuItem) : "";
@@ -3594,16 +3729,8 @@ async function collectionAction(action, collectionId) {
     return collectionValueDialog.showModal();
   }
   if (action === "icon") {
-    const form = collectionValueDialog.querySelector("form");
-    collectionValueDialog.querySelector("h2").textContent = t("更改收藏夹图标");
-    form.elements.value.value = state.preferences?.collectionIconByCollectionId?.[item.id] || "";
-    form.elements.value.placeholder = t("输入图标或 Emoji，留空恢复默认");
-    form.elements.value.required = false;
-    state.collectionValueAction = "icon";
-    state.collectionValueId = item.id;
-    collectionValueDialog.returnValue = "";
     renderSidebar();
-    return collectionValueDialog.showModal();
+    return openCollectionIconPicker(item);
   }
   if (action === "share") {
     const bookmarks = await api(`/v1/bookmarks?collection=${encodeURIComponent(item.id)}`);
@@ -4101,7 +4228,8 @@ function bind() {
     const collectionSearch = collectionPickerDialog.querySelector("#collection-picker-search");
     const collectionList = collectionPickerDialog.querySelector("#collection-picker-list");
     const syncCollection = () => {
-      form.querySelector(".edit-collection-icon").innerHTML = treeIcon(form.elements.collectionId.value === "unsorted" ? "inbox" : "folder");
+      const collectionId = form.elements.collectionId.value;
+      form.querySelector(".edit-collection-icon").innerHTML = collectionIconMarkup(collectionIconValue(collectionId), false, collectionId === "unsorted");
       form.querySelector(".edit-collection-arrow").innerHTML = treeIcon("caret");
       collectionLabel.textContent = collectionPath(form.elements.collectionId.value);
       collectionTrigger.title = collectionLabel.textContent;
@@ -4693,13 +4821,6 @@ collectionValueDialog.addEventListener("close", async () => {
   if (action === "rename") {
     await mutate(`/v1/collections/${item.id}`, { method: "PATCH", body: JSON.stringify({ revision: item.revision, name: value }) });
     return load();
-  }
-  if (action === "icon") {
-    const icons = { ...(state.preferences?.collectionIconByCollectionId || {}) };
-    if (value) icons[item.id] = value.slice(0, 8);
-    else delete icons[item.id];
-    await savePreferences({ collectionIconByCollectionId: icons });
-    renderSidebar();
   }
 });
 

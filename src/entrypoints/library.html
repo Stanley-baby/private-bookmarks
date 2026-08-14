@@ -16,6 +16,23 @@
     </form>
   </dialog>
 
+  <dialog id="collection-icon-picker-dialog" class="collection-icon-picker" aria-labelledby="collection-icon-picker-title">
+    <div class="collection-icon-picker-body" role="dialog" aria-modal="true">
+      <header class="collection-icon-picker-header">
+        <button type="button" id="collection-icon-picker-back" title="关闭" aria-label="关闭"></button>
+        <strong id="collection-icon-picker-title">更改图标</strong>
+        <span class="collection-icon-picker-space"></span>
+        <button type="button" class="collection-icon-picker-delete" data-collection-icon-delete>删除</button>
+        <label class="collection-icon-picker-upload" title="上传文件…" aria-label="上传文件…"><span data-collection-icon-upload-icon></span><input id="collection-icon-picker-upload" type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/avif"></label>
+        <button type="button" id="collection-icon-picker-close" title="关闭" aria-label="关闭"></button>
+      </header>
+      <label class="collection-icon-picker-search">
+        <span class="collection-icon-picker-search-field"><span class="collection-icon-picker-search-icon"></span><input id="collection-icon-picker-search" type="search" role="searchbox" spellcheck="false" autocomplete="hidden" autocorrect="off" inputmode="search" placeholder="搜索图标..." autofocus></span>
+      </label>
+      <div id="collection-icon-picker-content" class="collection-icon-picker-content" role="listbox" aria-label="可用图标"></div>
+    </div>
+  </dialog>
+
   <dialog id="collection-share-dialog">
     <form method="dialog">
       <h2>分享收藏夹</h2>
