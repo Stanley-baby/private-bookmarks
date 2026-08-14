@@ -1,0 +1,74 @@
+- main [ref=f1e126]:
+  - complementary [ref=f1e127]:
+    - generic [ref=f1e128]:
+      - button "私有书签" [ref=f1e130] [cursor=pointer]
+      - button "新建收藏夹" [ref=f1e136] [cursor=pointer]
+    - navigation [ref=f1e139]:
+      - generic [ref=f1e140]:
+        - button "所有书签 1" [ref=f1e141] [cursor=pointer]:
+          - generic [ref=f1e145]: 所有书签
+          - generic [ref=f1e146]: "1"
+        - button "未分类 1" [ref=f1e147] [cursor=pointer]:
+          - generic [ref=f1e153]: 未分类
+          - generic [ref=f1e154]: "1"
+      - generic [ref=f1e157]:
+        - button "收藏" [expanded] [ref=f1e158] [cursor=pointer]
+        - button "收藏选项" [ref=f1e159] [cursor=pointer]
+      - generic [ref=f1e162]:
+        - button "快速过滤…" [expanded] [ref=f1e164] [cursor=pointer]
+        - button "链接 1" [ref=f1e165] [cursor=pointer]:
+          - generic [ref=f1e169]: 链接
+          - generic [ref=f1e170]: "1"
+        - button "没有标签 1" [ref=f1e171] [cursor=pointer]:
+          - generic [ref=f1e177]: 没有标签
+          - generic [ref=f1e178]: "1"
+        - button "待检查 1" [ref=f1e179] [cursor=pointer]:
+          - generic [ref=f1e183]: 待检查
+          - generic [ref=f1e184]: "1"
+      - generic [ref=f1e186]:
+        - button "标签 (0)" [expanded] [ref=f1e187] [cursor=pointer]
+        - button "标签 更多" [ref=f1e188] [cursor=pointer]
+  - separator "调整侧边栏宽度" [ref=f1e191]
+  - generic [ref=f1e192]:
+    - generic [ref=f1e193]:
+      - generic [ref=f1e195]:
+        - textbox "搜索设置 / 筛选" [ref=f1e200]:
+          - /placeholder: 搜索
+        - button "搜索设置 / 筛选" [ref=f1e202] [cursor=pointer]
+      - generic [ref=f1e207]:
+        - button "连接私有实例后可用" [disabled] [ref=f1e208] [cursor=pointer]
+        - button "主题：跟随系统" [ref=f1e212] [cursor=pointer]
+        - button "导入书签" [ref=f1e217] [cursor=pointer]
+        - button "添加" [ref=f1e222] [cursor=pointer]
+    - generic [ref=f1e226]:
+      - generic [ref=f1e260]:
+        - button "选择所有" [ref=f1e262] [cursor=pointer]:
+          - generic:
+            - checkbox [checked]
+        - generic [ref=f1e263]:
+          - generic [ref=f1e264]: 1 个已选
+          - generic [ref=f1e265]: 全部
+        - button "移动" [ref=f1e266] [cursor=pointer]
+        - button "添加标签" [ref=f1e267] [cursor=pointer]
+        - button "删除" [ref=f1e268] [cursor=pointer]
+        - button "更多" [ref=f1e269] [cursor=pointer]:
+          - generic: 导出书签
+        - button "直接在浏览器打开" [ref=f1e270] [cursor=pointer]
+        - button "更多" [ref=f1e272] [cursor=pointer]
+        - button "取消" [ref=f1e274] [cursor=pointer]
+      - list [ref=f1e242]:
+        - listitem [ref=f1e243]:
+          - generic [ref=f1e245]:
+            - generic [ref=f1e246]: Example
+            - generic [ref=f1e248]:
+              - generic [ref=f1e249]:
+                - link [ref=f1e250] [cursor=pointer]:
+                  - /url: "#"
+                - text: ·
+              - generic [ref=f1e256]: example.com ·
+              - generic [ref=f1e257]: 8月14日
+          - generic "选择" [ref=f1e275] [cursor=pointer]:
+            - checkbox "选择Example" [checked] [ref=f1e276]
+          - link "Example" [ref=f1e258] [cursor=pointer]:
+            - /url: https://example.com/
+      - generic [ref=f1e259]: 1 个书签

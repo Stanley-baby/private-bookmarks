@@ -36,6 +36,40 @@ test("compact workspace controls share one 36 by 32 icon box", () => {
   assert.match(css, /\.workspace-sort-icon \.tree-svg,\s*\.view-trigger \.tree-svg,\s*\.workspace-tools > \.export \.tree-svg \{[^}]*width: 20px; height: 20px/);
 });
 
+test("selection toolbar keeps actions intact before switching to icon mode", () => {
+  const actions = declarations(".workspace-selection-head .selection-action");
+  const compactRules = css.match(/@container \(width < 600px\) \{([\s\S]*?)\n\}/)?.[1] || "";
+
+  assert.match(actions, /flex: 0 0 auto/);
+  assert.match(compactRules, /\.workspace-selection-head \.selection-action,\s*\n\s*\.workspace-selection-head \.selection-more \{[^}]*min-width: 36px;[^}]*flex: 0 0 36px;/);
+  assert.match(compactRules, /\.workspace-selection-head \.selection-action > span \{ display: none; \}/);
+});
+
+test("selection toolbar mirrors the reference header alignment and summary", () => {
+  assert.match(library, /const selectedLabel = languageIsEnglish\(\) \? `\$\{selection\.length\} selected` : `\$\{selection\.length\} 个已选`;/);
+  assert.match(library, /class="selection-count" aria-live="polite"/);
+  assert.match(library, /class="selection-context"/);
+  assert.match(library, /class="workspace-last-action"><button class="selection-action selection-cancel"/);
+  assert.match(css, /\.workspace-last-action \{[^}]*flex-shrink: 0;[^}]*margin-right: -8px/);
+  assert.match(css, /\.workspace-selection-head \.selection-action > span \{[^}]*overflow: hidden;[^}]*text-overflow: ellipsis/);
+});
+
+test("selection toolbar keeps reference icons at 20px", () => {
+  const header = library.slice(library.indexOf("function selectionHeaderMarkup"), library.indexOf("function workspaceHeaderMarkup"));
+  for (const icon of ["add", "moveTo", "tagAction", "trash", "download", "open", "moreHorizontal", "selectionClose", "web", "refresh", "likeActive", "like"]) {
+    assert.match(header, new RegExp(`treeIcon\\("${icon}"\\)`));
+  }
+  assert.match(library, /viewBox="0 0 \$\{small \? "10 10" : "20 20"\}"/);
+  assert.match(css, /\.workspace-selection-head \.selection-action \.tree-svg \{ width: 20px; height: 20px; \}/);
+  assert.match(library, /download: '<path[^']*a1 1 0 0 0-\.576/);
+});
+
+test("popup surface follows the reference 800/700px extension sizing", () => {
+  assert.match(css, /body\.surface-popup \{[\s\S]*?width: max\(800px, 100vw\);[\s\S]*?height: max\(600px, 100vh\);[\s\S]*?min-width: 800px/);
+  assert.match(css, /body\.surface-popup \.library \{[\s\S]*?--sidebar-width: 300px;[\s\S]*?height: max\(600px, 100vh\);[\s\S]*?grid-template-columns: 300px minmax\(0, 1fr\)/);
+  assert.match(css, /@media \(max-device-height: 800px\), \(max-device-width: 800px\) \{[\s\S]*?body\.surface-popup \{ width: max\(700px, 100vw\); min-width: 700px; \}/);
+});
+
 test("bookmark editing keeps the list visible in a desktop split pane", () => {
   assert.match(library, /editingId: ""/);
   assert.match(library, /mountEditPanel\(editWasOpen\)/);
@@ -194,8 +228,8 @@ test("shared surfaces mark their host before rendering and keep distinct layouts
   assert.match(surface, /document\.body\.classList\.add\(marker\)/);
   assert.match(popup, /<body data-surface="popup">/);
   assert.match(sidepanel, /<body data-surface="sidepanel">/);
-  assert.match(css, /body\.surface-popup[\s\S]*?min-width: 700px/);
-  assert.match(css, /body\.surface-popup \.library[\s\S]*?grid-template-columns: 250px minmax\(360px, 1fr\)/);
+  assert.match(css, /body\.surface-popup[\s\S]*?min-width: 800px/);
+  assert.match(css, /body\.surface-popup \.library[\s\S]*?grid-template-columns: 300px minmax\(0, 1fr\)/);
   assert.match(css, /body\.surface-sidepanel \.library[\s\S]*?--sidebar-width: clamp\(240px, 30vw, 280px\)/);
   assert.match(css, /@media \(max-width: 519px\)[\s\S]*?body\.surface-sidepanel \.library\.sidebar-open \.sidebar/);
   assert.match(library, /function openFullPage\(route = "library\.html"\)/);
