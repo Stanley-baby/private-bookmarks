@@ -6,6 +6,11 @@ const library = readFileSync(new URL("../extension/library.js", import.meta.url)
 const html = readFileSync(new URL("../extension/library.html", import.meta.url), "utf8");
 const css = readFileSync(new URL("../extension/style.css", import.meta.url), "utf8");
 
+test("close icon matches the reference path", () => {
+  const closePath = '<path fill-rule="evenodd" d="m10.95 10.25 6.4 6.4c.2.2.2.52 0 .7-.2.2-.5.2-.7 0l-6.4-6.4-6.4 6.4c-.2-.2-.52 0-.7 0-.2-.18-.2-.5 0-.7l6.4-6.4-6.4-6.4c-.2-.2-.2-.5 0-.7.18-.2.5-.2.7 0l6.4 6.4 6.4-6.4c-.2-.2-.52 0-.7 0-.2.2-.2.5 0 .7l-6.4 6.4Z"></path>';
+  assert.ok(library.includes(`close: '${closePath}'`));
+});
+
 test("collection icon picker keeps the reference catalog and modal geometry", () => {
   assert.match(html, /id="collection-icon-picker-dialog" class="collection-icon-picker"/);
   assert.match(html, /id="collection-icon-picker-search"[^>]+placeholder="搜索图标\.\.\."/);
