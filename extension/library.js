@@ -1,5 +1,5 @@
 import { api, connection, disconnect } from "./api.js?v=20260808-pin2";
-import { COLLECTION_ICON_DEFAULT_CATALOG, fetchCollectionIconCatalog, readCollectionIconCache, writeCollectionIconCache } from "./collection-icon-catalog.js";
+import { COLLECTION_ICON_DEFAULT_CATALOG, readCollectionIconCache } from "./collection-icon-catalog.js";
 import { bookmarkType, dateFilterSuggestions, duplicateLinks, languageFilterSuggestions, matchesSearchFilters, parseSearchQuery } from "./filters.js";
 import { canonicalImportLink, parseImportText } from "./import.js";
 import { disablePin, enablePin, lockNow, lockState, prepareLock, setAutoLock, startLockMonitor } from "./lock.js?v=20260808-pin2";
@@ -355,7 +355,6 @@ function microIcon(name) {
 }
 
 let collectionIconCatalog = COLLECTION_ICON_DEFAULT_CATALOG;
-let collectionIconCatalogRequest = null;
 
 const COLLECTION_ICON_DATA_URL = /^data:image\/(?:jpeg|png|gif|webp|avif);base64,[a-z\d+/]+={0,2}$/i;
 
@@ -1334,19 +1333,6 @@ function renderCollectionIconPicker(query = "") {
   content.innerHTML = collectionIconPickerRows(query);
 }
 
-function refreshCollectionIconCatalog() {
-  if (collectionIconCatalogRequest) return collectionIconCatalogRequest;
-  collectionIconCatalogRequest = fetchCollectionIconCatalog()
-    .then((catalog) => {
-      collectionIconCatalog = catalog;
-      writeCollectionIconCache(globalThis.localStorage, catalog);
-      if (collectionIconPickerDialog?.open) renderCollectionIconPicker(collectionIconPickerDialog.querySelector("#collection-icon-picker-search")?.value || "");
-    })
-    .catch(() => {})
-    .finally(() => { collectionIconCatalogRequest = null; });
-  return collectionIconCatalogRequest;
-}
-
 const COLLECTION_ICON_UPLOAD_MAX_BYTES = 5 * 1024 * 1024;
 const COLLECTION_ICON_UPLOAD_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp", "image/avif"]);
 
@@ -1432,7 +1418,6 @@ function openCollectionIconPicker(item) {
   collectionIconCatalog = readCollectionIconCache(globalThis.localStorage) || COLLECTION_ICON_DEFAULT_CATALOG;
   renderCollectionIconPicker();
   collectionIconPickerDialog.showModal();
-  refreshCollectionIconCatalog();
   queueMicrotask(() => search.focus());
 }
 

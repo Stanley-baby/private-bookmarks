@@ -94,3 +94,7 @@ test("catalog cache is fresh for 24 hours and network failures leave fallback ch
   await assert.rejects(() => fetchCollectionIconCatalog(async () => { throw new Error("offline"); }));
   assert.deepEqual(readCollectionIconCache(adapter, now + 1), catalog);
 });
+
+test("opening the icon picker does not trigger a remote catalog refresh", () => {
+  assert.doesNotMatch(library, /fetchCollectionIconCatalog|refreshCollectionIconCatalog/);
+});
