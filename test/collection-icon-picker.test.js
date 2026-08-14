@@ -96,5 +96,13 @@ test("catalog cache is fresh for 24 hours and network failures leave fallback ch
 });
 
 test("opening the icon picker does not trigger a remote catalog refresh", () => {
-  assert.doesNotMatch(library, /fetchCollectionIconCatalog|refreshCollectionIconCatalog/);
+  const opening = library.match(/function openCollectionIconPicker\(item\) \{([\s\S]*?)\n\}\n\ndocument\.addEventListener\("error"/)?.[1] || "";
+  assert.doesNotMatch(opening, /^\s*refreshCollectionIconCatalog\(\);/m);
+});
+
+test("icon picker exposes an explicit catalog refresh action", () => {
+  for (const markup of [html, sourceHtml]) assert.match(markup, /data-collection-icon-refresh[^>]*>手动更新图标目录</);
+  assert.match(library, /api\(["']\/v1\/icon-catalog["']/);
+  assert.match(library, /normalizeCollectionIconCatalog/);
+  assert.match(library, /writeCollectionIconCache/);
 });

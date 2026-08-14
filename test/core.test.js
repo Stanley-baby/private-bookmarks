@@ -129,6 +129,35 @@ test("canonicalizeUrl removes tracking parameters and normalizes path/query orde
   );
 });
 
+test("icon catalog route proxies the Raindrop catalog", async () => {
+  const upstreamPayload = { result: true, items: [{ title: "Remote", icons: [{ png: "https://up.raindrop.io/remote.png" }] }] };
+  let upstreamUrl;
+  const api = createApi({
+    key: "test-key",
+    store: new MemoryStore(),
+    fetchImpl: async (url) => {
+      upstreamUrl = url;
+      return Response.json(upstreamPayload);
+    },
+  });
+  const response = await api.fetch(request("/v1/icon-catalog"));
+  assert.equal(response.status, 200);
+  assert.equal(upstreamUrl, "https://api.raindrop.io/v1/collections/covers/");
+  assert.deepEqual(await response.json(), upstreamPayload);
+});
+
+test("icon catalog proxy reports upstream failures without returning a partial catalog", async () => {
+  for (const fetchImpl of [
+    async () => new Response("upstream unavailable", { status: 503 }),
+    async () => new Response("not json", { status: 200 }),
+  ]) {
+    const api = createApi({ key: "test-key", store: new MemoryStore(), fetchImpl });
+    const response = await api.fetch(request("/v1/icon-catalog"));
+    assert.equal(response.status, 502);
+    assert.equal((await response.json()).code, "icon_catalog_failed");
+  }
+});
+
 test("AI recommendations return confirmed metadata without exposing provider details", async () => {
   let prompt;
   const api = createApi({

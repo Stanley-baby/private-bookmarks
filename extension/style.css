@@ -864,6 +864,7 @@ dialog menu { display: flex; justify-content: end; gap: 6px; margin: 0; padding:
 .collection-icon-picker-header button:focus-visible, .collection-icon-picker-upload:focus-within { box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 .5px var(--accent); }
 .collection-icon-picker-header .tree-svg { width: 20px; height: 20px; pointer-events: none; }
 .collection-icon-picker-header .collection-icon-picker-delete { width: auto; }
+.collection-icon-picker-header .collection-icon-picker-refresh { width: auto; padding: 0 6px; color: var(--accent) !important; font-size: 12px; }
 .collection-icon-picker-delete, .collection-icon-picker-upload { color: var(--accent) !important; font-weight: 600 !important; }
 .collection-icon-picker-upload { cursor: pointer; grid-auto-flow: column; }
 .collection-icon-picker-upload-icon { display: block; width: 20px; height: 20px; }

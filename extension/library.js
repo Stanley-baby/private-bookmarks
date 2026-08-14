@@ -1,5 +1,5 @@
 import { api, connection, disconnect } from "./api.js?v=20260808-pin2";
-import { COLLECTION_ICON_DEFAULT_CATALOG, readCollectionIconCache } from "./collection-icon-catalog.js";
+import { COLLECTION_ICON_DEFAULT_CATALOG, normalizeCollectionIconCatalog, readCollectionIconCache, writeCollectionIconCache } from "./collection-icon-catalog.js";
 import { bookmarkType, dateFilterSuggestions, duplicateLinks, languageFilterSuggestions, matchesSearchFilters, parseSearchQuery } from "./filters.js";
 import { canonicalImportLink, parseImportText } from "./import.js";
 import { disablePin, enablePin, lockNow, lockState, prepareLock, setAutoLock, startLockMonitor } from "./lock.js?v=20260808-pin2";
@@ -355,6 +355,7 @@ function microIcon(name) {
 }
 
 let collectionIconCatalog = COLLECTION_ICON_DEFAULT_CATALOG;
+let collectionIconCatalogRequest = null;
 
 const COLLECTION_ICON_DATA_URL = /^data:image\/(?:jpeg|png|gif|webp|avif);base64,[a-z\d+/]+={0,2}$/i;
 
@@ -1333,6 +1334,24 @@ function renderCollectionIconPicker(query = "") {
   content.innerHTML = collectionIconPickerRows(query);
 }
 
+async function refreshCollectionIconCatalog() {
+  if (collectionIconCatalogRequest) return collectionIconCatalogRequest;
+  collectionIconCatalogRequest = (async () => {
+    if (!await connection()) throw new TypeError("手动更新图标目录需要连接私有实例");
+    const catalog = normalizeCollectionIconCatalog(await api("/v1/icon-catalog"));
+    if (!catalog.length) throw new TypeError("图标目录无效");
+    if (!writeCollectionIconCache(globalThis.localStorage, catalog)) throw new TypeError("无法保存图标目录");
+    collectionIconCatalog = catalog;
+    const query = collectionIconPickerDialog?.querySelector("#collection-icon-picker-search")?.value || "";
+    renderCollectionIconPicker(query);
+  })();
+  try {
+    return await collectionIconCatalogRequest;
+  } finally {
+    collectionIconCatalogRequest = null;
+  }
+}
+
 const COLLECTION_ICON_UPLOAD_MAX_BYTES = 5 * 1024 * 1024;
 const COLLECTION_ICON_UPLOAD_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp", "image/avif"]);
 
@@ -1390,6 +1409,7 @@ function openCollectionIconPicker(item) {
   const search = collectionIconPickerDialog.querySelector("#collection-icon-picker-search");
   const back = collectionIconPickerDialog.querySelector("#collection-icon-picker-back");
   const close = collectionIconPickerDialog.querySelector("#collection-icon-picker-close");
+  const refresh = collectionIconPickerDialog.querySelector("[data-collection-icon-refresh]");
   const upload = collectionIconPickerDialog.querySelector("#collection-icon-picker-upload");
   const remove = collectionIconPickerDialog.querySelector("[data-collection-icon-delete]");
   back.innerHTML = treeIcon("back");
@@ -1398,6 +1418,12 @@ function openCollectionIconPicker(item) {
   collectionIconPickerDialog.querySelector("[data-collection-icon-upload-icon]").innerHTML = treeIcon("add");
   back.onclick = () => collectionIconPickerDialog.close();
   close.onclick = () => collectionIconPickerDialog.close();
+  refresh.onclick = async () => {
+    if (refresh.disabled) return;
+    refresh.disabled = true;
+    try { await refreshCollectionIconCatalog(); } catch (error) { showError(error); }
+    finally { refresh.disabled = false; }
+  };
   search.value = "";
   search.oninput = () => renderCollectionIconPicker(search.value);
   remove.onclick = () => saveCollectionIconValue(item.id, "").then(() => collectionIconPickerDialog.close()).catch(showError);
@@ -1413,6 +1439,7 @@ function openCollectionIconPicker(item) {
   };
   collectionIconPickerDialog.onclose = () => {
     search.oninput = null;
+    refresh.onclick = null;
     collectionIconPickerDialog.querySelector("#collection-icon-picker-content").onclick = null;
   };
   collectionIconCatalog = readCollectionIconCache(globalThis.localStorage) || COLLECTION_ICON_DEFAULT_CATALOG;

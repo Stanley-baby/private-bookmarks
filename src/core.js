@@ -9,6 +9,7 @@ const MAX_REMOTE_BACKUP_BYTES = MAX_BACKUP_MEDIA_BYTES + 10 * 1024 * 1024;
 const MAX_AI_CONTEXT_ITEMS = 24;
 export const AI_DEFAULT_MODEL = "@cf/zai-org/glm-4.7-flash";
 export const AI_DEFAULT_MAX_TOKENS = 300;
+export const ICON_CATALOG_ENDPOINT = "https://api.raindrop.io/v1/collections/covers/";
 const AI_MIN_MAX_TOKENS = 128;
 const AI_MAX_MAX_TOKENS = 4_096;
 const AI_DEFAULT_BASE_URL = "https://api.openai.com/v1";
@@ -1267,6 +1268,20 @@ export function createApi({ key, store, healthCheck, mediaBucket = null, backupB
           if (!Array.isArray(input?.changes)) return error(400, "invalid_sync", "Sync changes must be an array");
           const result = await store.applySyncChanges(input.changes.slice(0, 500));
           return json(result);
+        }
+        if (request.method === "GET" && pathname === "/v1/icon-catalog") {
+          let response;
+          try {
+            response = await fetchImpl(ICON_CATALOG_ENDPOINT, { headers: { accept: "application/json" } });
+          } catch {
+            return error(502, "icon_catalog_failed", "图标目录请求失败");
+          }
+          if (!response?.ok) return error(502, "icon_catalog_failed", "图标目录请求失败");
+          try {
+            return json(await response.json());
+          } catch {
+            return error(502, "icon_catalog_failed", "图标目录响应无效");
+          }
         }
         if (request.method === "GET" && pathname === "/v1/export") return json(await store.exportData());
         if (request.method === "GET" && pathname === "/v1/cloud/connections") {
