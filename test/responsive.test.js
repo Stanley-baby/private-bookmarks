@@ -27,12 +27,12 @@ test("workspace controls keep full labels until the content becomes compact", ()
   assert.match(compactRules, /\.workspace-sort,\s*\n\s*\.view-trigger,\s*\n\s*\.workspace-tools > \.export \{ width: 36px;/);
 });
 
-test("compact workspace controls share one 36 by 32 icon box", () => {
+test("compact workspace controls share one 36 by 28 icon box", () => {
   const compactRules = css.match(/@container \(width < 600px\) \{([\s\S]*?)\n\}/)?.[1] || "";
 
-  assert.match(compactRules, /\.workspace-sort,\s*\n\s*\.view-trigger,\s*\n\s*\.workspace-tools > \.export \{[^}]*min-width: 36px;[^}]*height: 32px;[^}]*min-height: 32px;/);
-  assert.match(compactRules, /\.workspace-tools > \.export \{[^}]*grid-template-rows: 32px;/);
-  assert.doesNotMatch(compactRules, /\.workspace-tools > \.export \{[^}]*grid-template-rows: 28px;/);
+  assert.match(compactRules, /\.workspace-sort,\s*\n\s*\.view-trigger,\s*\n\s*\.workspace-tools > \.export \{[^}]*min-width: 36px;[^}]*height: 28px;[^}]*min-height: 28px;/);
+  assert.match(compactRules, /\.workspace-tools > \.export \{[^}]*grid-template-rows: 28px;/);
+  assert.doesNotMatch(compactRules, /\.workspace-tools > \.export \{[^}]*grid-template-rows: 32px;/);
   assert.match(css, /\.workspace-sort-icon \.tree-svg,\s*\.view-trigger \.tree-svg,\s*\.workspace-tools > \.export \.tree-svg \{[^}]*width: 20px; height: 20px/);
 });
 
@@ -41,6 +41,12 @@ test("selection toolbar keeps actions intact before switching to icon mode", () 
   const compactRules = css.match(/@container \(width < 600px\) \{([\s\S]*?)\n\}/)?.[1] || "";
 
   assert.match(actions, /flex: 0 0 auto/);
+  assert.doesNotMatch(compactRules, /\.workspace-selection-head \.selection-count \{ display: none; \}/);
+  assert.match(compactRules, /\.workspace-selection-head \.selection-context \{ color: var\(--text\); font-size: 16px; font-weight: 600; \}/);
+  assert.doesNotMatch(compactRules, /\.workspace-selection-head \.selection-name\s*,[\s\S]*display: none/);
+  assert.doesNotMatch(compactRules, /\.workspace-selection-head > \.workspace-space\s*\{[^}]*display: none/);
+  assert.match(compactRules, /\.workspace-selection-head \{[^}]*overflow: visible;/);
+  assert.doesNotMatch(compactRules, /\.workspace-selection-head \{[^}]*overflow-x: auto;/);
   assert.match(compactRules, /\.workspace-selection-head \.selection-action,\s*\n\s*\.workspace-selection-head \.selection-more \{[^}]*min-width: 36px;[^}]*flex: 0 0 36px;/);
   assert.match(compactRules, /\.workspace-selection-head \.selection-action > span \{ display: none; \}/);
 });
@@ -51,13 +57,15 @@ test("selection toolbar mirrors the reference header alignment and summary", () 
   assert.match(library, /class="selection-context"/);
   assert.match(library, /class="workspace-last-action"><button class="selection-action selection-cancel"/);
   assert.match(css, /\.workspace-last-action \{[^}]*flex-shrink: 0;[^}]*margin-right: -8px/);
+  assert.match(css, /\.workspace-selection-head \.selection-count \{[^}]*flex: 0 0 auto;/);
   assert.match(css, /\.workspace-selection-head \.selection-action > span \{[^}]*overflow: hidden;[^}]*text-overflow: ellipsis/);
 });
 
 test("selection toolbar keeps reference icons at 20px", () => {
   const header = library.slice(library.indexOf("function selectionHeaderMarkup"), library.indexOf("function workspaceHeaderMarkup"));
   for (const icon of ["add", "moveTo", "tagAction", "trash", "download", "open", "moreHorizontal", "selectionClose", "web", "refresh", "likeActive", "like"]) {
-    assert.match(header, new RegExp(`treeIcon\\("${icon}"\\)`));
+    const source = icon === "download" ? library.slice(library.indexOf("function exportMenuTriggerMarkup"), library.indexOf("function selectionHeaderMarkup")) : header;
+    assert.match(source, new RegExp(`treeIcon\\("${icon}"\\)`));
   }
   assert.match(library, /viewBox="0 0 \$\{small \? "10 10" : "20 20"\}"/);
   assert.match(css, /\.workspace-selection-head \.selection-action \.tree-svg \{ width: 20px; height: 20px; \}/);
@@ -111,6 +119,15 @@ test("settings text keeps readable colors in dark mode", () => {
   ]) assert.match(declarations(selector), /color: light-dark\(#1a1a1a, #ececee\)/);
 });
 
+test("legacy nested-collection mode explains both behaviors", () => {
+  assert.match(library, /legacyInput\.dataset\.settingsToggle = "nestedViewLegacy"/);
+  assert.match(library, /class="settings-inline-help"/);
+  assert.match(library, /勾选：父收藏集页面只显示当前收藏集中的书签，子收藏集不会展开/);
+  assert.match(library, /取消勾选：父收藏集页面按区块显示当前收藏集及所有子收藏集的书签/);
+  assert.match(css, /\.settings-inline-help:hover \.settings-inline-help-popover/);
+  assert.match(css, /\.settings-inline-help:focus-visible \.settings-inline-help-popover/);
+});
+
 test("account settings route exposes self-hosted instance fields", () => {
   assert.match(library, /initialSettingsSection = \["app", "account", "import"\]/);
   assert.match(library, /\["account", "帐户", "user", true\]/);
@@ -161,7 +178,7 @@ test("P2 density tokens keep controls reachable and bookmark rows compact", () =
   assert.match(declarations(".bookmark-card"), /min-height: 68px/);
   assert.match(css, /\.card-cover \{[^}]*width: 56px; height: 48px/);
   assert.match(css, /\.card-title \{[^}]*font-size: 15px;[^}]*line-height: 21px/);
-  assert.match(declarations(".bookmark-count-footer"), /height: 32px; min-height: 32px/);
+  assert.match(declarations(".bookmark-count-footer"), /height: 48px; min-height: 48px/);
   assert.match(declarations(".empty"), /padding: 32px 16px/);
   assert.match(css, /button:focus-visible, input:focus-visible/);
   assert.match(css, /\.bookmark-card:hover \.card-actions/);
@@ -174,7 +191,7 @@ test("grid cards keep bounded columns, stable covers, readable clamped copy, and
   const gridTitle = declarations(".layout-grid .card-title");
   const gridActions = declarations(".layout-grid .card-actions");
 
-  assert.match(grid, /grid-template-columns: repeat\(auto-fit, minmax\(min\(100%, 220px\), 1fr\)\)/);
+  assert.match(grid, /grid-template-columns: repeat\(auto-fit, minmax\(min\(100%, var\(--grid-item-width\)\), 1fr\)\)/);
   assert.match(grid, /gap: 16px/);
   assert.match(gridCard, /min-width: 0/);
   assert.match(gridCard, /min-height: 288px/);
@@ -204,7 +221,7 @@ test("empty states share centered geometry across layouts and surfaces", () => {
   const empty = declarations(".cards:has(> .empty) > .empty");
 
   assert.match(workspace, /display: grid/);
-  assert.match(workspace, /grid-template-rows: 48px minmax\(0, 1fr\) 32px/);
+  assert.match(workspace, /grid-template-rows: 48px minmax\(0, 1fr\) 48px/);
   assert.match(workspace, /min-height: calc\(100dvh - 48px\)/);
   assert.match(cards, /min-height: 0/);
   assert.match(cards, /padding: 0/);
@@ -220,6 +237,7 @@ test("empty states share centered geometry across layouts and surfaces", () => {
   assert.doesNotMatch(css, /\.cards\.layout-masonry > \.empty/);
   assert.match(css, /\.library \{[^}]*height: 100vh/);
   assert.match(css, /body\.surface-popup \{[\s\S]*?min-height: 600px/);
+  assert.doesNotMatch(css, /body\.surface-popup \.bookmark-count-footer/);
   assert.match(css, /body\.surface-sidepanel \{[\s\S]*?min-height: 100vh/);
 });
 

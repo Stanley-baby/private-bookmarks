@@ -1,0 +1,84 @@
+- generic [ref=e1]:
+  - main [ref=e398]:
+    - complementary [ref=e399]:
+      - generic [ref=e400]:
+        - button "私有书签" [ref=e402] [cursor=pointer]
+        - button "新建收藏夹" [ref=e408] [cursor=pointer]
+      - navigation [ref=e411]:
+        - generic [ref=e412]:
+          - button "所有书签" [ref=e413] [cursor=pointer]
+          - button "未分类" [ref=e418] [cursor=pointer]
+        - generic [ref=e426]:
+          - generic [ref=e427]:
+            - button "收藏" [expanded] [ref=e428] [cursor=pointer]
+            - button "收藏选项" [ref=e429] [cursor=pointer]
+          - generic [ref=e433]:
+            - button "A" [ref=e434] [cursor=pointer]
+            - generic:
+              - button "A选项"
+          - generic [ref=e447]:
+            - button "B" [ref=e448] [cursor=pointer]
+            - generic:
+              - button "B选项"
+        - button "快速过滤…" [expanded] [ref=e458] [cursor=pointer]
+        - generic [ref=e460]:
+          - button "标签 (0)" [expanded] [ref=e461] [cursor=pointer]
+          - button "标签 更多" [ref=e462] [cursor=pointer]
+    - separator "调整侧边栏宽度" [ref=e465]
+    - generic [ref=e466]:
+      - generic [ref=e467]:
+        - generic [ref=e469]:
+          - generic [ref=e474]: 搜索
+          - textbox "搜索" [ref=e475]
+          - button "搜索设置 / 筛选" [ref=e477] [cursor=pointer]
+        - generic [ref=e482]:
+          - button "连接私有实例后可用" [disabled] [ref=e483] [cursor=pointer]
+          - button "主题：跟随系统" [ref=e487] [cursor=pointer]
+          - button "导入书签" [ref=e492] [cursor=pointer]
+          - button "添加" [ref=e497] [cursor=pointer]
+      - generic [ref=e502]:
+        - generic [ref=e503]:
+          - link "A" [ref=e504] [cursor=pointer]:
+            - /url: library.html?collection=09e7bcc9-189f-4e6c-b71e-45fd9fcd6a78
+          - link "在新标签页中打开" [ref=e505] [cursor=pointer]:
+            - /url: library.html?collection=09e7bcc9-189f-4e6c-b71e-45fd9fcd6a78
+          - generic [ref=e508]:
+            - button "排序" [ref=e509] [cursor=pointer]:
+              - generic: 手动
+            - group "视图" [ref=e510]:
+              - button "视图" [ref=e511] [cursor=pointer]:
+                - generic: 列表
+            - button "A更多" [ref=e513] [cursor=pointer]
+        - status [ref=e517]
+  - dialog [ref=e518]:
+    - generic [ref=e519]:
+      - heading "添加书签" [level=2] [ref=e520]
+      - generic [ref=e521]:
+        - text: 网址
+        - textbox "网址" [active] [ref=e522]:
+          - /placeholder: https://example.com
+      - generic [ref=e523]:
+        - text: 标题
+        - textbox "标题" [ref=e524]:
+          - /placeholder: 可选
+      - generic [ref=e525]:
+        - text: 收藏夹
+        - combobox "收藏夹" [ref=e526]:
+          - option "未分类"
+          - option "A" [selected]
+          - option "B"
+      - generic [ref=e527]:
+        - text: 备注
+        - textbox "备注" [ref=e528]:
+          - /placeholder: 可选
+      - generic [ref=e529]:
+        - generic [ref=e530]:
+          - strong [ref=e531]: 推荐
+          - status
+        - generic [ref=e532]:
+          - paragraph [ref=e533]: AI 建议可能需要更长时间；失败时会保留本地建议。
+          - group [ref=e534]:
+            - generic "AI 推荐说明" [ref=e535] [cursor=pointer]: "!"
+      - list [ref=e536]:
+        - button "取消" [ref=e537] [cursor=pointer]
+        - button "添加" [ref=e538] [cursor=pointer]

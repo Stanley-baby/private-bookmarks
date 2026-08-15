@@ -1,0 +1,52 @@
+- main [ref=e283]:
+  - complementary [ref=e284]:
+    - generic [ref=e285]:
+      - button "私有书签" [ref=e287] [cursor=pointer]
+      - button "新建收藏夹" [ref=e293] [cursor=pointer]
+    - navigation [ref=e296]:
+      - generic [ref=e297]:
+        - button "所有书签" [ref=e298] [cursor=pointer]
+        - button "未分类" [ref=e303] [cursor=pointer]
+      - generic [ref=e311]:
+        - generic [ref=e312]:
+          - button "收藏" [expanded] [ref=e313] [cursor=pointer]
+          - button "收藏选项" [ref=e314] [cursor=pointer]
+        - generic [ref=e318]:
+          - button "A" [ref=e319] [cursor=pointer]
+          - generic:
+            - button "A选项"
+        - generic [ref=e328]:
+          - button "B" [ref=e329] [cursor=pointer]
+          - generic:
+            - button "B选项"
+      - button "快速过滤…" [expanded] [ref=e339] [cursor=pointer]
+      - generic [ref=e341]:
+        - button "标签 (0)" [expanded] [ref=e342] [cursor=pointer]
+        - button "标签 更多" [ref=e343] [cursor=pointer]
+  - separator "调整侧边栏宽度" [ref=e346]
+  - generic [ref=e347]:
+    - generic [ref=e348]:
+      - generic [ref=e350]:
+        - generic [ref=e355]: 搜索
+        - textbox "搜索" [ref=e356]
+        - button "搜索设置 / 筛选" [ref=e358] [cursor=pointer]
+      - generic [ref=e363]:
+        - button "连接私有实例后可用" [disabled] [ref=e364] [cursor=pointer]
+        - button "主题：跟随系统" [ref=e368] [cursor=pointer]
+        - button "导入书签" [ref=e373] [cursor=pointer]
+        - button "添加" [ref=e378] [cursor=pointer]
+    - generic [ref=e383]:
+      - generic [ref=e384]:
+        - generic [ref=e385]: 所有书签
+        - link "在新标签页中打开" [ref=e386] [cursor=pointer]:
+          - /url: library.html
+        - generic [ref=e389]:
+          - button "排序" [ref=e390] [cursor=pointer]:
+            - generic: 手动
+          - group "视图" [ref=e391]:
+            - button "视图" [ref=e392] [cursor=pointer]:
+              - generic: 列表
+      - list [ref=e394]:
+        - status [ref=e395]:
+          - paragraph [ref=e396]: 此视图中还没有书签。
+          - button "添加书签" [ref=e397] [cursor=pointer]

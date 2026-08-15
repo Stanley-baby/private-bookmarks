@@ -4,6 +4,7 @@ import { bookmarkType, dateFilterSuggestions, duplicateLinks, languageFilterSugg
 import { canonicalImportLink, parseImportText } from "./import.js";
 import { disablePin, enablePin, lockNow, lockState, prepareLock, setAutoLock, startLockMonitor } from "./lock.js?v=20260808-pin2";
 import { renderMarkdown } from "./markdown.js";
+import { mediaArchiveEntries } from "./media-archive.js";
 import { recommendBookmark } from "./recommendations.js";
 import { collectionOptions, connectionView, escapeHtml, isCurrentRequest, lockView, shouldShowGlobalLoading } from "./ui.js?v=20260811-navigation3";
 
@@ -95,10 +96,10 @@ function persistBackupHistory(history) {
 
 const state = {
   view: initialRoute.get("view") || "all", collectionId: initialRoute.get("collection"), query: initialRoute.get("search") || "", tag: "", selected: new Set(), favoriteCount: 0, tags: [],
-  items: [], allItems: [], collections: [], collectionCounts: {}, trashCount: 0, trashedCollections: [], preferences: null, layout: "list",
+  items: [], allItems: [], collectionItems: null, collectionItemsCollectionId: null, collections: [], collectionCounts: {}, trashCount: 0, trashedCollections: [], preferences: null, layout: "list",
   collapsedCollections: new Set(), dragBookmark: null, dragCollection: null, searchTimer: null, sidebarWidth: null, cardMenuId: null, cardActionProxies: null, editingId: "", editSnapshot: "",
-  searchMenuOpen: false, searchFilterGroup: null, sortMenuOpen: false, viewMenuOpen: false, themeMenuOpen: false, recentSearches: readSearchHistory(), groupMenuId: null, collectionMenuId: null, pickerCollectionMenuId: null, pickerGroupMenuId: null, inlineCollectionCreate: null, tagMenuOpen: false, tagItemMenu: null, collectionValueAction: null, collectionValueId: null, collectionSelection: null,
-  selectionMoreOpen: false, selectionScreenshotWorking: false, sidebarOpen: false, accountMenuOpen: false, mediaUploadEnabled: false, aiRecommendationsAvailable: false, aiSettings: null, aiBusy: false,
+  searchMenuOpen: false, searchFilterGroup: null, searchInCollection: false, searchActiveIndex: -1, sortMenuOpen: false, viewMenuOpen: false, workspaceMenuSectionId: null, workspaceCollectionMenuId: null, exportMenuSectionId: null, themeMenuOpen: false, recentSearches: readSearchHistory(), groupMenuId: null, collectionMenuId: null, pickerCollectionMenuId: null, pickerGroupMenuId: null, inlineCollectionCreate: null, tagMenuOpen: false, tagItemMenu: null, collectionValueAction: null, collectionValueId: null, collectionSelection: null,
+  selectionMoreOpen: false, selectionMoreSectionId: null, selectionSectionId: null, selectionScreenshotWorking: false, sidebarOpen: false, accountMenuOpen: false, mediaUploadEnabled: false, aiRecommendationsAvailable: false, aiSettings: null, aiBusy: false,
   settingsOpen: initialSettingsRoute, settingsSection: initialSettingsSection || "app", settingsMenu: null, settingsNeedsReload: false, settingsSavePromise: null, connectionInfo: null,
   viewSwitching: false,
   loading: false,
@@ -141,7 +142,7 @@ const EN_TEXT = Object.freeze({
   "全部": "All", "搜索图标...": "Search icons...", "没有找到图标": "No icons found",
   "应用": "App", "帐户": "Account", "订阅": "Subscription", "导入": "Import", "整合方式": "Integrations", "备份": "Backups", "帮助": "Help", "设置": "Settings", "私有书签": "Private Bookmarks", "私有实例": "Private instance", "实例名称": "Instance name", "实例地址": "Instance address", "访问密钥": "Access key", "已配置（仅存储在此设备）": "Configured (stored on this device only)", "头像": "Avatar", "固定实例图标": "Fixed instance icon", "认证方式": "Authentication", "访问密钥认证": "Access key authentication", "实例类型": "Instance type", "自托管实例": "Self-hosted instance", "数据统计": "Data", "书签数量": "Bookmarks", "收藏夹数量": "Collections", "废纸篓项目数": "Trash items", "媒体上传": "Media uploads", "已启用": "Enabled", "未配置": "Not configured", "断开当前设备": "Disconnect this device", "确认断开当前设备吗？": "Disconnect this device?", "档案": "File", "上传书签文件 (html、csv 或 txt)": "Upload bookmark file (html, csv, or txt)", "上传书签文件 (html、csv、txt 或 enex)": "Upload bookmark file (html, csv, txt, or enex)", "你可以从浏览器或服务的“导出书签”部分得到这个文件": "You can get this file from the browser or service's bookmark export section", "如何使用？": "How to use?", "上传文件…": "Upload file…", "导入预览": "Import preview", "文件": "File", "格式": "Format", "有效书签": "Valid bookmarks", "重复书签": "Duplicate bookmarks", "无效项目": "Invalid items", "跳过重复项目": "Skip duplicates", "导入这些书签": "Import these bookmarks", "恢复私有书签备份": "Restore Private Bookmarks backup", "备份会替换整个资料库": "This backup replaces the entire library", "当前快照已下载": "The current snapshot was downloaded", "正在解析…": "Parsing…", "正在导入…": "Importing…", "导入完成": "Import complete", "没有可导入的书签": "No bookmarks to import", "清除": "Clear", "条": " items", "个": " ",
   "语言": "Language", "界面样式": "Interface theme", "字体大小": "Font size", "大": "Large", "默认视图模式": "Default view", "默认视图已更改": "Default view changed", "新收藏夹现在将使用": "New collections will now use", "视图模式。": "view mode.", "是否将此更改应用于所有现有收藏夹？": "Apply this change to all existing collections?", "保持不变": "Keep unchanged", "全部更新": "Update all", "列表": "List", "卡片": "Cards", "标题": "Title", "心情看板": "Moodboard", "点击书签时": "When clicking bookmarks", "在新标签页中打开": "Open in new tab", "在当前标签页中打开": "Open in current tab", "按钮组": "Button group", "搜索": "Search", "按相关性排序": "Sort by relevance", "排序标签": "Sort tags", "按名称": "By name", "按书签数量": "By bookmark count", "失效链接": "Broken links", "嵌套收藏": "Nested collections", "旧视图": "Legacy view", "询问 AI": "Ask AI", "推荐的收藏集和标签": "Recommended collections and tags", "AI 推荐标签和备注": "AI suggested tags and note", "仅 Pro 可用。AI 功能暂未接入。": "Only available for Pro. AI is not connected yet.", "AI 功能暂未接入。": "AI is not connected yet.", "推荐功能使用本地已有书签，不会上传数据。": "Recommendations use existing bookmark data and do not upload it.", "AI 版需要在 Worker 中配置 Workers AI。": "The AI version requires a Workers AI binding on the Worker.",
-  "所有书签": "All bookmarks", "未分类": "Unsorted", "星标": "Favorites", "待检查": "Pending check", "废纸篓": "Trash", "收藏": "Collections", "快速过滤…": "Quick filters…", "备注": "Notes", "高亮": "Highlights", "提醒": "Reminders", "重复书签": "Duplicates", "没有标签": "Untagged", "标签": "Tags", "链接": "Links", "文章": "Articles", "图片": "Images", "视频": "Videos", "音频": "Audio", "文档": "Documents", "建议的": "Suggested", "最近使用的": "Recently used", "删除最近项": "Remove recent item", "搜索帮助": "Search help", "排序": "Sort", "网站": "Website", "视图": "View", "封面": "Cover", "图标": "Icon", "左": "Left", "右": "Right", "书签信息": "Bookmark info", "描述": "Description", "在列表中显示": "Show in list", "在卡片中显示": "Show in cards", "在标题中显示": "Show in titles", "在心情看板中显示": "Show in moodboard", "应用到全部": "Apply to all", "添加": "Add", "导出书签": "Export bookmarks", "检查链接": "Check links", "导入书签": "Import bookmarks", "直接在浏览器打开": "Open in browser", "移动": "Move", "添加标签": "Add tags", "删除": "Delete", "取消": "Cancel", "更多": "More", "选择所有": "Select all", "创建页面截图": "Create page screenshot", "正在创建页面截图…": "Creating page screenshot…", "刷新预览": "Refresh preview", "添加到收藏夹": "Add to favorites", "从收藏夹移除": "Remove from favorites", "移除标签": "Remove tags", "此视图中还没有书签。": "No bookmarks in this view.", "主题：": "Theme: ", "主题": "Theme", "浅色": "Light", "深色": "Dark", "跟随系统": "System", "日落": "Sunset", "Default mode": "Default mode", "中文（汉语）": "中文（汉语）", "新标签": "New tag", "显示": "Show", "隐藏标签": "Hide tags", "按名称排序标签": "Sort tags by name", "按书签数排序标签": "Sort tags by count", "显示侧边栏": "Show sidebar", "关闭侧边栏": "Close sidebar",
+  "所有书签": "All bookmarks", "未分类": "Unsorted", "星标": "Favorites", "待检查": "Pending check", "废纸篓": "Trash", "收藏": "Collections", "快速过滤…": "Quick filters…", "备注": "Notes", "高亮": "Highlights", "提醒": "Reminders", "重复书签": "Duplicates", "没有标签": "Untagged", "标签": "Tags", "链接": "Links", "文章": "Articles", "图片": "Images", "视频": "Videos", "音频": "Audio", "文档": "Documents", "建议的": "Suggested", "在当前收藏集中": "In current collection", "最近使用的": "Recently used", "删除最近项": "Remove recent item", "搜索帮助": "Search help", "排序": "Sort", "网站": "Website", "视图": "View", "封面": "Cover", "图标": "Icon", "左": "Left", "右": "Right", "书签信息": "Bookmark info", "描述": "Description", "在列表中显示": "Show in list", "在卡片中显示": "Show in cards", "在标题中显示": "Show in titles", "在心情看板中显示": "Show in moodboard", "应用到全部": "Apply to all", "添加": "Add", "导出书签": "Export bookmarks", "检查链接": "Check links", "导入书签": "Import bookmarks", "直接在浏览器打开": "Open in browser", "移动": "Move", "添加标签": "Add tags", "删除": "Delete", "取消": "Cancel", "更多": "More", "选择所有": "Select all", "创建页面截图": "Create page screenshot", "正在创建页面截图…": "Creating page screenshot…", "刷新预览": "Refresh preview", "添加到收藏夹": "Add to favorites", "从收藏夹移除": "Remove from favorites", "移除标签": "Remove tags", "此视图中还没有书签。": "No bookmarks in this view.", "主题：": "Theme: ", "主题": "Theme", "浅色": "Light", "深色": "Dark", "跟随系统": "System", "日落": "Sunset", "Default mode": "Default mode", "中文（汉语）": "中文（汉语）", "新标签": "New tag", "显示": "Show", "隐藏标签": "Hide tags", "按名称排序标签": "Sort tags by name", "按书签数排序标签": "Sort tags by count", "显示侧边栏": "Show sidebar", "关闭侧边栏": "Close sidebar",
   "关闭": "Close", "返回书签": "Back to bookmarks", "显示设置菜单": "Show settings menu", "可选": "Optional", "选项": " options", "书签详情": "Bookmark details", "暂未支持": "Not supported yet", "打开原网页": "Open original page", "更改图标": "Change icon", "添加描述": "Add description", "添加备注": "Add note", "预览 Markdown": "Preview Markdown", "添加标签…": "Add tags…", "最喜爱的": "Favorite", "添加 URL…": "Add URL…", "上传封面文件": "Upload cover file", "可用封面": "Available covers", "分享收藏夹": "Share collection", "复制": "Copy", "系统分享": "Share", "添加书签": "Add bookmark", "编辑": "Edit", "询问": "Ask", "Web存档": "Web archive", "保存": "Save", "添加 URL": "Add URL", "选择收藏集": "Select collection", "查找或创建新的收藏集…": "Find or create a collection…", "网址": "URL", "收藏夹": "Collection", "封面 URL": "Cover URL", "选择": "Select", "选择全部": "Select all", "恢复": "Restore", "截屏": "Screenshot", "创建嵌套的集合": "Create nested collection", "创建收藏集": "Create collection", "改名": "Rename", "分享": "Share", "显示分组": "Show group", "隐藏分组": "Hide group", "展开": "Expand", "折叠": "Collapse", "收起": "Collapse", "创建群组": "Create group", "删除分组": "Delete group", "新建收藏夹": "New collection", "新收藏": "New collection", "新群组": "New group", "更多操作": "More actions", "复制链接": "Copy link", "将链接复制到剪贴板": "Copy link to clipboard", "列表视图": "List view", "网格视图": "Grid view", "手动排序": "Manual order", "最近添加": "Recently added", "标题 (A-Z)": "Title (A-Z)", "网站 (A-Z)": "Website (A-Z)", "调整侧边栏宽度": "Resize sidebar", "当前标签页": "Current tab", "预览模式": "Preview mode", "Web 预览模式": "Web preview mode", "搜索设置 / 筛选": "Search settings / filters", "缩小搜索范围": "Narrow your search", "在条件前添加短横(-) 将其排除在搜索范围之外": "Prefix a condition with a hyphen (-) to exclude it from search", "浏览器扩展": "Browser extension", "下载应用": "Download app", "帮助与支持": "Help and support", "博客": "Blog", "更新内容?": "What's new?", "注销": "Log out", "按日期 ↑": "By date ↑", "按日期 ↓": "By date ↓", "类型": "Type", "创建日期": "Created", "在标题/描述中": "In title/description", "在URL中": "In URL", "移动到…": "Move to…", "移动到": "Move to", "全选": "Select all", "取消星标": "Remove favorite", "添加星标": "Add favorite", "收藏选项": "Collection options", "收藏集选项": "Collection options", "收藏夹名称": "Collection name", "高亮颜色": "Highlight color", "（无备注）": "(No note)", "应用锁": "App lock", "定时锁定": "Auto-lock", "每次打开": "Every time opened", "1 分钟": "1 minute", "5 分钟": "5 minutes", "15 分钟": "15 minutes", "30 分钟": "30 minutes", "1 小时": "1 hour", "从不": "Never", "启用应用锁": "Enable app lock", "关闭应用锁": "Disable app lock", "立即锁定": "Lock now", "当前已启用": "Enabled on this device", "永远不用担心数据丢失。创建本地快照，保存收藏夹、书签、标签和高亮。": "Never worry about losing your data. Create a local snapshot of collections, bookmarks, tags and highlights.", "创建的快照只保存在此浏览器，完整内容仍可随时下载到本地。": "Snapshots are stored only in this browser and can be downloaded locally at any time.", "创建新的备份": "Create new backup", "备份正在创建": "Your new backup is being created. You can leave this page and come back later.", "下载完整备份": "Get backup", "下载上传文件": "Download uploaded files", "恢复备份": "Restore backup", "历史备份": "Backup history", "云备份": "Cloud backup", "云备份在自托管实例中暂不可用。": "Cloud backup is not available for this self-hosted instance.", "没有历史备份": "No backups created on this device yet.", "下载 JSON": "JSON", "备份创建于": "Created", "云端": "Cloud", "返回导入": "Go to import", "推荐": "Recommendations", "推荐收藏集": "Suggested collection", "推荐标签": "Suggested tags", "应用本地建议": "Apply local suggestions", "生成 AI 建议": "Generate AI suggestions", "应用 AI 建议": "Apply AI suggestions", "正在分析…": "Analyzing…", "没有足够相似的书签": "No similar bookmarks yet", "AI 返回了空建议": "AI returned no suggestions", "AI 建议": "AI suggestions"
 });
 
@@ -506,22 +507,33 @@ const SEARCH_SUGGESTIONS = [
   { id: "favorite", label: "最喜爱的", token: "important:true", icon: "like", className: "favorite" },
   { id: "tags", label: "标签", token: "#", icon: "searchTag", className: "tags" },
   { id: "note", label: "备注", token: "note:true", icon: "note", className: "note" },
-  { id: "highlights", label: "高亮", token: "highlights:true", icon: "highlights", className: "highlights" },
-  { id: "reminder", label: "提醒", token: "reminder:true", icon: "reminder", className: "reminder" },
   { id: "type", label: "类型", token: "type:", icon: "type", className: "type" },
   { id: "created", label: "创建日期", token: "created:", icon: "calendar", className: "created" },
-  { id: "lang", label: "语言", token: "lang:", icon: "public", className: "language" },
   { id: "info", label: "在标题/描述中", token: "info:", icon: "info", className: "info" },
   { id: "url", label: "在URL中", token: "link:", icon: "link", className: "url" },
-  { id: "broken", label: "失效链接", token: "broken:true", icon: "broken", className: "broken" },
-  { id: "duplicate", label: "重复书签", token: "duplicate:true", icon: "duplicates", className: "duplicate" },
   { id: "untagged", label: "没有标签", token: "notag:true", icon: "tag", className: "untagged" },
 ];
+
+function searchCollectionId() {
+  return state.collectionId && (!state.query.trim() || state.searchInCollection) ? state.collectionId : null;
+}
+
+function collectionItemsPath() {
+  if (!state.collectionId) return null;
+  const params = new URLSearchParams({ collection: state.collectionId });
+  return `/v1/bookmarks?${params}`;
+}
+
+function searchSuggestionItems() {
+  if (state.collectionId && state.searchInCollection && state.collectionItemsCollectionId === state.collectionId && Array.isArray(state.collectionItems)) return state.collectionItems;
+  return state.allItems.length ? state.allItems : state.items;
+}
 
 function queryPath() {
   const params = new URLSearchParams();
   const search = parseSearchQuery(state.query).text;
-  if (state.collectionId) params.set("collection", state.collectionId);
+  const collectionId = searchCollectionId();
+  if (collectionId) params.set("collection", collectionId);
   else if (state.view !== "all") params.set("view", state.view);
   if (search) params.set("search", search);
   if (search && state.preferences?.searchRelevance !== false) params.set("sort", "score");
@@ -531,7 +543,8 @@ function queryPath() {
 function tagQueryPath() {
   const params = new URLSearchParams();
   const search = parseSearchQuery(state.query).text;
-  if (state.collectionId) params.set("collection", state.collectionId);
+  const collectionId = searchCollectionId();
+  if (collectionId) params.set("collection", collectionId);
   else if (state.view !== "all") params.set("view", state.view);
   if (search) params.set("search", search);
   params.set("tagsSort", state.preferences?.tagSort === "count" ? "-count" : "_id");
@@ -539,7 +552,7 @@ function tagQueryPath() {
 }
 
 function searchSuggestionCount(id) {
-  const items = state.allItems.length ? state.allItems : state.items;
+  const items = searchSuggestionItems();
   if (id === "favorite") return items.filter((item) => item.favorite).length;
   if (id === "tags") return items.filter((item) => item.tags.length).length;
   if (id === "note") return items.filter((item) => item.note).length;
@@ -575,8 +588,9 @@ function rememberSearch(query) {
 }
 
 function searchFilterMarkup() {
-  const items = state.allItems.length ? state.allItems : state.items;
+  const items = searchSuggestionItems();
   const activeCreated = parseSearchQuery(state.query).filters.find((filter) => filter.kind === "created" && !filter.excluded)?.value || "";
+  let optionIndex = 0;
   const languageName = (code) => {
     try { return new Intl.DisplayNames([languageIsEnglish() ? "en" : "zh-CN"], { type: "language" }).of(code) || code.toUpperCase(); } catch { return code.toUpperCase(); }
   };
@@ -585,8 +599,10 @@ function searchFilterMarkup() {
     return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat(languageIsEnglish() ? "en" : "zh-CN", { year: "numeric", month: "long" }).format(date);
   };
   const row = ({ id, label, token, icon, className = "", count, expandable = false, kind = token.startsWith("#") ? "#" : token.split(":", 1)[0] }) => {
+    const optionId = `search-filter-option-${optionIndex++}`;
+    const selected = state.searchActiveIndex === optionIndex - 1;
     const attributes = expandable ? `data-search-expand="${id}" data-search-prefix="${escapeHtml(token)}" aria-expanded="${state.searchFilterGroup === id}"` : `data-search-token="${escapeHtml(token)}"`;
-    return `<button type="button" class="search-filter-item" role="option" data-token="${escapeHtml(kind)}" data-id="${escapeHtml(id)}" ${attributes}><span class="search-filter-icon ${className}">${treeIcon(icon)}</span><span class="search-filter-title">${label}</span><small class="search-filter-count">${count ?? ""}</small></button>`;
+    return `<button id="${optionId}" type="button" class="search-filter-item" role="option" aria-selected="${selected}" data-token="${escapeHtml(kind)}" data-id="${escapeHtml(id)}" ${attributes}><span class="search-filter-icon ${className}">${treeIcon(icon)}</span><span class="search-filter-title">${label}</span><small class="search-filter-count">${count ?? ""}</small></button>`;
   };
   let suggestions;
   let sectionTitle = t("建议的");
@@ -604,24 +620,73 @@ function searchFilterMarkup() {
     suggestions = languageFilterSuggestions(items).map(({ value, count }) => row({ id: value, label: escapeHtml(languageIsEnglish() ? `${languageName(value)} language` : `${languageName(value)}语言`), token: `lang:${value}`, icon: "public", count, kind: "lang" })).join("");
     sectionTitle = t("缩小搜索范围");
   } else {
-    suggestions = SEARCH_SUGGESTIONS.filter((item) => item.id !== "lang" || searchSuggestionCount("lang")).map((item) => row({ ...item, label: t(item.label), count: searchSuggestionCount(item.id), expandable: ["type", "created", "lang"].includes(item.id) })).join("");
+    suggestions = SEARCH_SUGGESTIONS
+      .filter((item) => !(state.collectionId && state.searchInCollection && item.id === "untagged" && searchSuggestionCount(item.id) === 0))
+      .map((item) => row({ ...item, label: t(item.label), count: searchSuggestionCount(item.id), expandable: ["type", "created", "lang"].includes(item.id) }))
+      .join("");
   }
-  const recent = state.recentSearches.map((item) => `<button type="button" class="search-filter-item search-recent-item" role="option" data-search-recent="${escapeHtml(item.query)}"><span class="search-filter-icon recent">${treeIcon("search")}</span><span class="search-filter-title">${escapeHtml(item.query)}</span><small class="search-filter-count">${searchHistoryTime(item.usedAt)}</small></button>`).join("");
-  return `<div id="search-filter-menu" class="search-filter-menu ${state.searchMenuOpen ? "" : "hidden"}" role="listbox" aria-label="${t("搜索")}"><div class="search-filter-section-title${sectionClass}">${sectionTitle}</div>${suggestions}<div class="search-filter-section-title search-recent-title"><span>${t("最近使用的")}</span><button type="button" class="search-recent-clear" data-search-recent-clear title="${t("删除最近项")}" aria-label="${t("删除最近项")}">${microIcon("microClose")}</button></div>${recent}<div class="search-filter-help"><span>${languageIsEnglish() ? "Prefix a condition with a hyphen (-) to exclude it from search" : "在条件前添加短横(-) 将其排除在搜索范围之外"}</span><a href="https://help.raindrop.io/using-search" target="_blank" rel="noopener" title="${t("搜索帮助")}" aria-label="${t("搜索帮助")}">${treeIcon("help")}</a></div></div>`;
+  const recent = state.recentSearches.map((item) => {
+    const optionId = `search-filter-option-${optionIndex++}`;
+    const selected = state.searchActiveIndex === optionIndex - 1;
+    return `<button id="${optionId}" type="button" class="search-filter-item search-recent-item" role="option" aria-selected="${selected}" data-search-recent="${escapeHtml(item.query)}"><span class="search-filter-icon recent">${treeIcon("search")}</span><span class="search-filter-title">${escapeHtml(item.query)}</span><small class="search-filter-count">${searchHistoryTime(item.usedAt)}</small></button>`;
+  }).join("");
+  const scope = state.collectionId && !state.searchFilterGroup ? `<div class="search-filter-scope"><label><input type="checkbox" data-search-scope ${state.searchInCollection ? "checked" : ""}><span>${t("在当前收藏集中")}</span></label></div>` : "";
+  return `<div id="search-filter-menu" class="search-filter-menu ${state.searchMenuOpen ? "" : "hidden"}" role="listbox" aria-labelledby="search-filter-label"><div class="search-filter-menu-content">${scope}<div class="search-filter-section-title${sectionClass}">${sectionTitle}</div>${suggestions}<div class="search-filter-section-title search-recent-title"><span>${t("最近使用的")}</span><button type="button" class="search-recent-clear" data-search-recent-clear title="${t("删除最近项")}" aria-label="${t("删除最近项")}">${microIcon("microClose")}</button></div>${recent}<div class="search-filter-help"><span>${languageIsEnglish() ? "Prefix a condition with a hyphen (-) to exclude it from search" : "在条件前添加短横(-) 将其排除在搜索范围之外"}</span><a href="https://help.raindrop.io/using-search" target="_blank" rel="noopener" title="${t("搜索帮助")}" aria-label="${t("搜索帮助")}">${treeIcon("help")}</a></div></div></div>`;
+}
+
+function searchMenuElement() {
+  return document.querySelector("#search-filter-menu");
+}
+
+let searchMenuPositionBound = false;
+
+function positionSearchMenu() {
+  if (!searchMenuPositionBound) {
+    window.addEventListener("resize", positionSearchMenu);
+    document.addEventListener("scroll", positionSearchMenu, true);
+    searchMenuPositionBound = true;
+  }
+  const menu = searchMenuElement();
+  if (!menu || menu.classList.contains("hidden")) return;
+  const input = root.querySelector("#search");
+  if (!input) return;
+  const rect = input.getBoundingClientRect();
+  const width = Math.min(320, window.innerWidth - 16);
+  const height = Math.min(menu.offsetHeight, window.innerHeight - 16);
+  const left = Math.max(8, Math.min(window.innerWidth - width - 8, rect.left));
+  let top = rect.bottom;
+  if (top + height > window.innerHeight - 8) top = rect.top - height - 4;
+  menu.style.minWidth = `${width}px`;
+  menu.style.setProperty("--left", `${Math.round(left)}px`);
+  menu.style.setProperty("--top", `${Math.round(Math.max(8, top))}px`);
+}
+
+function mountSearchMenu() {
+  const menu = searchMenuElement();
+  if (!menu) return;
+  if (menu.parentElement !== document.body) document.body.append(menu);
+  positionSearchMenu();
 }
 
 function renderSearchMenu() {
-  const menu = root.querySelector("#search-filter-menu");
+  const menu = searchMenuElement();
   if (!menu) return;
   root.querySelector("[data-search-filter-toggle]")?.setAttribute("aria-expanded", String(state.searchMenuOpen));
   menu.outerHTML = searchFilterMarkup();
+  const nextMenu = searchMenuElement();
+  const active = nextMenu?.querySelector('[role="option"][aria-selected="true"]');
+  const input = root.querySelector("#search");
+  if (active) input?.setAttribute("aria-activedescendant", active.id);
+  else input?.removeAttribute("aria-activedescendant");
   bindSearchMenu();
+  positionSearchMenu();
 }
 
 function closeSearchMenu() {
   if (!state.searchMenuOpen) return;
   state.searchMenuOpen = false;
   state.searchFilterGroup = null;
+  state.searchActiveIndex = -1;
   const search = root.querySelector("#search");
   if (document.activeElement === search) search.blur();
   renderSearchMenu();
@@ -648,6 +713,14 @@ function commitSearch(value, remember = true, historyMode = "replace") {
   clearTimeout(state.searchTimer);
   state.query = String(value || "").trim();
   state.selected.clear();
+  state.selectionSectionId = null;
+  state.selectionMoreOpen = false;
+  state.selectionMoreSectionId = null;
+  state.exportMenuSectionId = null;
+  state.sortMenuOpen = false;
+  state.viewMenuOpen = false;
+  state.workspaceMenuSectionId = null;
+  state.workspaceCollectionMenuId = null;
   state.cardMenuId = null;
   if (remember) rememberSearch(state.query);
   updateLibraryRoute(historyMode);
@@ -655,28 +728,46 @@ function commitSearch(value, remember = true, historyMode = "replace") {
 }
 
 function bindSearchMenu() {
-  root.querySelectorAll("[data-search-token], [data-search-recent]").forEach((button) => button.onclick = (event) => {
+  const menu = searchMenuElement();
+  if (!menu) return;
+  menu.querySelectorAll("[data-search-token], [data-search-recent]").forEach((button) => button.onclick = (event) => {
     event.stopPropagation();
     const query = button.dataset.searchToken ?? button.dataset.searchRecent;
     const input = root.querySelector("#search");
     if (input) input.value = query;
-    state.searchMenuOpen = false;
+    state.searchMenuOpen = true;
     state.searchFilterGroup = null;
+    state.searchActiveIndex = -1;
     commitSearch(query, true, "push");
   });
-  root.querySelectorAll("[data-search-expand]").forEach((button) => button.onclick = (event) => {
+  menu.querySelectorAll("[data-search-expand]").forEach((button) => button.onclick = (event) => {
     event.stopPropagation();
     state.searchFilterGroup = button.dataset.searchExpand;
+    state.searchActiveIndex = -1;
     const query = button.dataset.searchPrefix;
     const input = root.querySelector("#search");
     if (input) input.value = query;
     commitSearch(query, false);
   });
-  const clear = root.querySelector("[data-search-recent-clear]");
+  const scope = menu.querySelector("[data-search-scope]");
+  if (scope) {
+    scope.onclick = (event) => event.stopPropagation();
+    scope.onchange = () => {
+      state.searchInCollection = scope.checked;
+      state.searchActiveIndex = -1;
+      state.selected.clear();
+      state.selectionSectionId = null;
+      updateLibraryRoute();
+      renderSearchMenu();
+      load({ viewOnly: true }).catch(showError);
+    };
+  }
+  const clear = menu.querySelector("[data-search-recent-clear]");
   if (clear) clear.onclick = (event) => {
     event.stopPropagation();
     state.recentSearches = [];
     try { localStorage.removeItem(SEARCH_HISTORY_KEY); } catch { /* ignore unavailable storage */ }
+    state.searchActiveIndex = -1;
     renderSearchMenu();
   };
 }
@@ -693,89 +784,206 @@ function enhanceSearch() {
   field.querySelector("kbd")?.remove();
   const group = document.createElement("div");
   group.className = "search-filter-group";
-  group.innerHTML = `<button type="button" class="search-filter-toggle" data-search-filter-toggle title="${t("搜索设置 / 筛选")}" aria-label="${t("搜索设置 / 筛选")}" aria-expanded="${state.searchMenuOpen}">${microIcon("microTune")}${microIcon("microArrow")}</button>`;
+  group.innerHTML = `<button type="button" class="search-filter-toggle" data-search-filter-toggle title="${t("搜索设置 / 筛选")}" aria-label="${t("搜索设置 / 筛选")}" aria-controls="search-filter-menu" aria-expanded="${state.searchMenuOpen}">${microIcon("microTune")}${microIcon("microArrow")}</button>`;
   field.append(group);
   shell.insertAdjacentHTML("beforeend", searchFilterMarkup());
+  mountSearchMenu();
 }
 
-function renderSortMenu() {
-  const trigger = root.querySelector("[data-sort-trigger]");
-  const existing = root.querySelector("#sort-menu");
-  trigger?.setAttribute("aria-expanded", String(state.sortMenuOpen));
+function workspaceElement(sectionId) {
+  return [...root.querySelectorAll(".workspace")].find((workspace) => workspace.dataset.sectionId === sectionId) || null;
+}
+
+function renderSortMenu(sectionId = state.workspaceMenuSectionId) {
+  const targetSectionId = sectionId || "all";
+  const trigger = workspaceElement(targetSectionId)?.querySelector("[data-sort-trigger]");
+  const existing = root.querySelector("[data-sort-menu]");
+  trigger?.setAttribute("aria-expanded", String(state.sortMenuOpen && state.workspaceMenuSectionId === targetSectionId));
   if (!state.sortMenuOpen) {
     existing?.remove();
     return;
   }
-  if (existing) existing.outerHTML = sortMenuMarkup();
-  else root.querySelector(".workspace-head")?.insertAdjacentHTML("afterend", sortMenuMarkup());
+  if (existing) existing.outerHTML = sortMenuMarkup(targetSectionId);
+  else workspaceElement(targetSectionId)?.querySelector(".workspace-head")?.insertAdjacentHTML("afterend", sortMenuMarkup(targetSectionId));
   bindSortMenu();
   positionSortMenu();
 }
 
 function bindSortMenu() {
   root.querySelectorAll("[data-sort-option]").forEach((input) => input.onchange = () => {
-    state.preferences = { ...state.preferences, sort: input.dataset.sortOption };
+    const sectionId = input.closest("[data-sort-menu]")?.dataset.sectionId || state.workspaceMenuSectionId;
+    const isCollection = sectionId && state.collections.some((item) => item.id === sectionId);
+    const sortByCollectionId = isCollection
+      ? { ...(state.preferences?.sortByCollectionId || {}), [sectionId]: input.dataset.sortOption }
+      : state.preferences?.sortByCollectionId;
+    state.preferences = { ...state.preferences, ...(isCollection ? { sortByCollectionId } : { sort: input.dataset.sortOption }) };
     state.sortMenuOpen = false;
     render();
-    savePreferences({ sort: input.dataset.sortOption }).catch(showError);
+    savePreferences(isCollection ? { sortByCollectionId } : { sort: input.dataset.sortOption }).catch(showError);
   });
 }
 
-function positionSortMenu() {
-  const menu = root.querySelector("#sort-menu");
-  const trigger = root.querySelector("[data-sort-trigger]");
+let workspaceMenuPositionBound = false;
+
+function positionWorkspaceMenu(menuSelector, triggerSelector) {
+  if (!workspaceMenuPositionBound) {
+    window.addEventListener("resize", positionWorkspaceMenus);
+    document.addEventListener("scroll", positionWorkspaceMenus, true);
+    workspaceMenuPositionBound = true;
+  }
+  const menu = root.querySelector(menuSelector);
+  const trigger = workspaceElement(menu?.dataset.sectionId)?.querySelector(triggerSelector);
   if (!menu || !trigger) return;
   const rect = trigger.getBoundingClientRect();
-  const width = menu.offsetWidth;
-  const height = menu.offsetHeight;
-  const left = Math.max(8, Math.min(window.innerWidth - width - 8, rect.left));
-  const top = Math.max(8, Math.min(window.innerHeight - height - 8, rect.bottom));
-  menu.style.setProperty("--left", `${left}px`);
-  menu.style.setProperty("--top", `${top}px`);
+  const width = Math.min(menu.offsetWidth, window.innerWidth - 16);
+  const height = Math.min(menu.offsetHeight, window.innerHeight - 16);
+  let left = rect.left;
+  let top = rect.bottom;
+  if (top + height > window.innerHeight - 8) top = rect.top - height;
+  left = Math.max(8, Math.min(window.innerWidth - width - 8, left));
+  top = Math.max(8, Math.min(window.innerHeight - height - 8, top));
+  menu.style.setProperty("--left", `${Math.round(left)}px`);
+  menu.style.setProperty("--top", `${Math.round(top)}px`);
+}
+
+function positionSortMenu() {
+  positionWorkspaceMenu("[data-sort-menu]", "[data-sort-trigger]");
 }
 
 function positionViewMenu() {
-  const menu = root.querySelector("#view-menu");
-  const trigger = root.querySelector("[data-view-trigger]");
-  if (!menu || !trigger) return;
-  const rect = trigger.getBoundingClientRect();
-  const width = menu.offsetWidth;
-  const height = menu.offsetHeight;
-  const left = Math.max(8, Math.min(window.innerWidth - width - 8, rect.left));
-  const top = Math.max(8, Math.min(window.innerHeight - height - 8, rect.bottom));
-  menu.style.setProperty("--left", `${left}px`);
-  menu.style.setProperty("--top", `${top}px`);
+  positionWorkspaceMenu("[data-view-menu]", "[data-view-trigger]");
 }
 
-function viewName(items = visibleItems()) {
+function positionWorkspaceMenus() {
+  positionSortMenu();
+  positionViewMenu();
+}
+
+let selectionMorePositionBound = false;
+
+function positionSelectionMoreMenu() {
+  if (!selectionMorePositionBound) {
+    window.addEventListener("resize", positionSelectionMoreMenu);
+    document.addEventListener("scroll", positionSelectionMoreMenu, true);
+    selectionMorePositionBound = true;
+  }
+  root.querySelectorAll("[data-selection-more-menu]").forEach((menu) => {
+    const trigger = workspaceElement(menu.dataset.sectionId)?.querySelector("[data-selection-more]");
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const width = Math.min(menu.offsetWidth, window.innerWidth - 16);
+    const height = Math.min(menu.offsetHeight, window.innerHeight - 16);
+    let left = rect.right - width;
+    let top = rect.bottom + 4;
+    if (top + height > window.innerHeight - 8) top = rect.top - height - 4;
+    left = Math.max(8, Math.min(window.innerWidth - width - 8, left));
+    top = Math.max(8, Math.min(window.innerHeight - height - 8, top));
+    menu.style.width = `${width}px`;
+    menu.style.left = `${Math.round(left)}px`;
+    menu.style.top = `${Math.round(top)}px`;
+  });
+}
+
+let workspaceCollectionMenuPositionBound = false;
+
+function positionWorkspaceCollectionMenu() {
+  if (!workspaceCollectionMenuPositionBound) {
+    window.addEventListener("resize", positionWorkspaceCollectionMenu);
+    document.addEventListener("scroll", positionWorkspaceCollectionMenu, true);
+    workspaceCollectionMenuPositionBound = true;
+  }
+  root.querySelectorAll("[data-workspace-collection-menu-panel]").forEach((menu) => {
+    const trigger = menu.parentElement?.querySelector("[data-workspace-collection-menu]");
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const width = Math.min(menu.offsetWidth, window.innerWidth - 16);
+    const height = Math.min(menu.offsetHeight, window.innerHeight - 16);
+    let left = rect.right - width;
+    left = Math.max(8, Math.min(window.innerWidth - width - 8, left));
+    const currentHead = trigger.closest(".workspace")?.querySelector(".workspace-head");
+    const workspaceHeads = [...root.querySelectorAll(".workspace-head")]
+      .filter((head) => head !== currentHead)
+      .map((head) => head.getBoundingClientRect());
+    const overlapsHead = (candidateTop) => workspaceHeads.some((head) => (
+      left < head.right && left + width > head.left && candidateTop < head.bottom && candidateTop + height > head.top
+    ));
+    let clearBelowTop = rect.bottom + 4;
+    workspaceHeads.forEach((head) => {
+      if (overlapsHead(clearBelowTop)) clearBelowTop = head.bottom + 4;
+    });
+    const candidates = [rect.bottom + 4, rect.top - height - 4, clearBelowTop];
+    let top = candidates.find((candidateTop) => (
+      candidateTop >= 8 && candidateTop + height <= window.innerHeight - 8 && !overlapsHead(candidateTop)
+    )) ?? candidates[0];
+    top = Math.max(8, Math.min(window.innerHeight - height - 8, top));
+    menu.style.width = `${width}px`;
+    menu.style.left = `${Math.round(left)}px`;
+    menu.style.top = `${Math.round(top)}px`;
+  });
+}
+
+let exportMenuPositionBound = false;
+
+function positionExportMenu() {
+  if (!exportMenuPositionBound) {
+    window.addEventListener("resize", positionExportMenu);
+    document.addEventListener("scroll", positionExportMenu, true);
+    exportMenuPositionBound = true;
+  }
+  root.querySelectorAll("[data-export-menu]").forEach((menu) => {
+    const trigger = menu.parentElement?.querySelector("[data-export-menu-trigger]");
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const width = Math.min(menu.offsetWidth, window.innerWidth - 16);
+    const height = Math.min(menu.offsetHeight, window.innerHeight - 16);
+    let left = rect.right - width;
+    let top = rect.bottom + 4;
+    if (top + height > window.innerHeight - 8) top = rect.top - height - 4;
+    left = Math.max(8, Math.min(window.innerWidth - width - 8, left));
+    top = Math.max(8, Math.min(window.innerHeight - height - 8, top));
+    menu.style.width = `${width}px`;
+    menu.style.left = `${Math.round(left)}px`;
+    menu.style.top = `${Math.round(top)}px`;
+  });
+}
+
+function closeExportMenu() {
+  if (!state.exportMenuSectionId) return;
+  state.exportMenuSectionId = null;
+  root.querySelectorAll("[data-export-menu]").forEach((menu) => menu.remove());
+  root.querySelectorAll("[data-export-menu-trigger]").forEach((trigger) => trigger.setAttribute("aria-expanded", "false"));
+}
+
+function viewName(items = visibleItems(), collectionId = state.collectionId) {
   if (state.query.trim() || state.tag) return `找到 ${items.length} 个书签`;
-  if (state.collectionId) return state.collections.find((item) => item.id === state.collectionId)?.name || "收藏夹";
+  if (collectionId) return state.collections.find((item) => item.id === collectionId)?.name || "收藏夹";
   return t(({ all: "所有书签", favorites: "星标", broken: "失效链接", unknown: "待检查", trash: "废纸篓" })[state.view]);
 }
 
-function workspaceIconMarkup() {
+function workspaceIconMarkup(collectionId = state.collectionId) {
   let icon = state.view === "all" ? "cloudActive" : ({ favorites: "like", trash: "trash", broken: "broken", unknown: "link" }[state.view] || "search");
   let emoji = "";
-  if (state.collectionId) {
-    const item = state.collections.find((entry) => entry.id === state.collectionId);
-    if (state.collectionId === "unsorted") icon = "inboxActive";
+  if (collectionId) {
+    const item = state.collections.find((entry) => entry.id === collectionId);
+    if (collectionId === "unsorted") icon = "inboxActive";
     else if (item) {
       emoji = collectionIconValue(item.id);
       if (!emoji) icon = "defaultCollection";
     } else icon = "defaultCollection";
   }
-  return `<div class="workspace-cloud icon-vkJU icon-yhAy"><span class="workspace-icon icon-VKRw${emoji ? " collection-emoji" : ""}">${emoji ? collectionIconMarkup(emoji, true, state.collectionId === "unsorted") : treeIcon(icon)}</span></div>`;
+  return `<div class="workspace-cloud icon-vkJU icon-yhAy"><span class="workspace-icon icon-VKRw${emoji ? " collection-emoji" : ""}">${emoji ? collectionIconMarkup(emoji, true, collectionId === "unsorted") : treeIcon(icon)}</span></div>`;
 }
 
-function workspaceHref() {
+function workspaceHref(collectionId = state.collectionId) {
   const params = new URLSearchParams();
-  if (state.collectionId) params.set("collection", state.collectionId);
+  if (collectionId) params.set("collection", collectionId);
   else if (state.view !== "all") params.set("view", state.view);
   if (state.query) params.set("search", state.query);
   return `library.html${params.toString() ? `?${params}` : ""}`;
 }
 
 const SORT_OPTIONS = [
+  { value: "manual", label: "手动", icon: "sortCreated" },
   { value: "created", label: "按日期 ↑", icon: "sortCreated" },
   { value: "-created", label: "按日期 ↓", icon: "sortCreated" },
   { value: "title", label: "按名称 (A-Z)", icon: "sortTitle" },
@@ -784,8 +992,9 @@ const SORT_OPTIONS = [
   { value: "-domain", label: "网站 (Z-A)", icon: "sortDomainDesc" },
 ];
 
-function currentSort() {
-  const value = state.preferences?.sort || "manual";
+function currentSort(sectionId = null) {
+  const scoped = sectionId && state.preferences?.sortByCollectionId?.[sectionId];
+  const value = scoped || state.preferences?.sort || "manual";
   return value === "host" ? "domain" : value;
 }
 
@@ -793,10 +1002,10 @@ function sortOption(value = currentSort()) {
   return SORT_OPTIONS.find((option) => option.value === value);
 }
 
-function sortMenuMarkup() {
+function sortMenuMarkup(sectionId = state.workspaceMenuSectionId) {
   if (!state.sortMenuOpen) return "";
-  const active = currentSort();
-  return `<div id="sort-menu" class="sort-popover" role="menu" data-sort-menu><div class="sort-menu-layout" data-type="default"><div class="sort-menu-label">${t("排序")}</div><div>${SORT_OPTIONS.map((option) => `<label class="sort-option" role="menuitemradio" aria-checked="${active === option.value}"><input type="radio" tabindex="0" data-sort-option="${option.value}" readonly ${active === option.value ? "checked" : ""}><span class="sort-option-icon">${treeIcon(option.icon)}</span><span>${t(option.label)}</span></label>`).join("")}</div></div></div>`;
+  const active = currentSort(sectionId);
+  return `<div id="sort-menu" class="sort-popover" role="menu" data-sort-menu data-section-id="${escapeHtml(sectionId || "all")}"><div class="sort-menu-layout" data-type="default"><div class="sort-menu-label">${t("排序")}</div><div>${SORT_OPTIONS.map((option) => `<label class="sort-option" role="menuitemradio" aria-checked="${active === option.value}"><input type="radio" tabindex="0" data-sort-option="${option.value}" readonly ${active === option.value ? "checked" : ""}><span class="sort-option-icon">${treeIcon(option.icon)}</span><span>${t(option.label)}</span></label>`).join("")}</div></div></div>`;
 }
 
 const VIEW_OPTIONS = [
@@ -810,8 +1019,11 @@ function validLayout(value) {
   return VIEW_OPTIONS.some((option) => option.value === value) ? value : null;
 }
 
-function viewScopeKey() {
-  if (state.collectionId) return `collection:${state.collectionId}`;
+function viewScopeKey(sectionId = null) {
+  const collectionId = sectionId && sectionId !== "all" && state.collections.some((item) => item.id === sectionId)
+    ? sectionId
+    : state.collectionId;
+  if (collectionId) return `collection:${collectionId}`;
   return state.view === "all" ? "all" : `view:${state.view}`;
 }
 
@@ -819,8 +1031,8 @@ function layoutByScope(preferences = state.preferences) {
   return preferences?.layoutByScope && typeof preferences.layoutByScope === "object" ? preferences.layoutByScope : {};
 }
 
-function layoutForScope(preferences = state.preferences) {
-  const scoped = validLayout(layoutByScope(preferences)[viewScopeKey()]);
+function layoutForScope(preferences = state.preferences, sectionId = null) {
+  const scoped = validLayout(layoutByScope(preferences)[viewScopeKey(sectionId)]);
   return scoped || validLayout(preferences?.defaultView) || validLayout(preferences?.layout) || "list";
 }
 
@@ -849,32 +1061,34 @@ function viewOption(value = state.layout) {
   return VIEW_OPTIONS.find((option) => option.value === value) || VIEW_OPTIONS[0];
 }
 
-function viewMenuMarkup() {
+function viewMenuMarkup(sectionId = state.workspaceMenuSectionId) {
   if (!state.viewMenuOpen) return "";
+  const layout = layoutForScope(state.preferences, sectionId);
   const settings = viewSettings();
-  const isCardView = state.layout === "grid";
-  const isTitleView = state.layout === "simple";
-  const isMasonryView = state.layout === "masonry";
-  const option = (item) => `<label class="view-option" role="menuitemradio" aria-checked="${state.layout === item.value}"><input type="radio" tabindex="0" data-view-option="${item.value}" ${state.layout === item.value ? "checked" : ""}><span class="view-option-icon">${treeIcon(item.icon)}</span>${t(item.label)}</label>`;
+  const isCardView = layout === "grid";
+  const isTitleView = layout === "simple";
+  const isMasonryView = layout === "masonry";
+  const option = (item) => `<label class="view-option" role="menuitemradio" aria-checked="${layout === item.value}"><input type="radio" tabindex="0" data-view-option="${item.value}" ${layout === item.value ? "checked" : ""}><span class="view-option-icon">${treeIcon(item.icon)}</span>${t(item.label)}</label>`;
   const field = (value, label) => `<label class="view-check-option"><input type="checkbox" tabindex="0" data-view-field="${value}" ${settings[value] ? "checked" : ""}>${t(label)}</label>`;
   const coverControl = isCardView || isMasonryView
     ? settings.cover ? `<div class="sort-menu-label view-menu-label" data-is-label="true">${t("封面")}</div><div><label class="view-range-option"><input type="range" tabindex="0" min="1" max="10" value="${coverSizeValue(settings)}" data-view-cover-size aria-label="${t("封面")}"></label></div>` : ""
     : isTitleView ? "" : `<div class="sort-menu-label view-menu-label" data-is-label="true">${t("封面")} ${languageIsEnglish() ? "position" : "位置"}</div><div><label class="view-option"><input type="radio" tabindex="0" name="view-cover-position" data-view-position="left" ${settings.coverPosition === "left" ? "checked" : ""}>${t("左")}</label><label class="view-option"><input type="radio" tabindex="0" name="view-cover-position" data-view-position="right" ${settings.coverPosition === "right" ? "checked" : ""}>${t("右")}</label></div>`;
   const fieldLabel = isTitleView ? "图标" : "封面";
   const displayLabel = isCardView ? "在卡片中显示" : isTitleView ? "在标题中显示" : isMasonryView ? "在心情看板中显示" : "在列表中显示";
-  return `<div id="view-menu" class="sort-popover view-popover" role="menu" data-view-menu><div class="sort-menu-layout view-menu-layout" data-type="default"><div class="sort-menu-label view-menu-label" data-is-label="true">${t("视图")}</div><div>${VIEW_OPTIONS.map(option).join("")}</div><button type="button" class="view-apply" role="button" title="${t("应用到全部")}" aria-label="${t("应用到全部")}" data-view-apply>${t("应用到全部")}</button><div class="view-separator" data-variant="default"></div><div class="sort-menu-label view-menu-label" data-is-label="true">${t(displayLabel)}</div><div>${field("cover", fieldLabel)}${field("title", "标题")}${field("note", "备注")}${field("description", "描述")}${field("highlights", "高亮")}${field("tags", "标签")}${field("metadata", "书签信息")}</div>${coverControl}</div></div>`;
+  return `<div id="view-menu" class="sort-popover view-popover" role="menu" data-view-menu data-section-id="${escapeHtml(sectionId || "all")}"><div class="sort-menu-layout view-menu-layout" data-type="default"><div class="sort-menu-label view-menu-label" data-is-label="true">${t("视图")}</div><div>${VIEW_OPTIONS.map(option).join("")}</div><button type="button" class="view-apply" role="button" title="${t("应用到全部")}" aria-label="${t("应用到全部")}" data-view-apply>${t("应用到全部")}</button><div class="view-separator" data-variant="default"></div><div class="sort-menu-label view-menu-label" data-is-label="true">${t(displayLabel)}</div><div>${field("cover", fieldLabel)}${field("title", "标题")}${field("note", "备注")}${field("description", "描述")}${field("highlights", "高亮")}${field("tags", "标签")}${field("metadata", "书签信息")}</div>${coverControl}</div></div>`;
 }
 
-function renderViewMenu() {
-  const trigger = root.querySelector("[data-view-trigger]");
-  const existing = root.querySelector("#view-menu");
-  trigger?.setAttribute("aria-expanded", String(state.viewMenuOpen));
+function renderViewMenu(sectionId = state.workspaceMenuSectionId) {
+  const targetSectionId = sectionId || "all";
+  const trigger = workspaceElement(targetSectionId)?.querySelector("[data-view-trigger]");
+  const existing = root.querySelector("[data-view-menu]");
+  trigger?.setAttribute("aria-expanded", String(state.viewMenuOpen && state.workspaceMenuSectionId === targetSectionId));
   if (!state.viewMenuOpen) {
     existing?.remove();
     return;
   }
-  if (existing) existing.outerHTML = viewMenuMarkup();
-  else root.querySelector(".workspace-head")?.insertAdjacentHTML("afterend", viewMenuMarkup());
+  if (existing) existing.outerHTML = viewMenuMarkup(targetSectionId);
+  else workspaceElement(targetSectionId)?.querySelector(".workspace-head")?.insertAdjacentHTML("afterend", viewMenuMarkup(targetSectionId));
   bindViewMenu();
   positionViewMenu();
 }
@@ -927,8 +1141,9 @@ function bindThemeMenu() {
 
 function bindViewMenu() {
   root.querySelectorAll("[data-view-option]").forEach((input) => input.onchange = () => {
+    const sectionId = input.closest("[data-view-menu]")?.dataset.sectionId || state.workspaceMenuSectionId;
     state.layout = input.dataset.viewOption;
-    const scope = viewScopeKey();
+    const scope = viewScopeKey(sectionId);
     const nextLayoutByScope = { ...layoutByScope(), [scope]: state.layout };
     state.preferences = { ...state.preferences, layoutByScope: nextLayoutByScope };
     state.viewMenuOpen = false;
@@ -951,14 +1166,16 @@ function bindViewMenu() {
     const coverSize = coverSizeValue({ coverSize: event.currentTarget.value });
     const viewFields = { ...viewSettings(), coverSize };
     state.preferences = { ...state.preferences, viewFields };
-    root.querySelector(".cards")?.style.setProperty("--card-cover-size", String(coverSize));
+    root.querySelectorAll(".cards").forEach((cards) => cards.style.setProperty("--card-cover-size", String(coverSize)));
     applyMasonryCoverSize();
     persistViewPreferences({ viewFields });
   });
   root.querySelector("[data-view-apply]")?.addEventListener("click", (event) => {
     event.stopPropagation();
-    const layout = state.layout;
+    const sectionId = event.currentTarget.closest("[data-view-menu]")?.dataset.sectionId || state.workspaceMenuSectionId;
+    const layout = layoutForScope(state.preferences, sectionId);
     const nextLayoutByScope = allLayoutScopes(layout);
+    state.layout = layout;
     state.preferences = { ...state.preferences, layout, defaultView: layout, layoutByScope: nextLayoutByScope };
     state.viewMenuOpen = false;
     renderViewMenu();
@@ -966,45 +1183,77 @@ function bindViewMenu() {
   });
 }
 
-function selectionHeaderMarkup(selection) {
-  const allSelected = selection.length === sortedItems().length;
-  const title = state.collectionId ? viewName() : state.view === "all" ? "全部" : viewName();
+function backupExportMenuMarkup(sectionId) {
+  const description = languageIsEnglish()
+    ? 'Click "Get backup" to download all collections, bookmarks, tags, and highlights. Or click "Download uploaded files" to download only your uploaded files, if available.'
+    : '点击“获取备份”下载所有收藏集、书签、标签和高亮。或者点击“下载上传文件”仅下载上传的文件（如果有）。';
+  const item = (action, label) => `<button type="button" role="menuitem" data-export-backup-action="${action}">${label}</button>`;
+  return `<div class="workspace-export-menu workspace-backup-export-menu" role="menu" data-export-menu data-export-menu-section-id="${escapeHtml(sectionId)}"><p class="workspace-backup-export-description">${description}</p>${item("backup", "获取备份")}${item("uploads", "下载上传文件")}</div>`;
+}
+
+function exportMenuMarkup(sectionId) {
+  if (state.exportMenuSectionId !== sectionId) return "";
+  const fullLibrary = sectionId === "all" && state.view === "all" && !state.collectionId && !state.query.trim() && !state.tag && !state.selectionSectionId;
+  if (fullLibrary) return backupExportMenuMarkup(sectionId);
+  const item = (format) => `<button type="button" role="menuitem" data-export-format="${format}">${format.toUpperCase()}</button>`;
+  return `<div class="workspace-export-menu" role="menu" data-export-menu data-export-menu-section-id="${escapeHtml(sectionId)}">${item("html")}${item("csv")}${item("txt")}${item("zip")}<p class="workspace-export-tip">如需下载上传的文件，请选择ZIP格式。</p></div>`;
+}
+
+function exportMenuTriggerMarkup(sectionId, selection = false, iconMarkup = treeIcon("download")) {
+  const wrapper = selection ? "selection-export-wrap" : "workspace-export-menu-wrap";
+  const button = selection ? "selection-action selection-export" : "export";
+  const label = `<span${selection ? "" : " class=\"workspace-tool-label\""}>导出书签</span>`;
+  return `<div class="${wrapper}"><button type="button" class="${button}" title="导出书签" aria-label="导出书签" aria-haspopup="menu" aria-expanded="${state.exportMenuSectionId === sectionId}" data-export-menu-trigger data-export-menu-section-id="${escapeHtml(sectionId)}"${selection ? " data-export-selection" : ""}>${iconMarkup}${label}</button>${exportMenuMarkup(sectionId)}</div>`;
+}
+
+function selectionHeaderMarkup(selection, sectionId, title, items) {
+  const allSelected = Boolean(items.length && selection.length === items.length);
   const selectedLabel = languageIsEnglish() ? `${selection.length} selected` : `${selection.length} 个已选`;
   const trashSelection = state.view === "trash";
-  const moreMenu = state.selectionMoreOpen ? `<div class="selection-more-menu" role="menu" data-selection-more-menu><button type="button" role="menuitem" data-selection-more-action="screenshot" ${state.selectionScreenshotWorking ? "disabled" : ""}>${treeIcon("web")}<span>${state.selectionScreenshotWorking ? "正在创建页面截图…" : "创建页面截图"}</span></button><button type="button" role="menuitem" data-selection-more-action="refresh">${treeIcon("refresh")}<span>刷新预览</span></button><span class="menu-separator"></span><button type="button" role="menuitem" data-selection-more-action="favorite">${treeIcon("likeActive")}<span>添加到收藏夹</span></button><button type="button" role="menuitem" data-selection-more-action="unfavorite">${treeIcon("like")}<span>从收藏夹移除</span></button><span class="menu-separator"></span><button type="button" role="menuitem" data-selection-more-action="remove-tags">${treeIcon("tagAction")}<span>移除标签</span></button></div>` : "";
+  const moreOpen = state.selectionMoreOpen && state.selectionMoreSectionId === sectionId;
+  const moreMenu = moreOpen ? `<div class="selection-more-menu" role="menu" data-selection-more-menu data-section-id="${escapeHtml(sectionId)}"><button type="button" role="menuitem" data-selection-more-action="screenshot" ${state.selectionScreenshotWorking ? "disabled" : ""}>${treeIcon("web")}<span>${state.selectionScreenshotWorking ? "正在创建页面截图…" : "创建页面截图"}</span></button><button type="button" role="menuitem" data-selection-more-action="refresh">${treeIcon("refresh")}<span>刷新预览</span></button><span class="menu-separator"></span><button type="button" role="menuitem" data-selection-more-action="favorite">${treeIcon("likeActive")}<span>添加到收藏夹</span></button><button type="button" role="menuitem" data-selection-more-action="unfavorite">${treeIcon("like")}<span>从收藏夹移除</span></button><span class="menu-separator"></span><button type="button" role="menuitem" data-selection-more-action="remove-tags">${treeIcon("tagAction")}<span>移除标签</span></button></div>` : "";
   const destructiveAction = trashSelection
     ? `<button class="selection-action" title="恢复" aria-label="恢复" data-batch="restore">${treeIcon("add")}<span>恢复</span></button>`
     : `<button class="selection-action selection-danger" title="删除" aria-label="删除" data-batch="trash">${treeIcon("trash")}<span>删除</span></button>`;
-  return `<header class="workspace-head workspace-selection-head" data-is-header="true"><div class="workspace-first-action"><div id="select-all" class="select-all selection-toggle button-dQdc" role="button" tabindex="0" title="选择所有" aria-label="选择所有" data-variant="active"><label class="selection-checkbox"><input tabindex="-1" type="checkbox" title="选择所有" ${allSelected ? "checked" : ""}></label></div></div><div class="workspace-name selection-name"><span class="selection-count" aria-live="polite">${escapeHtml(selectedLabel)}</span><span class="selection-context">${escapeHtml(title)}</span></div><div class="workspace-space"></div><button type="button" class="selection-action selection-move" title="移动" aria-label="移动" data-selection-move aria-haspopup="dialog">${treeIcon("moveTo")}<span>移动</span></button><button class="selection-action" title="添加标签" aria-label="添加标签" data-batch="tags">${treeIcon("tagAction")}<span>添加标签</span></button>${destructiveAction}<button id="export" class="selection-action" title="更多" aria-label="更多">${treeIcon("download")}<span>导出书签</span></button><button class="selection-action" title="直接在浏览器打开" aria-label="直接在浏览器打开" data-selection-open>${treeIcon("open")}<span>直接在浏览器打开</span></button><div class="selection-more-wrap"><button class="selection-action selection-more" title="更多" aria-label="更多" aria-expanded="${state.selectionMoreOpen}" data-selection-more>${treeIcon("moreHorizontal")}</button>${moreMenu}</div><div class="workspace-space"></div><div class="workspace-last-action"><button class="selection-action selection-cancel" title="取消" aria-label="取消" data-selection-clear>${treeIcon("selectionClose")}<span>取消</span></button></div></header>`;
+  return `<header class="workspace-head workspace-selection-head" data-is-header="true" data-section-id="${escapeHtml(sectionId)}"><div class="workspace-first-action"><div class="select-all selection-toggle button-dQdc" role="button" tabindex="0" title="选择所有" aria-label="选择所有" data-select-all data-variant="active"><label class="selection-checkbox"><input tabindex="-1" type="checkbox" title="选择所有" ${allSelected ? "checked" : ""}></label></div></div><div class="workspace-name selection-name"><span class="selection-count" aria-live="polite">${escapeHtml(selectedLabel)}</span><span class="selection-context">${escapeHtml(title)}</span></div><div class="workspace-space"></div><button type="button" class="selection-action selection-move" title="移动" aria-label="移动" data-selection-move aria-haspopup="dialog">${treeIcon("moveTo")}<span>移动</span></button><button class="selection-action" title="添加标签" aria-label="添加标签" data-batch="tags">${treeIcon("tagAction")}<span>添加标签</span></button>${destructiveAction}${exportMenuTriggerMarkup(sectionId, true, treeIcon("download"))}<button class="selection-action" title="直接在浏览器打开" aria-label="直接在浏览器打开" data-selection-open>${treeIcon("open")}<span>直接在浏览器打开</span></button><div class="selection-more-wrap"><button class="selection-action selection-more" title="更多" aria-label="更多" aria-expanded="${moreOpen}" data-selection-more>${treeIcon("moreHorizontal")}</button>${moreMenu}</div><div class="workspace-space"></div><div class="workspace-last-action"><button class="selection-action selection-cancel" title="取消" aria-label="取消" data-selection-clear>${treeIcon("selectionClose")}<span>取消</span></button></div></header>`;
 }
 
-function workspaceHeaderMarkup(items, selection) {
-  if (selection.length) return selectionHeaderMarkup(selection);
-  const sort = sortOption();
-  const allSelected = Boolean(items.length && selection.length === items.length);
-  const view = viewOption();
-  const firstAction = selection.length
-    ? `<div class="workspace-first-action"><div id="select-all" class="select-all selection-toggle button-dQdc" role="button" tabindex="0" title="选择所有" aria-label="选择所有" data-variant="active"><label class="selection-checkbox"><input tabindex="-1" type="checkbox" title="选择所有" ${allSelected ? "checked" : ""}></label></div></div><span class="selection-count" aria-live="polite">${selection.length}</span>`
-    : `<div class="workspace-first-action"><div id="select-all" class="select-all button-dQdc button-JeZa" role="button" tabindex="0" title="选择所有" aria-label="选择所有" data-variant="default" data-accent="default" data-size="default" data-selectable="true">${workspaceIconMarkup()}<label class="select-checkbox select-U4Ec" title="选择所有"><input tabindex="-1" type="checkbox" ${allSelected ? "checked" : ""}></label></div></div><div class="workspace-name">${escapeHtml(viewName(items))}</div><a class="workspace-open" href="${escapeHtml(workspaceHref())}" target="_blank" rel="noopener" title="在新标签页中打开" aria-label="在新标签页中打开">${microIcon("microOpen")}</a>`;
-  const selectionActions = selection.length
-    ? `<div class="selection-actions"><button title="添加星标" data-batch="favorite">★</button><button title="取消星标" data-batch="unfavorite">☆</button><button title="编辑标签" data-batch="tags">#</button><select id="move-to" aria-label="移动到"><option value="">移动到…</option>${state.collections.map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("")}</select>${state.view === "trash" ? `<button data-batch="restore">恢复</button>` : `<button class="danger" data-batch="trash">删除</button>`}<button id="export" class="export" title="导出书签" aria-label="导出书签">${treeIcon("download")}<span>导出书签</span></button><button data-selection-clear title="取消选择" aria-label="取消选择">×</button></div>`
-    : `<div class="workspace-tools"><div class="workspace-sort" role="button" tabindex="0" title="排序" aria-label="排序" aria-haspopup="menu" aria-expanded="${state.sortMenuOpen}" data-sort-trigger><span class="workspace-sort-icon">${treeIcon(sort?.icon || "sortCreated")}</span><span class="workspace-tool-label workspace-sort-label">${sort?.label || "排序"}</span></div><div class="view-switcher" role="group" aria-label="视图"><button class="view-trigger active" data-view-trigger title="视图" aria-label="视图" aria-haspopup="menu" aria-expanded="${state.viewMenuOpen}">${treeIcon(view.icon)}<span class="workspace-tool-label">${view.label}</span></button></div><button id="export" class="export" title="更多" aria-label="导出书签">${treeIcon("download")}<span class="workspace-tool-label">导出书签</span></button></div>`;
-  return `<header class="workspace-head${selection.length ? " workspace-selection-head" : ""}" data-is-header="true">${firstAction}<div class="workspace-space"></div>${selectionActions}</header>${selection.length ? "" : `${sortMenuMarkup()}${viewMenuMarkup()}`}`;
+function workspaceCollectionMenuMarkup(collectionId) {
+  if (!collectionId || state.workspaceCollectionMenuId !== collectionId) return "";
+  const menuItem = (action, label) => `<button type="button" role="menuitem" data-workspace-collection-action="${action}" data-collection-id="${escapeHtml(collectionId)}">${label}</button>`;
+  return `<div class="workspace-collection-menu" role="menu" data-workspace-collection-menu-panel data-collection-id="${escapeHtml(collectionId)}">${menuItem("rename", "改名")}${menuItem("icon", "更改图标")}${menuItem("delete", "删除收藏集")}</div>`;
 }
 
-function visibleItems() {
+function workspaceHeaderMarkup(items, selection, sectionId = "all", title = viewName(items), section = null) {
+  if (selection.length) return selectionHeaderMarkup(selection, sectionId, title, items);
+  const hasItems = section?.hasItems ?? items.length > 0;
+  const collectionId = section?.id || (state.collections.some((item) => item.id === sectionId) ? sectionId : null);
+  const sort = sortOption(currentSort(sectionId));
+  const view = viewOption(section?.layout || layoutForScope(state.preferences, sectionId));
+  const sortOpen = state.sortMenuOpen && state.workspaceMenuSectionId === sectionId;
+  const viewOpen = state.viewMenuOpen && state.workspaceMenuSectionId === sectionId;
+  const selectAll = hasItems ? `<div class="workspace-first-action"><div class="select-all button-dQdc button-JeZa" role="button" tabindex="0" title="选择所有" aria-label="选择所有" data-select-all data-variant="default" data-accent="default" data-size="default" data-selectable="true">${workspaceIconMarkup(sectionId === "all" ? null : sectionId)}<label class="select-checkbox select-U4Ec" title="选择所有"><input tabindex="-1" type="checkbox"></label></div></div>` : "";
+  const titleMarkup = collectionId
+    ? `<a class="workspace-name workspace-title-link" href="${escapeHtml(workspaceHref(collectionId))}" title="${escapeHtml(title)}">${escapeHtml(title)}</a>`
+    : `<div class="workspace-name">${escapeHtml(title)}</div>`;
+  const headerExportMarkup = !hasItems ? "" : exportMenuTriggerMarkup(sectionId);
+  const managementMarkup = collectionId ? `<div class="workspace-collection-menu-wrap"><button type="button" class="workspace-collection-more" title="更多" aria-label="${escapeHtml(title)}更多" aria-haspopup="menu" aria-expanded="${state.workspaceCollectionMenuId === collectionId}" data-workspace-collection-menu="${escapeHtml(collectionId)}">${treeIcon("moreHorizontal")}</button>${workspaceCollectionMenuMarkup(collectionId)}</div>` : "";
+  return `<header class="workspace-head" data-is-header="true" data-section-id="${escapeHtml(sectionId)}">${selectAll}${titleMarkup}<a class="workspace-open" href="${escapeHtml(workspaceHref(sectionId === "all" ? null : sectionId))}" target="_blank" rel="noopener" title="在新标签页中打开" aria-label="在新标签页中打开">${microIcon("microOpen")}</a><div class="workspace-space"></div><div class="workspace-tools"><div class="workspace-sort" role="button" tabindex="0" title="排序" aria-label="排序" aria-haspopup="menu" aria-expanded="${sortOpen}" data-sort-trigger data-section-id="${escapeHtml(sectionId)}"><span class="workspace-sort-icon">${treeIcon(sort?.icon || "sortCreated")}</span><span class="workspace-tool-label workspace-sort-label">${sort?.label || "排序"}</span></div><div class="view-switcher" role="group" aria-label="视图"><button class="view-trigger active" data-view-trigger title="视图" aria-label="视图" aria-haspopup="menu" aria-expanded="${viewOpen}" data-section-id="${escapeHtml(sectionId)}">${treeIcon(view.icon)}<span class="workspace-tool-label">${view.label}</span></button></div>${headerExportMarkup}${managementMarkup}</div></header>`;
+}
+
+function visibleItems(source = state.items) {
   const filters = parseSearchQuery(state.query).filters;
   const duplicates = duplicateLinks(sidebarItems());
-  return state.items.filter((item) => {
+  return source.filter((item) => {
     if (!matchesSearchFilters(item, filters, duplicates)) return false;
     if (state.tag && !item.tags.some((tag) => tag.toLocaleLowerCase() === state.tag.toLocaleLowerCase())) return false;
     return true;
   });
 }
 
-function sortedItems() {
-  const items = visibleItems();
-  const sort = state.preferences?.sort;
+function sortedItems(source = state.items, sectionId = null) {
+  const items = visibleItems(source);
+  const sort = currentSort(sectionId);
   if (sort === "title" || sort === "-title") {
     const ordered = [...items].sort((a, b) => (a.title || a.link).localeCompare(b.title || b.link, "zh-CN"));
     return sort === "-title" ? ordered.reverse() : ordered;
@@ -1018,6 +1267,40 @@ function sortedItems() {
     return sort === "-created" ? ordered.reverse() : ordered;
   }
   return items;
+}
+
+function collectionDescendantIds(collectionId) {
+  const ids = [collectionId];
+  for (let index = 0; index < ids.length; index += 1) {
+    for (const item of state.collections) if (item.parentId === ids[index]) ids.push(item.id);
+  }
+  return ids;
+}
+
+function collectionSections() {
+  const collectionId = state.collectionId && state.view === "all" ? state.collectionId : null;
+  const ids = collectionId ? collectionDescendantIds(collectionId) : [];
+  const nestedViewLegacy = state.preferences?.nestedViewLegacy === true;
+  if (ids.length > 1 && !nestedViewLegacy && (!state.query.trim() || state.searchInCollection)) {
+    const source = state.query.trim() ? state.items : state.allItems.length ? state.allItems : state.items;
+    return ids.map((id) => {
+      const items = sortedItems(source.filter((item) => item.collectionId === id), id);
+      return { id, key: id, title: collectionName(id), items, layout: layoutForScope(state.preferences, id), hasItems: items.length > 0 };
+    });
+  }
+  const id = state.collectionId || null;
+  const items = sortedItems(state.items, id);
+  return [{ id, key: id || "all", title: viewName(items), items, layout: layoutForScope(state.preferences, id || "all"), hasItems: items.length > 0 }];
+}
+
+function workspaceItems(sectionId) {
+  return collectionSections().find((section) => section.key === sectionId)?.items || sortedItems();
+}
+
+function selectionItems(sectionId) {
+  return state.collectionId && sectionId === state.collectionId && collectionSections().length > 1
+    ? sortedItems()
+    : workspaceItems(sectionId);
 }
 
 function tagList(items) {
@@ -1881,11 +2164,11 @@ async function mutate(path, init) {
   }
 }
 
-function card(item, index, duplicates = new Set()) {
+function card(item, index, duplicates = new Set(), layout = state.layout) {
   const selected = state.selected.has(item.id) ? "checked" : "";
-  const titleView = state.layout === "simple";
-  const gridView = state.layout === "grid";
-  const masonryView = state.layout === "masonry";
+  const titleView = layout === "simple";
+  const gridView = layout === "grid";
+  const masonryView = layout === "masonry";
   const coverSrc = titleView ? faviconUrl(item.link) : masonryView ? masonryCoverUrl(item) : gridView ? gridCoverUrl(item) : listCoverUrl(item);
   const coverSize = titleView ? 20 : 56;
   const cardLinkTarget = settingsPreference("bookmarkClick", "new_tab") === "current_tab" ? "" : "target=\"_blank\" rel=\"noopener\"";
@@ -1980,8 +2263,9 @@ function bindCardMenuActions(menu) {
 function renderCardMenu() {
   const panel = root.querySelector("[data-card-menu-panel]");
   if (!state.cardMenuId) return closeCardMenu();
-  const item = sortedItems().find((entry) => entry.id === state.cardMenuId);
-  const cards = root.querySelector(".cards");
+  const section = collectionSections().find((entry) => entry.items.some((item) => item.id === state.cardMenuId));
+  const item = section?.items.find((entry) => entry.id === state.cardMenuId);
+  const cards = [...root.querySelectorAll(".cards")].find((element) => element.dataset.sectionId === section?.key);
   if (!item || !cards) return closeCardMenu();
   panel?.remove();
   cards.insertAdjacentHTML("beforeend", cardActionMenu(item));
@@ -1994,10 +2278,12 @@ function renderCardMenu() {
 
 function applyViewFields() {
   const settings = viewSettings();
-  const titleView = state.layout === "simple";
-  const supportsCoverPosition = state.layout === "list";
-  root.querySelector(".cards")?.style.setProperty("--card-cover-size", String(coverSizeValue(settings)));
-  root.querySelectorAll(".bookmark-card:not(.collection-trash-card)").forEach((card) => {
+  root.querySelectorAll(".cards").forEach((cards) => {
+    const layout = cards.dataset.layout || state.layout;
+    const titleView = layout === "simple";
+    const supportsCoverPosition = layout === "list";
+    cards.style.setProperty("--card-cover-size", String(coverSizeValue(settings)));
+    cards.querySelectorAll(":scope > .bookmark-card:not(.collection-trash-card)").forEach((card) => {
     const toggle = (selector, visible) => card.querySelector(selector)?.classList.toggle("view-hidden", !visible);
     toggle(".card-cover", settings.cover);
     toggle(".card-title", settings.title);
@@ -2020,49 +2306,56 @@ function applyViewFields() {
     if (detailsVisible) rows.push("auto");
     if (settings.metadata) rows.push("21.2891px");
     card.style.setProperty("--card-copy-rows", rows.join(" ") || "1fr");
+    });
   });
   applyMasonryCoverSize();
 }
 
 function applyMasonryCoverSize() {
-  const cards = root.querySelector(".cards.layout-masonry, .cards.layout-grid");
-  if (!cards) return;
-  const masonry = cards.classList.contains("layout-masonry");
+  const cardsList = [...root.querySelectorAll(".cards.layout-masonry, .cards.layout-grid")];
+  if (!cardsList.length) return;
   const width = masonryGridWidth();
-  const items = new Map(state.items.map((item) => [item.id, item]));
-  cards.style.setProperty("--grid-item-width", `${width}px`);
-  cards.querySelectorAll(":scope > .bookmark-card:not(.collection-trash-card)").forEach((card) => {
-    card.style.removeProperty("--masonry-cover-ratio");
-    const item = items.get(card.dataset.dragBookmark);
-    if (!item) return;
-    const source = card.querySelector(".card-cover source");
-    const image = card.querySelector(".card-cover img");
-    const src = masonry ? masonryCoverUrl(item, width) : gridCoverUrl(item, width);
-    if (source?.getAttribute("srcset") !== src) source?.setAttribute("srcset", src);
-    image?.setAttribute("width", String(width));
-    if (image?.getAttribute("src") !== src) {
-      image?.addEventListener("load", layoutMasonry, { once: true });
-      image?.setAttribute("src", src);
-    }
+  const items = new Map((state.allItems.length ? state.allItems : state.items).map((item) => [item.id, item]));
+  cardsList.forEach((cards) => {
+    const masonry = cards.classList.contains("layout-masonry");
+    cards.style.setProperty("--grid-item-width", `${width}px`);
+    cards.querySelectorAll(":scope > .bookmark-card:not(.collection-trash-card)").forEach((card) => {
+      card.style.removeProperty("--masonry-cover-ratio");
+      const item = items.get(card.dataset.dragBookmark);
+      if (!item) return;
+      const source = card.querySelector(".card-cover source");
+      const image = card.querySelector(".card-cover img");
+      const src = masonry ? masonryCoverUrl(item, width) : gridCoverUrl(item, width);
+      if (source?.getAttribute("srcset") !== src) source?.setAttribute("srcset", src);
+      image?.setAttribute("width", String(width));
+      if (image?.getAttribute("src") !== src) {
+        image?.addEventListener("load", layoutMasonry, { once: true });
+        image?.setAttribute("src", src);
+      }
+    });
   });
-  if (masonry) layoutMasonry();
+  if (cardsList.some((cards) => cards.classList.contains("layout-masonry"))) {
+    layoutMasonry();
+  }
 }
 
 let masonryResizeBound = false;
 
 function layoutMasonry() {
-  const cards = root.querySelector(".cards.layout-masonry");
-  if (!cards) return;
+  const cardsList = [...root.querySelectorAll(".cards.layout-masonry")];
+  if (!cardsList.length) return;
   const rowHeight = 15;
   const rowGap = 16;
-  const items = [...cards.querySelectorAll(":scope > .bookmark-card:not(.collection-trash-card)")];
-  items.forEach((item) => item.style.removeProperty("grid-row-end"));
-  requestAnimationFrame(() => {
-    if (!cards.isConnected || !cards.classList.contains("layout-masonry")) return;
-    items.forEach((item) => {
-      const height = item.getBoundingClientRect().height;
-      const span = Math.max(1, Math.ceil((height + rowGap) / (rowHeight + rowGap)));
-      item.style.gridRowEnd = `span ${span}`;
+  cardsList.forEach((cards) => {
+    const items = [...cards.querySelectorAll(":scope > .bookmark-card:not(.collection-trash-card)")];
+    items.forEach((item) => item.style.removeProperty("grid-row-end"));
+    requestAnimationFrame(() => {
+      if (!cards.isConnected || !cards.classList.contains("layout-masonry")) return;
+      items.forEach((item) => {
+        const height = item.getBoundingClientRect().height;
+        const span = Math.max(1, Math.ceil((height + rowGap) / (rowHeight + rowGap)));
+        item.style.gridRowEnd = `span ${span}`;
+      });
     });
   });
   if (!masonryResizeBound) {
@@ -2906,6 +3199,7 @@ function renderSettings() {
     legacyInput.checked = settingsPreference("nestedViewLegacy", false);
     legacyInput.dataset.settingsToggle = "nestedViewLegacy";
     legacyInput.parentElement.classList.remove("settings-disabled");
+    legacyInput.parentElement.insertAdjacentHTML("beforeend", `<button type="button" class="settings-inline-help" aria-label="旧视图说明" aria-describedby="nested-view-legacy-help" title="查看旧视图说明">说明<span id="nested-view-legacy-help" class="settings-inline-help-popover" role="tooltip"><strong>旧视图说明</strong><span>勾选：父收藏集页面只显示当前收藏集中的书签，子收藏集不会展开。</span><span>取消勾选：父收藏集页面按区块显示当前收藏集及所有子收藏集的书签。</span></span></button>`);
   }
   const aiNote = root.querySelector(".settings-sub-label");
   if (aiNote) {
@@ -3171,13 +3465,21 @@ async function load({ viewOnly = false } = {}) {
       state.items = items;
       state.tags = Array.isArray(tags) ? tags : [];
       state.trashedCollections = state.view === "trash" ? trashedCollections : [];
+      if (state.collectionId && path === collectionItemsPath()) {
+        state.collectionItems = items;
+        state.collectionItemsCollectionId = state.collectionId;
+      } else if (!state.collectionId) {
+        state.collectionItems = null;
+        state.collectionItemsCollectionId = null;
+      }
       if (!state.allItems.length && state.view === "all" && !state.collectionId) state.allItems = items;
       render();
       return;
     }
-    const requests = [api("/v1/bootstrap"), api(path), path === "/v1/bookmarks?" ? null : api("/v1/bookmarks?"), api(tagQueryPath()).catch(() => [])];
+    const rawCollectionPath = collectionItemsPath();
+    const requests = [api("/v1/bootstrap"), api(path), path === "/v1/bookmarks?" ? null : api("/v1/bookmarks?"), api(tagQueryPath()).catch(() => []), rawCollectionPath && rawCollectionPath !== path ? api(rawCollectionPath).catch(() => null) : null];
     if (state.view === "trash") requests.push(api("/v1/collections?trash=1"));
-    const [connectionInfo, boot, items, allItems, tags, trashedCollections = []] = await Promise.all([connection(), ...requests]);
+    const [connectionInfo, boot, items, allItems, tags, collectionItems, trashedCollections = []] = await Promise.all([connection(), ...requests]);
     if (!isCurrentRequest(generation, loadGeneration)) return;
     state.connectionInfo = connectionInfo;
     state.lock = await lockState();
@@ -3192,6 +3494,16 @@ async function load({ viewOnly = false } = {}) {
     state.collapsedCollections = new Set(Array.isArray(boot.preferences.collapsedCollectionIds) ? boot.preferences.collapsedCollectionIds : []);
     state.items = items;
     state.allItems = allItems || items;
+    if (state.collectionId && path === rawCollectionPath) {
+      state.collectionItems = items;
+      state.collectionItemsCollectionId = state.collectionId;
+    } else if (state.collectionId && Array.isArray(collectionItems)) {
+      state.collectionItems = collectionItems;
+      state.collectionItemsCollectionId = state.collectionId;
+    } else if (!state.collectionId) {
+      state.collectionItems = null;
+      state.collectionItemsCollectionId = null;
+    }
     state.tags = Array.isArray(tags) ? tags : [];
     state.favoriteCount = (allItems || items).filter((item) => item.favorite).length;
     state.trashedCollections = trashedCollections;
@@ -3203,32 +3515,52 @@ async function load({ viewOnly = false } = {}) {
   }
 }
 
-function emptyStateMarkup() {
+function emptyStateMarkup(collectionId = state.collectionId) {
   const searching = Boolean(state.query.trim());
-  const message = searching ? "没有匹配的书签。" : state.view === "trash" ? "废纸篓为空。" : state.collectionId ? "此收藏夹还没有书签。" : "此视图中还没有书签。";
+  const message = searching ? "没有匹配的书签。" : state.view === "trash" ? "废纸篓为空。" : collectionId ? "此收藏夹还没有书签。" : "此视图中还没有书签。";
   const action = searching
     ? `<button type="button" class="empty-action" data-empty-action="clear-search">清除搜索</button>`
     : state.view === "trash"
       ? `<button type="button" class="empty-action" data-empty-action="all">返回所有书签</button>`
-      : `<button type="button" class="primary empty-action" data-empty-action="add-bookmark">添加书签</button>`;
+      : `<button type="button" class="primary empty-action" data-empty-action="add-bookmark"${collectionId ? ` data-empty-collection="${escapeHtml(collectionId)}"` : ""}>添加书签</button>`;
   return `<div class="empty" role="status"><p>${t(message) === message ? message : t(message)}</p>${action}</div>`;
 }
 
+function collectionSectionMarkup(section, duplicates, viewSwitching) {
+  const selection = state.selectionSectionId === section.key
+    ? selectionItems(section.key).filter((item) => state.selected.has(item.id))
+    : [];
+  const collectionTrash = state.view === "trash" && !section.id ? state.trashedCollections.map((item) => `<article class="bookmark-card collection-trash-card"><span class="collection-trash-icon">${collectionIconMarkup(collectionIconValue(item.id))}</span><span><strong>${escapeHtml(item.name)}</strong><span class="card-meta">收藏夹及其下级项目</span></span><button data-restore-collection="${item.id}" title="恢复收藏夹" aria-label="恢复收藏夹">${treeIcon("add")}</button></article>`).join("") : "";
+  const cardMenuItem = section.items.find((item) => item.id === state.cardMenuId);
+  const cardMenu = cardMenuItem ? cardActionMenu(cardMenuItem) : "";
+  const cards = section.items.length
+    ? section.items.map((item, index) => card(item, index, duplicates, section.layout)).join("")
+    : collectionTrash || emptyStateMarkup(section.id);
+  const menus = selection.length || state.workspaceMenuSectionId !== section.key ? "" : `${sortMenuMarkup(section.key)}${viewMenuMarkup(section.key)}`;
+  const emptyCollection = !section.items.length && !collectionTrash && section.id;
+  const content = emptyCollection
+    ? `<div class="workspace-scroll workspace-scroll-empty"><div class="empty" role="status"></div></div>`
+    : `<div class="workspace-scroll"><section class="cards layout-${section.layout}${viewSwitching ? " no-card-animation" : ""}" data-section-id="${escapeHtml(section.key)}" data-layout="${escapeHtml(section.layout)}" role="list">${cards}${cardMenu}</section></div>`;
+  const footer = section.items.length ? `<div class="bookmark-count-footer" data-compact="true">${section.items.length} 个书签</div>` : "";
+  return `<section class="workspace workspace-section${emptyCollection ? " workspace-empty" : ""}" data-section-id="${escapeHtml(section.key)}"${section.id ? ` data-collection-id="${escapeHtml(section.id)}"` : ""}>${workspaceHeaderMarkup(section.items, selection, section.key, section.title, section)}${menus}${content}${footer}</section>`;
+}
+
 function render() {
+  searchMenuElement()?.remove();
   if (state.settingsOpen) return renderSettings();
   document.title = languageIsEnglish() ? "Private Bookmarks" : "私有书签";
   const viewSwitching = state.viewSwitching;
   state.viewSwitching = false;
   const editWasOpen = editBookmarkDialog.open;
-  const items = sortedItems();
-  const selection = items.filter((item) => state.selected.has(item.id));
+  const sections = collectionSections();
   const duplicates = duplicateLinks(sidebarItems());
-  if (!selection.length) state.selectionMoreOpen = false;
-  const collectionTrash = state.view === "trash" ? state.trashedCollections.map((item) => `<article class="bookmark-card collection-trash-card"><span class="collection-trash-icon">${collectionIconMarkup(collectionIconValue(item.id))}</span><span><strong>${escapeHtml(item.name)}</strong><span class="card-meta">收藏夹及其下级项目</span></span><button data-restore-collection="${item.id}" title="恢复收藏夹" aria-label="恢复收藏夹">${treeIcon("add")}</button></article>`).join("") : "";
-  const cardMenuItem = items.find((item) => item.id === state.cardMenuId);
-  if (!cardMenuItem) state.cardMenuId = null;
-  const cardMenu = cardMenuItem ? cardActionMenu(cardMenuItem) : "";
-  root.innerHTML = localizeHtml(`<main class="library">${sidebarMarkup()}<section class="content"><header class="topbar"><label class="quick-search"><span>⌕</span><input id="search" value="${escapeHtml(state.query)}" placeholder="搜索" autocomplete="off"><kbd>⌘ K</kbd></label><div class="top-actions"><button id="check-links" class="top-action-icon"${state.connectionInfo ? "" : " disabled"} title="${state.connectionInfo ? t("检查链接") : t("连接私有实例后可用")}" aria-label="${state.connectionInfo ? t("检查链接") : t("连接私有实例后可用")}">${treeIcon("refresh")}</button><div class="theme-menu-wrap"><button id="theme" class="top-action-icon theme-trigger" title="主题：${themeOption().label}" aria-label="主题：${themeOption().label}" aria-haspopup="menu" aria-expanded="${state.themeMenuOpen}" data-theme-trigger>${treeIcon(themeOption().icon)}</button>${themeMenuMarkup()}</div><button id="import" class="top-action-icon" title="导入书签" aria-label="导入书签">${treeIcon("upload")}</button><button id="add-bookmark" class="primary add-bookmark">${treeIcon("add")}<span>添加</span></button></div></header><section class="workspace"><header class="workspace-head"><div class="workspace-title"><button id="select-all" class="select-all" title="选择全部" aria-label="选择全部" aria-pressed="${Boolean(items.length && selection.length === items.length)}"><span class="select-checkbox">${items.length && selection.length === items.length ? "✓" : ""}</span></button><h1>☁ ${escapeHtml(viewName(items))}</h1><span class="count">${items.length}</span></div><div class="workspace-tools"><select id="sort" aria-label="排序"><option value="manual" ${state.preferences?.sort === "manual" ? "selected" : ""}>手动排序</option><option value="title" ${state.preferences?.sort === "title" ? "selected" : ""}>标题 (A-Z)</option><option value="host" ${state.preferences?.sort === "host" ? "selected" : ""}>网站 (A-Z)</option><option value="created" ${state.preferences?.sort === "created" ? "selected" : ""}>最近添加</option></select><div class="view-switcher" role="group" aria-label="视图"><button data-layout="list" class="${state.layout === "list" ? "active" : ""}" title="列表视图" aria-pressed="${state.layout === "list"}">☷ 列表</button><button data-layout="grid" class="${state.layout === "grid" ? "active" : ""}" title="网格视图" aria-pressed="${state.layout === "grid"}">▦ 网格</button></div><button id="export" class="export" title="导出书签">⇩ 导出书签</button></div></header><section class="cards layout-${state.layout}${viewSwitching ? " no-card-animation" : ""}" role="list">${collectionTrash}${items.length ? items.map((item, index) => card(item, index, duplicates)).join("") : collectionTrash || emptyStateMarkup()}${cardMenu}</section><div class="bookmark-count-footer" data-compact="false">${items.length} 个书签</div></section></section></main>`);
+  if (!sections.some((section) => section.items.some((item) => item.id === state.cardMenuId))) state.cardMenuId = null;
+  if (!state.selected.size) {
+    state.selectionMoreOpen = false;
+    state.selectionMoreSectionId = null;
+  }
+  const workspaces = sections.map((section) => collectionSectionMarkup(section, duplicates, viewSwitching)).join("");
+  root.innerHTML = localizeHtml(`<main class="library">${sidebarMarkup()}<section class="content"><header class="topbar"><label class="quick-search"><span>⌕</span><span id="search-filter-label" class="search-filter-label">搜索</span><input id="search" aria-controls="search-filter-menu" aria-labelledby="search-filter-label" value="${escapeHtml(state.query)}" placeholder="搜索" autocomplete="off"><kbd>⌘ K</kbd></label><div class="top-actions"><button id="check-links" class="top-action-icon"${state.connectionInfo ? "" : " disabled"} title="${state.connectionInfo ? t("检查链接") : t("连接私有实例后可用")}" aria-label="${state.connectionInfo ? t("检查链接") : t("连接私有实例后可用")}">${treeIcon("refresh")}</button><div class="theme-menu-wrap"><button id="theme" class="top-action-icon theme-trigger" title="主题：${themeOption().label}" aria-label="主题：${themeOption().label}" aria-haspopup="menu" aria-expanded="${state.themeMenuOpen}" data-theme-trigger>${treeIcon(themeOption().icon)}</button>${themeMenuMarkup()}</div><button id="import" class="top-action-icon" title="导入书签" aria-label="导入书签">${treeIcon("upload")}</button><button id="add-bookmark" class="primary add-bookmark">${treeIcon("add")}<span>添加</span></button></div></header><div class="workspace-sections">${workspaces}</div></section></main>`);
   const sidebar = root.querySelector(".sidebar");
   mountEditPanel(editWasOpen);
   const resizer = document.createElement("div");
@@ -3238,7 +3570,6 @@ function render() {
   resizer.setAttribute("aria-label", t("调整侧边栏宽度"));
   resizer.setAttribute("tabindex", "0");
   sidebar?.after(resizer);
-  root.querySelector(".workspace-head").outerHTML = localizeHtml(workspaceHeaderMarkup(items, selection));
   localizeDialogs();
   applyViewFields();
   enhanceSearch();
@@ -3312,6 +3643,7 @@ async function accountAction(action) {
   setAccountMenuOpen(false);
   if (action === "settings") {
     state.selected.clear();
+    state.selectionSectionId = null;
     state.searchMenuOpen = false;
     state.sortMenuOpen = false;
     state.viewMenuOpen = false;
@@ -3328,6 +3660,7 @@ async function disconnectCurrentDevice(confirmFirst = false) {
   if (confirmFirst && !window.confirm(t("确认断开当前设备吗？"))) return;
   await disconnect();
   state.selected.clear();
+  state.selectionSectionId = null;
   state.accountMenuOpen = false;
   state.connectionInfo = null;
   state.settingsOpen = false;
@@ -3517,18 +3850,27 @@ function updateViewChrome() {
     button.closest(".collection-row, .nav-item")?.classList.toggle("active", button.dataset.collection === state.collectionId);
   });
   root.querySelectorAll("[data-search-query], [data-tag]").forEach((button) => button.classList.remove("active"));
-  const name = root.querySelector(".workspace-head .workspace-name");
-  if (name) name.textContent = viewName();
-  const open = root.querySelector(".workspace-open");
-  if (open) open.href = workspaceHref();
+  const sections = collectionSections();
+  root.querySelectorAll(".workspace").forEach((workspace) => {
+    const section = sections.find((item) => item.key === workspace.dataset.sectionId);
+    if (!section) return;
+    const name = workspace.querySelector(".workspace-head .workspace-name");
+    if (name) name.textContent = section.title;
+    const open = workspace.querySelector(".workspace-open");
+    if (open) open.href = workspaceHref(section.id);
+  });
   refreshSelectionUi({ refreshHeader: true });
 }
 
 function switchView(view, collectionId = null) {
   state.sidebarOpen = false;
   state.searchMenuOpen = false;
+  state.searchActiveIndex = -1;
   state.sortMenuOpen = false;
   state.viewMenuOpen = false;
+  state.workspaceMenuSectionId = null;
+  state.workspaceCollectionMenuId = null;
+  state.exportMenuSectionId = null;
   state.themeMenuOpen = false;
   state.accountMenuOpen = false;
   state.cardMenuId = null;
@@ -3537,6 +3879,7 @@ function switchView(view, collectionId = null) {
   state.query = "";
   state.tag = "";
   state.selected.clear();
+  state.selectionSectionId = null;
   state.selectionMoreOpen = false;
   state.viewSwitching = true;
   updateLibraryRoute("push");
@@ -3835,94 +4178,158 @@ function releaseCardActionProxies() {
   Object.values(state.cardActionProxies || {}).forEach((button) => button.remove());
 }
 
-function updateSelectAllControl() {
-  const input = root.querySelector("#select-all input");
+function updateSelectAllControl(workspace) {
+  const input = workspace?.querySelector("[data-select-all] input");
   if (!input) return;
-  const items = sortedItems();
+  const items = selectionItems(workspace.dataset.sectionId);
   const selected = items.filter((item) => state.selected.has(item.id));
   const allSelected = Boolean(items.length && selected.length === items.length);
   input.checked = allSelected;
   input.indeterminate = Boolean(selected.length && !allSelected);
 }
 
+function selectAll(sectionId) {
+  const items = selectionItems(sectionId);
+  state.selectionSectionId = sectionId;
+  const allSelected = Boolean(items.length && items.every((item) => state.selected.has(item.id)));
+  if (allSelected) items.forEach((item) => state.selected.delete(item.id));
+  else items.forEach((item) => state.selected.add(item.id));
+  if (!state.selected.size) state.selectionSectionId = null;
+  refreshSelectionUi();
+}
+
 function bindWorkspaceHeader() {
-  const selectAll = root.querySelector("#select-all");
-  const toggleSelectAll = () => {
-    const items = sortedItems();
-    const allSelected = items.length && items.every((item) => state.selected.has(item.id));
-    if (allSelected) items.forEach((item) => state.selected.delete(item.id));
-    else items.forEach((item) => state.selected.add(item.id));
-    refreshSelectionUi();
-  };
-  if (selectAll) {
-    selectAll.onclick = toggleSelectAll;
-    selectAll.onkeydown = (event) => {
-      if (event.key !== "Enter" && event.key !== " ") return;
-      event.preventDefault();
-      toggleSelectAll();
-    };
-  }
-  const selectionClear = root.querySelector("[data-selection-clear]");
-  if (selectionClear) selectionClear.onclick = () => {
-    state.selected.clear();
-    state.selectionMoreOpen = false;
-    refreshSelectionUi();
-  };
-
-  const viewTrigger = root.querySelector("[data-view-trigger]");
-  if (viewTrigger) {
-    const toggleViewMenu = () => {
-      state.viewMenuOpen = !state.viewMenuOpen;
-      if (state.viewMenuOpen) {
-        state.sortMenuOpen = false;
-        renderSortMenu();
-      }
-      renderViewMenu();
-    };
-    viewTrigger.onclick = (event) => {
-      event.stopPropagation();
-      toggleViewMenu();
-    };
-    viewTrigger.onkeydown = (event) => {
-      if (event.key !== "Enter" && event.key !== " ") return;
-      event.preventDefault();
-      toggleViewMenu();
-    };
-  }
+  root.querySelectorAll(".workspace").forEach((workspace) => {
+    const sectionId = workspace.dataset.sectionId;
+    const selectAllControl = workspace.querySelector("[data-select-all]");
+    if (selectAllControl) {
+      const toggleSelectAll = () => selectAll(sectionId);
+      selectAllControl.onclick = toggleSelectAll;
+      selectAllControl.onkeydown = (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        toggleSelectAll();
+      };
+    }
+    const viewTrigger = workspace.querySelector("[data-view-trigger]");
+    if (viewTrigger) {
+      const toggleViewMenu = () => {
+        state.workspaceMenuSectionId = sectionId;
+        closeExportMenu();
+        state.viewMenuOpen = !state.viewMenuOpen;
+        if (state.viewMenuOpen) {
+          state.sortMenuOpen = false;
+          renderSortMenu(sectionId);
+        }
+        renderViewMenu(sectionId);
+      };
+      viewTrigger.onclick = (event) => {
+        event.stopPropagation();
+        toggleViewMenu();
+      };
+      viewTrigger.onkeydown = (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        toggleViewMenu();
+      };
+    }
+    const sortTrigger = workspace.querySelector("[data-sort-trigger]");
+    if (sortTrigger) {
+      const toggleSortMenu = () => {
+        state.workspaceMenuSectionId = sectionId;
+        closeExportMenu();
+        state.sortMenuOpen = !state.sortMenuOpen;
+        if (state.sortMenuOpen) {
+          state.viewMenuOpen = false;
+          renderViewMenu(sectionId);
+        }
+        renderSortMenu(sectionId);
+      };
+      sortTrigger.onclick = (event) => {
+        event.stopPropagation();
+        toggleSortMenu();
+      };
+      sortTrigger.onkeydown = (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        toggleSortMenu();
+      };
+    }
+    updateSelectAllControl(workspace);
+  });
   bindViewMenu();
-
-  const sortTrigger = root.querySelector("[data-sort-trigger]");
-  if (sortTrigger) {
-    const toggleSortMenu = () => {
-      state.sortMenuOpen = !state.sortMenuOpen;
-      if (state.sortMenuOpen) {
-        state.viewMenuOpen = false;
-        renderViewMenu();
-      }
-      renderSortMenu();
-    };
-    sortTrigger.onclick = (event) => {
-      event.stopPropagation();
-      toggleSortMenu();
-    };
-    sortTrigger.onkeydown = (event) => {
-      if (event.key !== "Enter" && event.key !== " ") return;
-      event.preventDefault();
-      toggleSortMenu();
-    };
-  }
   bindSortMenu();
-
-  root.querySelectorAll("[data-batch]").forEach((button) => button.onclick = () => batch(button.dataset.batch));
-  const selectionMore = root.querySelector("[data-selection-more]");
-  if (selectionMore) selectionMore.onclick = (event) => {
+  positionSelectionMoreMenu();
+  root.querySelectorAll("[data-workspace-collection-menu]").forEach((button) => button.onclick = (event) => {
     event.stopPropagation();
-    state.selectionMoreOpen = !state.selectionMoreOpen;
+    state.workspaceCollectionMenuId = state.workspaceCollectionMenuId === button.dataset.workspaceCollectionMenu ? null : button.dataset.workspaceCollectionMenu;
+    closeExportMenu();
+    state.sortMenuOpen = false;
+    state.viewMenuOpen = false;
+    render();
+  });
+  root.querySelectorAll("[data-workspace-collection-action]").forEach((button) => button.onclick = (event) => {
+    event.stopPropagation();
+    state.workspaceCollectionMenuId = null;
+    collectionAction(button.dataset.workspaceCollectionAction, button.dataset.collectionId).catch(showError);
+  });
+  positionWorkspaceCollectionMenu();
+  root.querySelectorAll("[data-export-menu-trigger]").forEach((button) => button.onclick = (event) => {
+    event.stopPropagation();
+    const sectionId = button.dataset.exportMenuSectionId;
+    const open = state.exportMenuSectionId === sectionId;
+    state.exportMenuSectionId = open ? null : sectionId;
+    state.workspaceCollectionMenuId = null;
+    state.sortMenuOpen = false;
+    state.viewMenuOpen = false;
+    if (button.hasAttribute("data-export-selection")) refreshSelectionUi({ refreshHeader: true });
+    else render();
+  });
+  root.querySelectorAll("[data-export-format]").forEach((button) => button.onclick = (event) => {
+    event.stopPropagation();
+    const menu = button.closest("[data-export-menu]");
+    const sectionId = menu?.dataset.exportMenuSectionId || "all";
+    const selection = menu?.parentElement?.querySelector("[data-export-selection]");
+    state.exportMenuSectionId = null;
+    if (selection) refreshSelectionUi({ refreshHeader: true });
+    else render();
+    exportBookmarks(button.dataset.exportFormat, sectionId).catch(showError);
+  });
+  root.querySelectorAll("[data-export-backup-action]").forEach((button) => button.onclick = (event) => {
+    event.stopPropagation();
+    const action = button.dataset.exportBackupAction;
+    closeExportMenu();
+    if (action === "backup") {
+      return isPopupSurface()
+        ? openFullPage("library.html?settings=backups")
+        : setSettingsRoute(true, "backups");
+    }
+    if (action === "uploads") return api("/v1/export").then((backup) => downloadExport(backup, "zip")).catch(showError);
+  });
+  positionExportMenu();
+
+  root.querySelectorAll("[data-selection-clear]").forEach((button) => button.onclick = () => {
+    state.selected.clear();
+    state.selectionSectionId = null;
+    state.selectionMoreOpen = false;
+    state.selectionMoreSectionId = null;
+    state.exportMenuSectionId = null;
+    refreshSelectionUi();
+  });
+  root.querySelectorAll("[data-batch]").forEach((button) => button.onclick = () => batch(button.dataset.batch));
+  root.querySelectorAll("[data-selection-more]").forEach((button) => button.onclick = (event) => {
+    event.stopPropagation();
+    const sectionId = button.closest(".workspace")?.dataset.sectionId;
+    const open = state.selectionMoreOpen && state.selectionMoreSectionId === sectionId;
+    closeExportMenu();
+    state.selectionMoreOpen = !open;
+    state.selectionMoreSectionId = open ? null : sectionId;
     refreshSelectionUi({ refreshHeader: true });
-  };
+  });
   root.querySelectorAll("[data-selection-more-action]").forEach((button) => button.onclick = () => {
     const action = button.dataset.selectionMoreAction;
     state.selectionMoreOpen = false;
+    state.selectionMoreSectionId = null;
     if (action === "screenshot") {
       state.selectionScreenshotWorking = true;
       refreshSelectionUi({ refreshHeader: true });
@@ -3939,40 +4346,45 @@ function bindWorkspaceHeader() {
     }
     batch(action === "remove-tags" ? "tags-remove" : action).catch(showError);
   });
-  const selectionMove = root.querySelector("[data-selection-move]");
-  if (selectionMove) selectionMove.onclick = openMovePicker;
-  const selectionOpen = root.querySelector("[data-selection-open]");
-  if (selectionOpen) selectionOpen.onclick = () => {
+  root.querySelectorAll("[data-selection-move]").forEach((button) => button.onclick = openMovePicker);
+  root.querySelectorAll("[data-selection-open]").forEach((button) => button.onclick = () => {
     const item = state.items.find((entry) => state.selected.has(entry.id));
     if (item?.link) window.open(item.link, "_blank", "noopener");
-  };
-  root.querySelector("#export").onclick = () => isPopupSurface()
-    ? openFullPage("library.html?settings=backups")
-    : api("/v1/export").then(downloadBackup).catch(showError);
-  updateSelectAllControl();
+  });
 }
 
 function refreshSelectionUi({ refreshHeader = false } = {}) {
-  const items = sortedItems();
-  const selection = items.filter((item) => state.selected.has(item.id));
-  if (!selection.length) state.selectionMoreOpen = false;
-  const selecting = Boolean(selection.length);
-  const cards = root.querySelector(".cards");
-  cards?.classList.toggle("selection-mode", selecting);
-  root.querySelectorAll("[data-drag-bookmark]").forEach((card) => {
-    const selected = state.selected.has(card.dataset.dragBookmark);
-    card.classList.toggle("selected", selected);
-    card.classList.toggle("selection-mode", selecting);
-    const input = card.querySelector("[data-select]");
-    if (input) input.checked = selected;
-  });
-  const header = root.querySelector(".workspace-head");
-  if (header && (refreshHeader || header.classList.contains("workspace-selection-head") !== selecting)) {
-    header.outerHTML = localizeHtml(workspaceHeaderMarkup(items, selection));
-    bindWorkspaceHeader();
-    return;
+  const sections = collectionSections();
+  if (!state.selected.size) {
+    state.selectionMoreOpen = false;
+    state.selectionMoreSectionId = null;
+    state.exportMenuSectionId = null;
   }
-  updateSelectAllControl();
+  let refreshNeeded = false;
+  root.querySelectorAll(".workspace").forEach((workspace) => {
+    const section = sections.find((item) => item.key === workspace.dataset.sectionId);
+    if (!section) return;
+    const selection = state.selectionSectionId === section.key
+      ? selectionItems(section.key).filter((item) => state.selected.has(item.id))
+      : [];
+    const selecting = Boolean(selection.length);
+    const cards = workspace.querySelector(".cards");
+    cards?.classList.toggle("selection-mode", Boolean(state.selected.size));
+    workspace.querySelectorAll("[data-drag-bookmark]").forEach((card) => {
+      const selected = state.selected.has(card.dataset.dragBookmark);
+      card.classList.toggle("selected", selected);
+      card.classList.toggle("selection-mode", Boolean(state.selected.size));
+      const input = card.querySelector("[data-select]");
+      if (input) input.checked = selected;
+    });
+    const header = workspace.querySelector(".workspace-head");
+    if (header && (refreshHeader || header.classList.contains("workspace-selection-head") !== selecting)) {
+      header.outerHTML = localizeHtml(workspaceHeaderMarkup(selectionItems(section.key), selection, section.key, section.title, section));
+      refreshNeeded = true;
+    }
+  });
+  if (refreshNeeded) bindWorkspaceHeader();
+  else root.querySelectorAll(".workspace").forEach(updateSelectAllControl);
 }
 
 function bind() {
@@ -4140,6 +4552,7 @@ function bind() {
     if (button.dataset.emptyAction === "clear-search") {
       state.query = "";
       state.selected.clear();
+      state.selectionSectionId = null;
       updateLibraryRoute();
       return load().catch(showError);
     }
@@ -4157,6 +4570,7 @@ function bind() {
     state.tagItemMenu = null;
     state.tag = button.dataset.tag === state.tag ? "" : button.dataset.tag;
     state.selected.clear();
+    state.selectionSectionId = null;
     render();
   });
   bindWorkspaceHeader();
@@ -4177,6 +4591,8 @@ function bind() {
     event.stopPropagation();
     const nextOpen = !state.searchMenuOpen;
     state.searchMenuOpen = nextOpen;
+    if (nextOpen) state.searchActiveIndex = -1;
+    else state.searchFilterGroup = null;
     const search = root.querySelector("#search");
     if (nextOpen) search?.focus();
     else {
@@ -4206,11 +4622,37 @@ function bind() {
     }, 180);
   });
   search.addEventListener("keydown", (event) => {
+    if ((event.key === "ArrowUp" || event.key === "ArrowDown") && state.searchMenuOpen) {
+      const options = [...(searchMenuElement()?.querySelectorAll('[role="option"]') || [])];
+      if (!options.length) return;
+      event.preventDefault();
+      const delta = event.key === "ArrowDown" ? 1 : -1;
+      const current = state.searchActiveIndex < 0 ? (delta > 0 ? -1 : 0) : state.searchActiveIndex;
+      state.searchActiveIndex = (current + delta + options.length) % options.length;
+      renderSearchMenu();
+      return;
+    }
+    if (event.key === "Escape" && state.searchMenuOpen) {
+      event.preventDefault();
+      event.stopPropagation();
+      closeSearchMenu();
+      return;
+    }
     if (event.key !== "Enter") return;
+    if (state.searchMenuOpen && state.searchActiveIndex >= 0) {
+      const option = searchMenuElement()?.querySelectorAll('[role="option"]')[state.searchActiveIndex];
+      if (option) {
+        event.preventDefault();
+        option.click();
+        return;
+      }
+    }
     commitSearch(search.value, true, "push");
   });
   root.querySelectorAll("[data-select]").forEach((input) => input.onchange = () => {
+    state.selectionSectionId = input.closest(".workspace")?.dataset.sectionId || null;
     input.checked ? state.selected.add(input.dataset.select) : state.selected.delete(input.dataset.select);
+    if (!state.selected.size) state.selectionSectionId = null;
     refreshSelectionUi();
   });
   root.querySelectorAll("[data-favorite]").forEach((button) => button.onclick = async () => {
@@ -4611,11 +5053,11 @@ function bindDragDrop() {
       if (!item || !target || item.id === target.id || item.collectionId !== target.collectionId) return;
       event.preventDefault();
       event.dataTransfer.dropEffect = "move";
-      markDropTarget(element, beforeTarget(element, event, state.layout === "grid"));
+      markDropTarget(element, beforeTarget(element, event, element.closest(".cards")?.dataset.layout === "grid"));
     };
     element.ondrop = (event) => {
       event.preventDefault();
-      const before = beforeTarget(element, event, state.layout === "grid");
+      const before = beforeTarget(element, event, element.closest(".cards")?.dataset.layout === "grid");
       reorderBookmark(element.dataset.dragBookmark, before).catch(showError);
     };
     element.ondragend = () => { state.dragBookmark = null; clearDropTargets(); };
@@ -4660,6 +5102,150 @@ function editHighlights(item) {
   const note = window.prompt("备注", current.note || "");
   if (note == null) return item.highlights;
   return item.highlights.map((highlight, currentIndex) => currentIndex === index ? { ...highlight, color: color.toLocaleLowerCase(), note: note.trim() } : highlight);
+}
+
+function scopedBackup(backup, collectionId, selectedIds = null) {
+  if (!Array.isArray(backup?.bookmarks)) return backup;
+  const selected = selectedIds ? new Set(selectedIds) : null;
+  const bookmarks = backup.bookmarks.filter((item) => selected
+    ? selected.has(item.id)
+    : !collectionId || collectionId === "all" || item.collectionId === collectionId);
+  if ((!collectionId || collectionId === "all") && !selected) return backup;
+  const collectionIds = new Set(bookmarks.map((item) => item.collectionId).filter(Boolean));
+  if (collectionId && collectionId !== "all") collectionIds.add(collectionId);
+  return {
+    ...backup,
+    bookmarks,
+    collections: Array.isArray(backup.collections) ? backup.collections.filter((item) => collectionIds.has(item.id)) : backup.collections,
+  };
+}
+
+function exportTimestamp(value) {
+  const time = Date.parse(String(value || ""));
+  return Number.isFinite(time) ? Math.floor(time / 1000) : 0;
+}
+
+function exportCsvCell(value) {
+  const text = String(value ?? "");
+  return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function exportCsv(backup) {
+  const rows = [["id", "title", "note", "excerpt", "url", "tags", "created", "cover", "highlights", "favorite"]];
+  for (const item of backup.bookmarks || []) rows.push([
+    item.id || "",
+    item.title || "",
+    item.note || "",
+    item.description || "",
+    item.link || "",
+    (item.tags || []).join(","),
+    item.createdAt || "",
+    item.cover || item.coverRef?.url || "",
+    Array.isArray(item.highlights) && item.highlights.length ? JSON.stringify(item.highlights) : "",
+    item.favorite ? "true" : "false",
+  ]);
+  return `${rows.map((row) => row.map(exportCsvCell).join(",")).join("\r\n")}\r\n`;
+}
+
+function exportTxt(backup) {
+  const links = (backup.bookmarks || []).map((item) => String(item.link || "")).filter(Boolean);
+  return links.length ? `${links.join("\n")}\n` : "";
+}
+
+function exportHtml(backup) {
+  const items = backup.bookmarks || [];
+  const links = items.map((item) => {
+    const created = exportTimestamp(item.createdAt);
+    const modified = exportTimestamp(item.updatedAt || item.createdAt);
+    const tags = (item.tags || []).join(",");
+    const cover = item.cover || item.coverRef?.url || "";
+    const attributes = [
+      `HREF="${escapeHtml(item.link || "")}"`,
+      `ADD_DATE="${created}"`,
+      `LAST_MODIFIED="${modified}"`,
+      `TAGS="${escapeHtml(tags)}"`,
+      `DATA-COVER="${escapeHtml(cover)}"`,
+      `DATA-IMPORTANT="${item.favorite ? "true" : "false"}"`,
+    ].join(" ");
+    return `<DT><A ${attributes}>${escapeHtml(item.title || item.link || "")}</A>${item.note ? `\n<DD>${escapeHtml(item.note)}` : ""}`;
+  }).join("\n");
+  return `<!DOCTYPE NETSCAPE-Bookmark-file-1>\n<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">\n<TITLE>Raindrop.io Bookmarks</TITLE>\n<H1>Raindrop.io Bookmarks</H1>\n<DL><p>\n<DT><H3>Export</H3>\n<DL><p>\n${links}\n</DL><p>\n</DL><p>\n`;
+}
+
+const EXPORT_CRC32_TABLE = Array.from({ length: 256 }, (_, index) => {
+  let value = index;
+  for (let bit = 0; bit < 8; bit += 1) value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+  return value >>> 0;
+});
+
+function exportZipArchive(entries) {
+  const encoder = new TextEncoder();
+  const local = [];
+  const central = [];
+  let offset = 0;
+  const concat = (chunks) => {
+    const output = new Uint8Array(chunks.reduce((size, chunk) => size + chunk.byteLength, 0));
+    let index = 0;
+    for (const chunk of chunks) { output.set(chunk, index); index += chunk.byteLength; }
+    return output;
+  };
+  const crc32 = (bytes) => {
+    let value = 0xffffffff;
+    for (const byte of bytes) value = EXPORT_CRC32_TABLE[(value ^ byte) & 0xff] ^ (value >>> 8);
+    return (value ^ 0xffffffff) >>> 0;
+  };
+  for (const entry of entries) {
+    const name = encoder.encode(entry.name);
+    const bytes = entry.bytes instanceof Uint8Array ? entry.bytes : new Uint8Array(entry.bytes);
+    const crc = crc32(bytes);
+    const localHeader = new ArrayBuffer(30);
+    const localView = new DataView(localHeader);
+    localView.setUint32(0, 0x04034b50, true); localView.setUint16(4, 20, true); localView.setUint16(6, 0x800, true);
+    localView.setUint32(14, crc, true); localView.setUint32(18, bytes.byteLength, true); localView.setUint32(22, bytes.byteLength, true);
+    localView.setUint16(26, name.byteLength, true);
+    local.push(new Uint8Array(localHeader), name, bytes);
+    const centralHeader = new ArrayBuffer(46);
+    const centralView = new DataView(centralHeader);
+    centralView.setUint32(0, 0x02014b50, true); centralView.setUint16(4, 20, true); centralView.setUint16(6, 20, true); centralView.setUint16(8, 0x800, true);
+    centralView.setUint32(16, crc, true); centralView.setUint32(20, bytes.byteLength, true); centralView.setUint32(24, bytes.byteLength, true);
+    centralView.setUint16(28, name.byteLength, true); centralView.setUint32(42, offset, true);
+    central.push(new Uint8Array(centralHeader), name);
+    offset += 30 + name.byteLength + bytes.byteLength;
+  }
+  const localBytes = concat(local);
+  const centralBytes = concat(central);
+  const end = new ArrayBuffer(22);
+  const endView = new DataView(end);
+  endView.setUint32(0, 0x06054b50, true); endView.setUint16(8, entries.length, true); endView.setUint16(10, entries.length, true);
+  endView.setUint32(12, centralBytes.byteLength, true); endView.setUint32(16, localBytes.byteLength, true);
+  return concat([localBytes, centralBytes, new Uint8Array(end)]);
+}
+
+async function exportZip(backup) {
+  const encoder = new TextEncoder();
+  const media = await mediaArchiveEntries(backup);
+  return exportZipArchive([
+    { name: "export.csv", bytes: encoder.encode(exportCsv(backup)) },
+    { name: "export.html", bytes: encoder.encode(exportHtml(backup)) },
+    { name: "export.txt", bytes: encoder.encode(exportTxt(backup)) },
+    ...media,
+  ]);
+}
+
+async function downloadExport(backup, format) {
+  const content = format === "csv" ? exportCsv(backup) : format === "html" ? exportHtml(backup) : format === "txt" ? exportTxt(backup) : await exportZip(backup);
+  const type = format === "csv" ? "text/csv;charset=utf-8" : format === "html" ? "text/html;charset=utf-8" : format === "txt" ? "text/plain;charset=utf-8" : "application/zip";
+  const url = URL.createObjectURL(new Blob([content], { type }));
+  const link = Object.assign(document.createElement("a"), { href: url, download: `export.${format}` });
+  document.body.append(link);
+  link.click();
+  window.setTimeout(() => { URL.revokeObjectURL(url); link.remove(); }, 1000);
+}
+
+async function exportBookmarks(format, sectionId) {
+  const backup = await api("/v1/export");
+  const selectedIds = state.selectionSectionId === sectionId && state.selected.size ? [...state.selected] : null;
+  await downloadExport(scopedBackup(backup, sectionId, selectedIds), format);
 }
 
 function downloadBackup(backup) {
@@ -4802,6 +5388,8 @@ async function batch(kind, collectionId) {
   const items = state.items.filter((item) => state.selected.has(item.id)).map(({ id, revision }) => ({ id, revision }));
   await mutate("/v1/bookmarks/batch", { method: "POST", body: JSON.stringify({ items, action }) });
   state.selected.clear();
+  state.selectionSectionId = null;
+  state.exportMenuSectionId = null;
   load().catch(showError);
 }
 
@@ -5028,6 +5616,18 @@ document.addEventListener("keydown", (event) => {
     setAccountMenuOpen(false);
     return;
   }
+  if (event.key === "Escape" && state.exportMenuSectionId) {
+    const selecting = Boolean(state.selectionSectionId && state.selected.size);
+    state.exportMenuSectionId = null;
+    if (selecting) refreshSelectionUi({ refreshHeader: true });
+    else render();
+    return;
+  }
+  if (event.key === "Escape" && state.workspaceCollectionMenuId) {
+    state.workspaceCollectionMenuId = null;
+    render();
+    return;
+  }
   if (event.key === "Escape" && state.cardMenuId) {
     closeCardMenu();
     return;
@@ -5067,6 +5667,7 @@ document.addEventListener("keydown", (event) => {
     search.value = "";
     state.query = "";
     state.selected.clear();
+    state.selectionSectionId = null;
     updateLibraryRoute();
     load().catch(showError);
   }
@@ -5093,6 +5694,20 @@ document.addEventListener("click", (event) => {
   if (state.themeMenuOpen && !insideTheme) closeThemeMenu();
   const insideAccount = event.target.closest("[data-account-trigger], [data-account-menu]");
   if (state.accountMenuOpen && !insideAccount) setAccountMenuOpen(false);
+  const insideExportMenu = event.target.closest("[data-export-menu-trigger], [data-export-menu]");
+  if (state.exportMenuSectionId && !insideExportMenu) {
+    const selecting = Boolean(state.selectionSectionId && state.selected.size);
+    state.exportMenuSectionId = null;
+    if (selecting) refreshSelectionUi({ refreshHeader: true });
+    else render();
+    return;
+  }
+  const insideWorkspaceCollectionMenu = event.target.closest("[data-workspace-collection-menu], [data-workspace-collection-menu-panel]");
+  if (state.workspaceCollectionMenuId && !insideWorkspaceCollectionMenu) {
+    state.workspaceCollectionMenuId = null;
+    render();
+    return;
+  }
   const insideSelectionMore = event.target.closest("[data-selection-more], [data-selection-more-menu]");
   if (state.selectionMoreOpen && !insideSelectionMore) {
     state.selectionMoreOpen = false;

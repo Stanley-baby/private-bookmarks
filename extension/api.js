@@ -79,6 +79,19 @@ async function localApi(path, init = {}) {
   const unavailable = (message = "此功能需要连接私有实例") => { throw Object.assign(new Error(message), { status: 501, code: "not_available" }); };
   const legacyBookmark = (item) => ({ type: "link", language: "", title: "", description: "", note: "", tags: [], highlights: [], media: [], reminder: "", favorite: false, health: { status: "unknown", checkedAt: null, finalUrl: "" }, ...item, type: item.type || "link", language: item.language || "", tags: Array.isArray(item.tags) ? item.tags : [], highlights: Array.isArray(item.highlights) ? item.highlights : [], media: Array.isArray(item.media) ? item.media : [], reminder: item.reminder || "", favorite: Boolean(item.favorite), health: item.health || { status: "unknown", checkedAt: null, finalUrl: "" } });
   const records = async () => (await db.listBookmarks({ trash: !live })).map(legacyBookmark);
+  const collectionScope = async (id) => {
+    if (!id || (await db.getPreferences()).nestedViewLegacy) return id ? new Set([id]) : null;
+    const collections = await db.listCollections();
+    const ids = new Set([id]);
+    for (let changed = true; changed;) {
+      changed = false;
+      for (const item of collections) if (item.parentId && ids.has(item.parentId) && !ids.has(item.id)) {
+        ids.add(item.id);
+        changed = true;
+      }
+    }
+    return ids;
+  };
   if (method === "GET" && url.pathname === "/v1/health") return { ok: true };
   if (method === "GET" && url.pathname === "/v1/bootstrap") {
     await db.ensureDefaults();
@@ -90,7 +103,8 @@ async function localApi(path, init = {}) {
     let items = await records();
     const collection = url.searchParams.get("collection");
     const search = (url.searchParams.get("search") || "").trim().toLocaleLowerCase();
-    if (collection) items = items.filter((item) => item.collectionId === collection);
+    const scope = await collectionScope(collection);
+    if (scope) items = items.filter((item) => scope.has(item.collectionId));
     const view = url.searchParams.get("view");
     if (view === "favorites") items = items.filter((item) => item.favorite);
     if (view === "broken") items = items.filter((item) => item.health?.status === "broken");
@@ -102,7 +116,8 @@ async function localApi(path, init = {}) {
     const counts = new Map();
     let tagItems = await records();
     const collection = url.searchParams.get("collection");
-    if (collection) tagItems = tagItems.filter((item) => item.collectionId === collection);
+    const scope = await collectionScope(collection);
+    if (scope) tagItems = tagItems.filter((item) => scope.has(item.collectionId));
     for (const item of tagItems) for (const tag of item.tags || []) counts.set(tag, (counts.get(tag) || 0) + 1);
     return [...counts].map(([name, count]) => ({ name, count })).sort((a, b) => a.name.localeCompare(b.name));
   }

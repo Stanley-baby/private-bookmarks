@@ -1,0 +1,49 @@
+- main [ref=e133]:
+  - complementary [ref=e134]:
+    - generic [ref=e135]:
+      - button "私有书签" [ref=e137] [cursor=pointer]
+      - button "新建收藏夹" [ref=e143] [cursor=pointer]
+    - navigation [ref=e238]:
+      - generic [ref=e239]:
+        - button "所有书签" [ref=e240] [cursor=pointer]
+        - button "未分类" [ref=e245] [cursor=pointer]
+      - generic [ref=e253]:
+        - generic [ref=e254]:
+          - button "收藏" [expanded] [ref=e255] [cursor=pointer]
+          - button "收藏选项" [ref=e256] [cursor=pointer]
+        - textbox "新收藏" [active] [ref=e263]
+        - generic [ref=e265]:
+          - button "A" [ref=e266] [cursor=pointer]
+          - generic:
+            - button "A选项"
+      - button "快速过滤…" [expanded] [ref=e276] [cursor=pointer]
+      - generic [ref=e278]:
+        - button "标签 (0)" [expanded] [ref=e279] [cursor=pointer]
+        - button "标签 更多" [ref=e280] [cursor=pointer]
+  - separator "调整侧边栏宽度" [ref=e186]
+  - generic [ref=e187]:
+    - generic [ref=e188]:
+      - generic [ref=e190]:
+        - generic [ref=e195]: 搜索
+        - textbox "搜索" [ref=e196]
+        - button "搜索设置 / 筛选" [ref=e198] [cursor=pointer]
+      - generic [ref=e203]:
+        - button "连接私有实例后可用" [disabled] [ref=e204] [cursor=pointer]
+        - button "主题：跟随系统" [ref=e208] [cursor=pointer]
+        - button "导入书签" [ref=e213] [cursor=pointer]
+        - button "添加" [ref=e218] [cursor=pointer]
+    - generic [ref=e223]:
+      - generic [ref=e224]:
+        - generic [ref=e225]: 所有书签
+        - link "在新标签页中打开" [ref=e226] [cursor=pointer]:
+          - /url: library.html
+        - generic [ref=e229]:
+          - button "排序" [ref=e230] [cursor=pointer]:
+            - generic: 手动
+          - group "视图" [ref=e231]:
+            - button "视图" [ref=e232] [cursor=pointer]:
+              - generic: 列表
+      - list [ref=e234]:
+        - status [ref=e235]:
+          - paragraph [ref=e236]: 此视图中还没有书签。
+          - button "添加书签" [ref=e237] [cursor=pointer]
