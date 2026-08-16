@@ -22,6 +22,20 @@ test("collection management menus avoid sibling workspace headers", () => {
   assert.match(library, /clearBelowTop = head\.bottom \+ 4/);
 });
 
+test("collection management menu toggles locally without rebuilding the library", () => {
+  assert.match(library, /function renderWorkspaceCollectionMenu\(/);
+  assert.match(library, /function bindWorkspaceCollectionMenu\(/);
+  const binding = library.match(/function bindWorkspaceCollectionMenu\(\) \{([\s\S]*?)\n\}\n\nfunction renderWorkspaceCollectionMenu/)?.[1] || "";
+  assert.match(binding, /renderWorkspaceCollectionMenu\(\)/);
+  assert.doesNotMatch(binding, /\brender\(\)/);
+  const escapeBlock = library.match(/if \(event\.key === "Escape" && state\.workspaceCollectionMenuId\) \{([\s\S]*?)\n  \}/)?.[1] || "";
+  assert.match(escapeBlock, /renderWorkspaceCollectionMenu\(\)/);
+  assert.doesNotMatch(escapeBlock, /\brender\(\)/);
+  const outsideBlock = library.match(/const insideWorkspaceCollectionMenu[\s\S]*?if \(state\.workspaceCollectionMenuId && !insideWorkspaceCollectionMenu\) \{([\s\S]*?)\n  \}/)?.[1] || "";
+  assert.match(outsideBlock, /renderWorkspaceCollectionMenu\(\)/);
+  assert.doesNotMatch(outsideBlock, /\brender\(\)/);
+});
+
 test("fixed card-copy rows apply only to list and simple layouts", () => {
   assert.match(css, /\.cards:not\(\.layout-grid\):not\(\.layout-masonry\) \.bookmark-card\.view-fields-custom \.card-copy \{[^}]*grid-template-rows: var\(--card-copy-rows\)/);
   assert.doesNotMatch(css, /^\.bookmark-card\.view-fields-custom \.card-copy \{/m);

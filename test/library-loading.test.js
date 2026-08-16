@@ -24,3 +24,16 @@ test("link checks are unavailable offline and handle request failures", () => {
   assert.doesNotMatch(handler, /onclick = async/);
   assert.match(handler, /\.then\(\(\) => load\(\)\)\.catch\(showError\)/);
 });
+
+test("extension context invalidation is ignored before logging or UI updates", () => {
+  const showError = library.slice(library.indexOf("function showError"), library.indexOf('\n\nwindow.addEventListener("unhandledrejection"'));
+
+  assert.match(showError, /function showError\(error\) \{\n  if \(\/Extension context invalidated\/i\.test\(String\(error\?\.message \|\| error\)\)\) return;\n  console\.error\(error\);/);
+});
+
+test("library rerenders preserve sidebar scroll position", () => {
+  const render = library.slice(library.indexOf("function render()"), library.indexOf("\nlet cardPopoverPositionBound"));
+
+  assert.match(render, /const navScrollTop = root\.querySelector\("\.nav"\)\?\.scrollTop;/);
+  assert.match(render, /const nav = root\.querySelector\("\.nav"\);\n  if \(nav && navScrollTop != null\) nav\.scrollTop = navScrollTop;/);
+});

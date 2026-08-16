@@ -36,6 +36,22 @@ test("compact workspace controls share one 36 by 28 icon box", () => {
   assert.match(css, /\.workspace-sort-icon \.tree-svg,\s*\.view-trigger \.tree-svg,\s*\.workspace-tools > \.export \.tree-svg \{[^}]*width: 20px; height: 20px/);
 });
 
+test("compact export wrapper does not offset the icon button", () => {
+  const compactRules = css.match(/@container \(width < 600px\) \{([\s\S]*?)\n\}/)?.[1] || "";
+
+  assert.match(compactRules, /\.workspace-export-menu-wrap \{[^}]*padding: 0;/);
+});
+
+test("sidebar account and create controls share the reference button geometry", () => {
+  const createButton = declarations(".sidebar-head > .icon-button");
+
+  assert.match(createButton, /display: inline-grid/);
+  assert.match(createButton, /width: 36px; min-width: 36px/);
+  assert.match(createButton, /height: 28px; min-height: 28px/);
+  assert.match(createButton, /padding: 0 8px/);
+  assert.match(css, /\.sidebar-head > \.icon-button \.tree-svg \{ width: 20px; height: 20px; \}/);
+});
+
 test("selection toolbar keeps actions intact before switching to icon mode", () => {
   const actions = declarations(".workspace-selection-head .selection-action");
   const compactRules = css.match(/@container \(width < 600px\) \{([\s\S]*?)\n\}/)?.[1] || "";
@@ -72,9 +88,23 @@ test("selection toolbar keeps reference icons at 20px", () => {
   assert.match(library, /download: '<path[^']*a1 1 0 0 0-\.576/);
 });
 
-test("popup surface follows the reference 800/700px extension sizing", () => {
-  assert.match(css, /body\.surface-popup \{[\s\S]*?width: max\(800px, 100vw\);[\s\S]*?height: max\(600px, 100vh\);[\s\S]*?min-width: 800px/);
-  assert.match(css, /body\.surface-popup \.library \{[\s\S]*?--sidebar-width: 300px;[\s\S]*?height: max\(600px, 100vh\);[\s\S]*?grid-template-columns: 300px minmax\(0, 1fr\)/);
+test("popup surface fills the viewport while preserving the horizontal shell", () => {
+  const popup = declarations("body.surface-popup");
+  const librarySurface = declarations("body.surface-popup .library");
+
+  assert.match(css, /html\.surface-popup \{ overflow-y: hidden; \}/);
+  assert.match(popup, /width: max\(800px, 100vw\)/);
+  assert.match(popup, /height: 100dvh/);
+  assert.match(popup, /min-width: 800px/);
+  assert.match(popup, /min-height: 0/);
+  assert.match(popup, /overflow-x: auto/);
+  assert.match(popup, /overflow-y: hidden/);
+  assert.match(librarySurface, /--sidebar-width: 300px/);
+  assert.match(librarySurface, /height: 100dvh/);
+  assert.match(librarySurface, /min-width: 800px/);
+  assert.match(librarySurface, /min-height: 0/);
+  assert.match(librarySurface, /grid-template-columns: 300px minmax\(0, 1fr\)/);
+  assert.match(css, /body\.surface-popup \.content \{ min-width: 0; overflow: auto; \}/);
   assert.match(css, /@media \(max-device-height: 800px\), \(max-device-width: 800px\) \{[\s\S]*?body\.surface-popup \{ width: max\(700px, 100vw\); min-width: 700px; \}/);
 });
 
@@ -191,21 +221,27 @@ test("grid cards keep bounded columns, stable covers, readable clamped copy, and
   const gridTitle = declarations(".layout-grid .card-title");
   const gridActions = declarations(".layout-grid .card-actions");
 
-  assert.match(grid, /grid-template-columns: repeat\(auto-fit, minmax\(min\(100%, var\(--grid-item-width\)\), 1fr\)\)/);
+  assert.match(grid, /grid-template-columns: repeat\(auto-fill, minmax\(min\(calc\(50% - 32px\), var\(--grid-item-width\)\), 1fr\)\)/);
   assert.match(grid, /gap: 16px/);
   assert.match(gridCard, /min-width: 0/);
-  assert.match(gridCard, /min-height: 288px/);
-  assert.match(gridCard, /border: 1px solid var\(--line\)/);
+  assert.match(gridCard, /display: flex/);
+  assert.match(gridCard, /flex-direction: column/);
+  assert.match(gridCard, /min-height: 0/);
+  assert.match(gridCard, /gap: 0/);
+  assert.match(gridCard, /border: 0/);
+  assert.match(gridCard, /border-radius: 4px/);
+  assert.doesNotMatch(gridCard, /min-height: 288px/);
   assert.match(gridCover, /aspect-ratio: 16 \/ 9/);
   assert.match(css, /\.layout-grid \.card-cover img \{[^}]*object-fit: cover/);
   assert.match(css, /\.layout-grid \.card-cover img\[src\$="icons\/bookmark\.svg"\] \{[^}]*object-fit: contain/);
   assert.match(gridTitle, /font-size: 15px/);
   assert.match(gridTitle, /line-height: 21px/);
-  assert.match(gridTitle, /-webkit-line-clamp: 2/);
+  assert.match(gridTitle, /-webkit-line-clamp: 3/);
+  assert.doesNotMatch(gridTitle, /min-height: 42px/);
   assert.match(css, /\.layout-grid \.card-note, \.layout-grid \.card-description \{[^}]*-webkit-line-clamp: 2/);
   assert.match(css, /\.layout-grid \.card-tags \{[^}]*font-size: 12px/);
   assert.match(css, /\.layout-grid \.card-source \{[^}]*font-size: 12px/);
-  assert.match(css, /\.layout-grid \.bookmark-card:hover \{[^}]*transform: translateY\(-1px\)/);
+  assert.doesNotMatch(css, /\.layout-grid \.bookmark-card:hover \{[^}]*transform: translateY\(-1px\)/);
   assert.match(css, /\.layout-grid \.card-permalink:focus-visible \{[^}]*outline: 2px solid var\(--accent\)/);
   assert.match(gridActions, /top: 8px/);
   assert.match(css, /@media \(hover: none\) \{ \.bookmark-card \.card-actions \{ display: inline-grid; \} \}/);
@@ -213,6 +249,41 @@ test("grid cards keep bounded columns, stable covers, readable clamped copy, and
   assert.match(css, /\.card-cover \{[^}]*width: 56px; height: 48px/);
   assert.match(css, /body\.surface-sidepanel[\s\S]*?min-width: 0/);
   assert.match(css, /@media \(max-width: 519px\) \{[\s\S]*?body\.surface-sidepanel \.cards\.layout-grid \{ grid-template-columns: minmax\(0, 1fr\); \}/);
+});
+
+test("grid card metadata keeps two rows, leaf collection text, and full labels", () => {
+  const card = library.slice(library.indexOf("function card("), library.indexOf("function bookmarkActionMarkup"));
+
+  assert.match(card, /const collectionLabel = gridView \|\| masonryView \? collectionName\(item\.collectionId\) : collectionPathLabel/);
+  assert.match(card, /const collectionAttributes = gridView \? ` title="\$\{escapeHtml\(collectionPathLabel\)\}" aria-label="\$\{escapeHtml\(collectionPathLabel\)\}"`/);
+  assert.match(card, /data-card-source-row="primary"/);
+  assert.match(card, /data-card-source-row="secondary"/);
+  assert.match(card, /const gridBadges =/);
+  assert.match(card, /compactDateTimeLabel\(item\.reminder\)/);
+  assert.match(card, /class="card-source-separator"/);
+  assert.match(card, /const metadataMarkup = `<div class="card-source">\$\{gridView \? gridSource : source\}<\/div>`/);
+  assert.match(card, /const cardTitleAttributes = gridView \? ` title="\$\{escapeHtml\(bookmarkLabel\)\}" aria-label="\$\{escapeHtml\(bookmarkLabel\)\}"`/);
+});
+
+test("grid card metadata clamps text without shrinking its icons", () => {
+  const gridSource = declarations(".layout-grid .card-source");
+  const row = declarations(".layout-grid .card-source-row");
+  const path = declarations(".layout-grid .card-source-row .card-path");
+  const pathIcon = declarations(".layout-grid .card-source-row .card-path-icon");
+  const microIcon = declarations(".layout-grid .card-source-row .search-micro-icon");
+
+  assert.match(gridSource, /display: grid/);
+  assert.match(gridSource, /height: auto; min-height: 36px/);
+  assert.match(gridSource, /grid-template-rows: repeat\(2, minmax\(18px, auto\)\)/);
+  assert.match(row, /min-width: 0/);
+  assert.match(row, /overflow: hidden/);
+  assert.match(path, /min-width: 0/);
+  assert.match(path, /overflow: hidden/);
+  assert.match(css, /\.card-path-label \{[^}]*text-overflow: ellipsis/);
+  assert.match(pathIcon, /flex: 0 0 20px/);
+  assert.match(microIcon, /flex: 0 0 10px/);
+  assert.match(css, /\.layout-grid \.card-source-badges \{[^}]*display: flex/);
+  assert.match(css, /\.layout-grid \.card-source-row\[data-card-source-row="secondary"\] > \.card-reminder \{[^}]*max-width: 106px/);
 });
 
 test("empty states share centered geometry across layouts and surfaces", () => {
@@ -236,7 +307,7 @@ test("empty states share centered geometry across layouts and surfaces", () => {
   assert.match(empty, /padding: 32px 16px/);
   assert.doesNotMatch(css, /\.cards\.layout-masonry > \.empty/);
   assert.match(css, /\.library \{[^}]*height: 100vh/);
-  assert.match(css, /body\.surface-popup \{[\s\S]*?min-height: 600px/);
+  assert.match(css, /body\.surface-popup \{[\s\S]*?min-height: 0/);
   assert.doesNotMatch(css, /body\.surface-popup \.bookmark-count-footer/);
   assert.match(css, /body\.surface-sidepanel \{[\s\S]*?min-height: 100vh/);
 });

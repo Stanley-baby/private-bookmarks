@@ -94,6 +94,8 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .account-menu button:focus-visible { color: var(--page); background: var(--accent); outline: 0; }
 .account-menu .menu-separator { display: block; width: 130px; height: 1px; min-height: 1px; margin: 5px 0; background: transparent; box-shadow: inset 0 .5px 0 var(--line); }
 .icon-button { width: 32px; min-width: 32px; height: 32px; min-height: 32px; margin-left: auto; padding: 0; color: var(--muted); font-size: 19px; }
+.sidebar-head > .icon-button { display: inline-grid; width: 36px; min-width: 36px; height: 28px; min-height: 28px; align-items: center; justify-content: center; padding: 0 8px; line-height: 28px; }
+.sidebar-head > .icon-button .tree-svg { width: 20px; height: 20px; }
 .nav { flex: 1; padding: 0 0 20px; overflow: auto; scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text), transparent 82%) transparent; }
 .sidebar-section { display: grid; gap: 0; padding: 0; }
 .sidebar-section + .sidebar-section { border: 0; }
@@ -463,8 +465,10 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .card-source .card-highlights { color: #975da8; }
 .card-path { display: inline-flex; position: relative; z-index: 1; align-items: center; justify-content: center; font-weight: 500; color: inherit; }
 .card-path:hover { text-decoration: underline; }
+.card-path-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card-path-icon { display: inline-grid; width: 20px; height: 20px; place-items: center; color: inherit; }
 .card-path-icon .tree-svg { width: 20px; height: 20px; }
+.card-reminder-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card-important { position: relative; height: 21.2891px; overflow: clip; color: #f44336; }
 .card-important .tree-svg { width: 10px; height: 10px; margin-top: 4px; }
 .health.broken { margin-left: 4px; color: var(--danger); }
@@ -492,24 +496,37 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .collection-trash-card > span:nth-child(2) { display: grid; gap: 2px; }
 .empty { padding: 32px 16px; color: var(--muted); text-align: center; }
 
-.cards.layout-grid { --grid-item-width: 254px; grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--grid-item-width)), 1fr)); gap: 16px; padding: 16px 16px 0; }
-.layout-grid .bookmark-card { display: grid; min-width: 0; min-height: 288px; padding: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: var(--page); grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
-.layout-grid .bookmark-card:hover { box-shadow: 0 8px 24px color-mix(in srgb, var(--text), transparent 88%); transform: translateY(-1px); }
-.layout-grid .bookmark-card.selected { border-color: var(--accent); background: color-mix(in srgb, var(--page), var(--accent) 8%); }
+.cards.layout-grid { --grid-item-width: 254px; grid-template-columns: repeat(auto-fill, minmax(min(calc(50% - 32px), var(--grid-item-width)), 1fr)); gap: 16px; padding: 16px 16px 0; }
+.layout-grid .bookmark-card { display: flex; flex-direction: column; min-width: 0; min-height: 0; width: 100%; height: auto; padding: 0; overflow: clip; gap: 0; border: 0; border-radius: 4px; background: var(--page); }
+.layout-grid .bookmark-card.selected { background: color-mix(in srgb, var(--page), var(--accent) 8%); }
 .layout-grid .bookmark-card.selected:hover { background: color-mix(in srgb, var(--page), var(--accent) 8%); }
 .layout-grid .card-select { top: 2px; left: 2px; width: 20px; height: 20px; padding: 0; }
 .layout-grid .card-main { grid-template-columns: 1fr; gap: 0; }
 .layout-grid .card-cover { width: 100%; height: auto; min-height: 0; aspect-ratio: 16 / 9; border: 0; border-radius: 0; }
 .layout-grid .card-cover img { width: 100%; height: 100%; object-fit: cover; }
 .layout-grid .card-cover img[src$="icons/bookmark.svg"] { object-fit: contain; padding: 24%; }
-.layout-grid .card-copy { grid-template-rows: auto minmax(0, 1fr) auto; min-height: 0; gap: 4px; padding: 12px; }
-.layout-grid .card-title { min-height: 42px; font-size: 15px; line-height: 21px; -webkit-line-clamp: 2; }
+.layout-grid .card-copy { grid-template-rows: auto minmax(0, 1fr) auto; min-height: 0; gap: 2px; padding: 12px; }
+.layout-grid .card-title { min-height: 0; font-size: 15px; line-height: 21px; -webkit-line-clamp: 3; }
 .layout-grid .card-details { display: grid; height: auto; min-height: 0; gap: 2px; align-content: start; }
 .layout-grid .card-note, .layout-grid .card-description { min-height: 0; white-space: normal; -webkit-line-clamp: 2; }
 .layout-grid .card-tags { max-height: 18px; margin-top: 1px; gap: 6px; font-size: 12px; line-height: 18px; }
 .layout-grid .card-tag { flex: 0 0 auto; }
-.layout-grid .card-source { height: 18px; min-height: 18px; flex-wrap: nowrap; font-size: 12px; line-height: 18px; white-space: nowrap; }
-.layout-grid .card-source section { flex: 0 1 auto; }
+.layout-grid .card-source { display: grid; height: auto; min-height: 36px; grid-template-rows: repeat(2, minmax(18px, auto)); gap: 2px; overflow: visible; font-size: 12px; line-height: 18px; white-space: normal; }
+.layout-grid .card-source-row { display: flex; width: 100%; min-width: 0; min-height: 18px; align-items: center; gap: 0; overflow: hidden; }
+.layout-grid .card-source-row > section { display: flex; min-width: 0; min-height: 18px; align-items: center; overflow: hidden; padding-right: 0; text-overflow: ellipsis; white-space: nowrap; }
+.layout-grid .card-source-row > section::after { display: none; }
+.layout-grid .card-source-row[data-card-source-row="primary"] > .card-source-collection { flex: 0 1 48%; max-width: 48%; }
+.layout-grid .card-source-row[data-card-source-row="primary"] > .card-source-separator { flex: 0 0 auto; padding: 0 5px; }
+.layout-grid .card-source-row[data-card-source-row="primary"] > .card-host { flex: 1 1 auto; }
+.layout-grid .card-source-row[data-card-source-row="secondary"] { gap: 6px; }
+.layout-grid .card-source-row[data-card-source-row="secondary"] > .card-date { flex: 0 0 auto; }
+.layout-grid .card-source-badges { display: flex; min-width: 0; flex: 0 1 auto; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap; }
+.layout-grid .card-source-badges > section { flex: 0 0 auto; min-width: 0; padding-right: 0; overflow: visible; }
+.layout-grid .card-source-badges .card-highlights { max-width: 82px; overflow: hidden; text-overflow: ellipsis; }
+.layout-grid .card-source-row[data-card-source-row="secondary"] > .card-reminder { display: flex; flex: 0 1 106px; min-width: 0; max-width: 106px; margin-left: auto; gap: 4px; padding-right: 0; overflow: hidden; }
+.layout-grid .card-source-row .card-path { min-width: 0; max-width: 100%; overflow: hidden; justify-content: flex-start; }
+.layout-grid .card-source-row .card-path-icon { flex: 0 0 20px; }
+.layout-grid .card-source-row .search-micro-icon { flex: 0 0 10px; }
 .layout-grid .card-actions { top: 8px; right: 8px; padding: 3px; border-radius: 7px; }
 .layout-grid .card-permalink:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 7px; }
 .layout-grid .collection-trash-card { display: grid; min-height: 76px; padding: 9px; }
@@ -964,7 +981,7 @@ dialog menu { display: flex; justify-content: end; gap: 6px; margin: 0; padding:
   .workspace-tools > .export { width: 36px; min-width: 36px; height: 28px; min-height: 28px; padding: 0 8px; }
   .workspace-export-menu-wrap,
   .workspace-export-menu-wrap > .export { width: 36px; min-width: 36px; height: 28px; min-height: 28px; padding: 0 8px; }
-  .workspace-export-menu-wrap { flex: 0 0 36px; }
+  .workspace-export-menu-wrap { flex: 0 0 36px; padding: 0; }
   .workspace-sort,
   .view-trigger { grid-template-columns: 20px; }
   .workspace-sort-icon .tree-svg,
@@ -1038,18 +1055,21 @@ dialog menu { display: flex; justify-content: end; gap: 6px; margin: 0; padding:
 /* Action popups keep the same management shell as the full library. Chrome may
    cap the outer popup, so the shell scrolls horizontally instead of dropping
    the navigation column. */
+html.surface-popup { overflow-y: hidden; }
 body.surface-popup {
   width: max(800px, 100vw);
-  height: max(600px, 100vh);
+  height: 100dvh;
   min-width: 800px;
-  min-height: 600px;
-  overflow: auto;
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 body.surface-popup .library {
   --sidebar-width: 300px;
-  height: max(600px, 100vh);
+  height: 100dvh;
   min-width: 800px;
+  min-height: 0;
   padding: 0;
   grid-template-columns: 300px minmax(0, 1fr);
 }
