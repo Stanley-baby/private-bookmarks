@@ -22,6 +22,7 @@ const defaultViewDialog = document.querySelector("#default-view-dialog");
 const SEARCH_HISTORY_KEY = "private-bookmarks.search-history";
 const IMPORT_PROGRESS_KEY = "private-bookmarks.import-progress";
 const BACKUP_HISTORY_KEY = "private-bookmarks.backup-history";
+const SIDEBAR_WIDTH_KEY = "private-bookmarks.sidebar-width";
 const initialRoute = new URL(location.href).searchParams;
 const initialSetting = initialRoute.get("settings");
 const initialSettingsSection = ["app", "account", "import"].includes(initialSetting) ? initialSetting : initialSetting === "backups" ? "backups" : initialSetting === "pin" ? "pin" : "";
@@ -33,6 +34,27 @@ function surfaceName() {
 
 function isPopupSurface() {
   return surfaceName() === "popup";
+}
+
+function sidebarWidthStorageKey() {
+  return `${SIDEBAR_WIDTH_KEY}.${surfaceName()}`;
+}
+
+function readSidebarWidth() {
+  try {
+    const width = Number(localStorage.getItem(sidebarWidthStorageKey()));
+    return Number.isFinite(width) && width > 0 ? width : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistSidebarWidth(width) {
+  try {
+    const key = sidebarWidthStorageKey();
+    if (width == null) localStorage.removeItem(key);
+    else localStorage.setItem(key, String(width));
+  } catch { /* storage is optional */ }
 }
 
 function openFullPage(route = "library.html") {
@@ -97,7 +119,7 @@ function persistBackupHistory(history) {
 const state = {
   view: initialRoute.get("view") || "all", collectionId: initialRoute.get("collection"), query: initialRoute.get("search") || "", tag: "", selected: new Set(), favoriteCount: 0, tags: [],
   items: [], allItems: [], collectionItems: null, collectionItemsCollectionId: null, collections: [], collectionCounts: {}, trashCount: 0, trashedCollections: [], preferences: null, layout: "list",
-  collapsedCollections: new Set(), dragBookmark: null, dragCollection: null, searchTimer: null, sidebarWidth: null, cardMenuId: null, cardActionProxies: null, editingId: "", editSnapshot: "",
+  collapsedCollections: new Set(), dragBookmark: null, dragCollection: null, searchTimer: null, sidebarWidth: null, sidebarDefaultWidth: null, cardMenuId: null, cardActionProxies: null, editingId: "", editSnapshot: "",
   searchMenuOpen: false, searchFilterGroup: null, searchInCollection: false, searchActiveIndex: -1, sortMenuOpen: false, viewMenuOpen: false, workspaceMenuSectionId: null, workspaceCollectionMenuId: null, exportMenuSectionId: null, themeMenuOpen: false, recentSearches: readSearchHistory(), groupMenuId: null, collectionMenuId: null, pickerCollectionMenuId: null, pickerGroupMenuId: null, inlineCollectionCreate: null, tagMenuOpen: false, tagItemMenu: null, collectionValueAction: null, collectionValueId: null, collectionSelection: null,
   selectionMoreOpen: false, selectionMoreSectionId: null, selectionSectionId: null, selectionScreenshotWorking: false, sidebarOpen: false, accountMenuOpen: false, mediaUploadEnabled: false, aiRecommendationsAvailable: false, aiSettings: null, aiBusy: false,
   settingsOpen: initialSettingsRoute, settingsSection: initialSettingsSection || "app", settingsMenu: null, settingsNeedsReload: false, settingsSavePromise: null, connectionInfo: null,
@@ -105,6 +127,7 @@ const state = {
   loading: false,
   importPreview: readImportProgress(), importBusy: false, backups: readBackupHistory(), backupSource: "local", backupBusy: false, backupLoading: false, backupIncludeMedia: false, cloudConnections: [], cloudBackups: { dropbox: [], google: [], onedrive: [] }, cloudBackupLoading: {}, cloudBackupErrors: {}, cloudBusy: false, lock: { enabled: false, locked: false, autoLock: "15" },
 };
+state.sidebarWidth = readSidebarWidth();
 
 function setGlobalLoading(loading) {
   if (!root) return;
@@ -136,7 +159,7 @@ function setSettingsRoute(open, section = state.settingsSection || "app") {
 
 const EN_TEXT = Object.freeze({
   " 个书签": " bookmarks",
-  "默认模式": "Default mode", "基础模式": "Basic mode", "严格模式": "Strict mode",
+  "默认模式": "Default mode", "默认": "Default", "恢复默认宽度": "Reset sidebar width", "基础模式": "Basic mode", "严格模式": "Strict mode",
   "使用此封面": "Use this cover", "此书签还没有可用的候选封面。": "This bookmark has no candidate covers.", "正在加载…": "Loading…", "正在创建…": "Creating…", "上传文件（需要配置 R2）": "Upload file (R2 required)", "正在上传封面…": "Uploading cover…", "已保存 ": "Saved ", "删除标签": "Remove tag", "编辑 Markdown": "Edit Markdown",
   "打开所有书签": "Open all bookmarks", "展开所有收藏集": "Expand all collections", "折叠所有收藏集": "Collapse all collections", "按名称排序所有收藏集": "Sort all collections by name", "删除所有空收藏集": "Delete all empty collections", "没有找到收藏集": "No collections found",
   "全部": "All", "搜索图标...": "Search icons...", "没有找到图标": "No icons found",
@@ -2431,7 +2454,7 @@ function sidebarMarkup() {
   const unsortedActive = state.collectionId === "unsorted";
   const trashActive = state.view === "trash";
   const primaryNav = `<button class="nav-item tree-item ${allActive ? "active" : ""}" data-view="all"><span class="tree-expand"></span><span class="tree-icon">${treeIcon(allActive ? "cloudActive" : "cloud")}</span><span class="tree-title">所有书签</span>${sidebarCount(total)}</button><button class="nav-item tree-item ${unsortedActive ? "active" : ""}" data-collection="unsorted"><span class="tree-expand"></span><span class="tree-icon">${treeIcon(unsortedActive ? "inboxActive" : "inbox")}</span><span class="tree-title">未分类</span>${sidebarCount(state.collectionCounts.unsorted || 0)}</button>${state.trashCount ? `<button class="nav-item tree-item ${trashActive ? "active" : ""}" data-view="trash"><span class="tree-expand"></span><span class="tree-icon">${treeIcon(trashActive ? "trashActive" : "trash")}</span><span class="tree-title">废纸篓</span>${sidebarCount(state.trashCount)}</button>` : ""}`;
-  return `<aside class="sidebar"><div class="sidebar-head"><div class="account-wrap"><button type="button" class="account-trigger" data-account-trigger aria-haspopup="menu" aria-expanded="${state.accountMenuOpen}" title="私有书签"><span class="account-mark"><img src="icons/bookmark.svg" width="20" height="20" alt=""></span><span class="account-name">私有书签</span><span class="sidebar-caret">${treeIcon("microArrow")}</span></button>${accountMenuMarkup()}</div><button id="new-collection" class="icon-button" title="新建收藏夹" aria-label="新建收藏夹">${treeIcon("add")}</button></div><nav class="nav"><section class="sidebar-section primary-nav">${primaryNav}</section><section class="sidebar-section collections-section"><div class="sidebar-label"><span>收藏</span><button id="new-collection-secondary" title="新建收藏夹" aria-label="新建收藏夹">${treeIcon("add")}</button></div>${collectionTree()}</section><section class="sidebar-section filters-section"><div class="sidebar-label"><span>快速过滤…</span></div>${quick("favorite", "like", "星标", state.favoriteCount, "important:true")}${quick("notes", "note", "备注", items.filter((item) => item.note).length, "note:true")}${quick("highlights", "highlights", "高亮", items.filter((item) => item.highlights.length).length, "highlights:true")}${quick("reminder", "reminder", "提醒", items.filter((item) => item.reminder).length, "reminder:true")}${types}${quick("duplicates", "duplicates", "重复书签", items.filter((item) => duplicates.has(item.link)).length, "duplicate:true")}${quick("untagged", "tag", "没有标签", items.filter((item) => !item.tags.length).length, "notag:true")}${quick("broken", "broken", "失效链接", items.filter((item) => item.health.status === "broken").length, "broken:true")}${items.some((item) => item.health.status === "unknown") ? nav(state.view === "unknown", "link", "待检查", items.filter((item) => item.health.status === "unknown").length, 'data-view="unknown"') : ""}</section>${tags.length ? `<section class="sidebar-section tag-section"><div class="sidebar-label">标签 (${tags.length})</div>${tags.map(([tag, count]) => `<div class="tag-row"><button class="tag-filter tree-item ${state.tag === tag ? "active" : ""}" data-tag="${escapeHtml(tag)}"><span class="tree-expand"></span><span class="tree-icon">${microIcon("microTag")}</span><span class="tree-title">${escapeHtml(tag)}</span>${sidebarCount(count)}</button><button class="tag-item-menu-trigger" data-tag-item-menu="${escapeHtml(tag)}" title="${escapeHtml(tag)}选项" aria-label="${escapeHtml(tag)}选项" aria-expanded="${state.tagItemMenu === tag}">${treeIcon("moreHorizontal")}</button>${state.tagItemMenu === tag ? `<div class="tag-item-menu" role="menu" data-tag-item-menu-panel><button type="button" role="menuitem" data-tag-item-action="rename" data-tag-value="${escapeHtml(tag)}">重命名标签</button><button type="button" role="menuitem" data-tag-item-action="delete" data-tag-value="${escapeHtml(tag)}">删除标签</button></div>` : ""}</div>`).join("")}</section>` : ""}</nav></aside>`;
+  return `<aside class="sidebar"><div class="sidebar-head"><div class="account-wrap"><button type="button" class="account-trigger" data-account-trigger aria-haspopup="menu" aria-expanded="${state.accountMenuOpen}" title="私有书签"><span class="account-mark"><img src="icons/bookmark.svg" width="20" height="20" alt=""></span><span class="account-name">私有书签</span><span class="sidebar-caret">${treeIcon("microArrow")}</span></button>${accountMenuMarkup()}</div><button type="button" class="icon-button sidebar-width-reset" data-sidebar-width-reset${state.sidebarWidth == null ? " hidden" : ""} title="${t("恢复默认宽度")}" aria-label="${t("恢复默认宽度")}">${treeIcon("refresh")}</button><button id="new-collection" class="icon-button" title="新建收藏夹" aria-label="新建收藏夹">${treeIcon("add")}</button></div><nav class="nav"><section class="sidebar-section primary-nav">${primaryNav}</section><section class="sidebar-section collections-section"><div class="sidebar-label"><span>收藏</span><button id="new-collection-secondary" title="新建收藏夹" aria-label="新建收藏夹">${treeIcon("add")}</button></div>${collectionTree()}</section><section class="sidebar-section filters-section"><div class="sidebar-label"><span>快速过滤…</span></div>${quick("favorite", "like", "星标", state.favoriteCount, "important:true")}${quick("notes", "note", "备注", items.filter((item) => item.note).length, "note:true")}${quick("highlights", "highlights", "高亮", items.filter((item) => item.highlights.length).length, "highlights:true")}${quick("reminder", "reminder", "提醒", items.filter((item) => item.reminder).length, "reminder:true")}${types}${quick("duplicates", "duplicates", "重复书签", items.filter((item) => duplicates.has(item.link)).length, "duplicate:true")}${quick("untagged", "tag", "没有标签", items.filter((item) => !item.tags.length).length, "notag:true")}${quick("broken", "broken", "失效链接", items.filter((item) => item.health.status === "broken").length, "broken:true")}${items.some((item) => item.health.status === "unknown") ? nav(state.view === "unknown", "link", "待检查", items.filter((item) => item.health.status === "unknown").length, 'data-view="unknown"') : ""}</section>${tags.length ? `<section class="sidebar-section tag-section"><div class="sidebar-label">标签 (${tags.length})</div>${tags.map(([tag, count]) => `<div class="tag-row"><button class="tag-filter tree-item ${state.tag === tag ? "active" : ""}" data-tag="${escapeHtml(tag)}"><span class="tree-expand"></span><span class="tree-icon">${microIcon("microTag")}</span><span class="tree-title">${escapeHtml(tag)}</span>${sidebarCount(count)}</button><button class="tag-item-menu-trigger" data-tag-item-menu="${escapeHtml(tag)}" title="${escapeHtml(tag)}选项" aria-label="${escapeHtml(tag)}选项" aria-expanded="${state.tagItemMenu === tag}">${treeIcon("moreHorizontal")}</button>${state.tagItemMenu === tag ? `<div class="tag-item-menu" role="menu" data-tag-item-menu-panel><button type="button" role="menuitem" data-tag-item-action="rename" data-tag-value="${escapeHtml(tag)}">重命名标签</button><button type="button" role="menuitem" data-tag-item-action="delete" data-tag-value="${escapeHtml(tag)}">删除标签</button></div>` : ""}</div>`).join("")}</section>` : ""}</nav></aside>`;
 }
 
 function accountMenuMarkup() {
@@ -3613,6 +3636,7 @@ function render() {
     state.selectionMoreSectionId = null;
   }
   const workspaces = sections.map((section) => collectionSectionMarkup(section, duplicates, viewSwitching)).join("");
+  state.sidebarDefaultWidth = null;
   root.innerHTML = localizeHtml(`<main class="library">${sidebarMarkup()}<section class="content"><header class="topbar"><label class="quick-search"><span>⌕</span><span id="search-filter-label" class="search-filter-label">搜索</span><input id="search" aria-controls="search-filter-menu" aria-labelledby="search-filter-label" value="${escapeHtml(state.query)}" placeholder="搜索" autocomplete="off"><kbd>⌘ K</kbd></label><div class="top-actions"><button id="check-links" class="top-action-icon"${state.connectionInfo ? "" : " disabled"} title="${state.connectionInfo ? t("检查链接") : t("连接私有实例后可用")}" aria-label="${state.connectionInfo ? t("检查链接") : t("连接私有实例后可用")}">${treeIcon("refresh")}</button><div class="theme-menu-wrap"><button id="theme" class="top-action-icon theme-trigger" title="主题：${themeOption().label}" aria-label="主题：${themeOption().label}" aria-haspopup="menu" aria-expanded="${state.themeMenuOpen}" data-theme-trigger>${treeIcon(themeOption().icon)}</button>${themeMenuMarkup()}</div><button id="import" class="top-action-icon" title="导入书签" aria-label="导入书签">${treeIcon("upload")}</button><button id="add-bookmark" class="primary add-bookmark">${treeIcon("add")}<span>添加</span></button></div></header><div class="workspace-sections">${workspaces}</div></section></main>`);
   const nav = root.querySelector(".nav");
   if (nav && navScrollTop != null) nav.scrollTop = navScrollTop;
@@ -3620,6 +3644,7 @@ function render() {
   mountEditPanel(editWasOpen);
   const resizer = document.createElement("div");
   resizer.className = "sidebar-resizer";
+  resizer.innerHTML = `<span class="sidebar-default-hint" aria-hidden="true">${t("默认")}</span>`;
   resizer.setAttribute("role", "separator");
   resizer.setAttribute("aria-orientation", "vertical");
   resizer.setAttribute("aria-label", t("调整侧边栏宽度"));
@@ -3805,6 +3830,17 @@ function sidebarWidthBounds() {
   return { min, max: Math.max(min, window.innerWidth - 320) };
 }
 
+function sidebarDefaultWidth(library, fallback) {
+  if (state.sidebarDefaultWidth != null) return state.sidebarDefaultWidth;
+  const sidebar = library.querySelector(".sidebar");
+  const inlineWidth = library.style.getPropertyValue("--sidebar-width");
+  if (inlineWidth) library.style.removeProperty("--sidebar-width");
+  const width = sidebar?.getBoundingClientRect().width || fallback;
+  if (inlineWidth) library.style.setProperty("--sidebar-width", inlineWidth);
+  state.sidebarDefaultWidth = width;
+  return width;
+}
+
 function setSidebarOpen(open) {
   state.sidebarOpen = Boolean(open);
   root.querySelector(".library")?.classList.toggle("sidebar-open", state.sidebarOpen);
@@ -3842,19 +3878,38 @@ function applySidebarWidth() {
   const resizer = root.querySelector(".sidebar-resizer");
   if (!library || !resizer) return;
   const { min, max } = sidebarWidthBounds();
-  const actualWidth = library.querySelector(".sidebar")?.getBoundingClientRect().width || min;
+  const sidebar = library.querySelector(".sidebar");
   resizer.setAttribute("aria-valuemin", String(min));
   resizer.setAttribute("aria-valuemax", String(max));
   if (state.sidebarWidth == null) {
     library.style.removeProperty("--sidebar-width");
-    resizer.setAttribute("aria-valuenow", String(Math.round(actualWidth)));
-    return;
+  } else {
+    state.sidebarWidth = Math.min(max, Math.max(min, state.sidebarWidth));
+    library.style.setProperty("--sidebar-width", `${state.sidebarWidth}px`);
   }
-  state.sidebarWidth = Math.min(max, Math.max(min, state.sidebarWidth));
-  library.style.setProperty("--sidebar-width", `${state.sidebarWidth}px`);
-  resizer.setAttribute("aria-valuemin", String(min));
-  resizer.setAttribute("aria-valuemax", String(max));
-  resizer.setAttribute("aria-valuenow", String(Math.round(state.sidebarWidth)));
+  const width = state.sidebarWidth ?? sidebar?.getBoundingClientRect().width ?? min;
+  const isDefault = Math.abs(width - sidebarDefaultWidth(library, width)) <= 2;
+  resizer.setAttribute("aria-valuenow", String(Math.round(width)));
+  resizer.classList.toggle("is-default", isDefault);
+  root.querySelector("[data-sidebar-width-reset]")?.toggleAttribute("hidden", isDefault);
+}
+
+function commitSidebarWidth(width) {
+  const library = root.querySelector(".library");
+  if (!library) return;
+  const value = Number(width);
+  if (!Number.isFinite(value)) return;
+  const { min, max } = sidebarWidthBounds();
+  const next = Math.min(max, Math.max(min, value));
+  state.sidebarWidth = Math.abs(next - sidebarDefaultWidth(library, next)) <= 2 ? null : next;
+  persistSidebarWidth(state.sidebarWidth);
+  applySidebarWidth();
+}
+
+function resetSidebarWidth() {
+  state.sidebarWidth = null;
+  persistSidebarWidth(null);
+  applySidebarWidth();
 }
 
 function bindSidebarResizer() {
@@ -3862,6 +3917,11 @@ function bindSidebarResizer() {
   const library = root.querySelector(".library");
   if (!resizer || !library) return;
   applySidebarWidth();
+  const reset = root.querySelector("[data-sidebar-width-reset]");
+  if (reset) reset.onclick = (event) => {
+    event.preventDefault();
+    resetSidebarWidth();
+  };
   resizer.onpointerdown = (event) => {
     if (event.button !== 0) return;
     event.preventDefault();
@@ -3876,6 +3936,7 @@ function bindSidebarResizer() {
       applySidebarWidth();
     };
     const stop = () => {
+      commitSidebarWidth(state.sidebarWidth);
       resizer.classList.remove("is-dragging");
       document.body.classList.remove("sidebar-resizing");
       resizer.onpointermove = null;
@@ -3891,8 +3952,7 @@ function bindSidebarResizer() {
     const next = event.key === "ArrowLeft" ? current - 10 : event.key === "ArrowRight" ? current + 10 : event.key === "Home" ? min : event.key === "End" ? max : null;
     if (next == null) return;
     event.preventDefault();
-    state.sidebarWidth = next;
-    applySidebarWidth();
+    commitSidebarWidth(next);
   };
 }
 

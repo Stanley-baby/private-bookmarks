@@ -88,24 +88,39 @@ test("selection toolbar keeps reference icons at 20px", () => {
   assert.match(library, /download: '<path[^']*a1 1 0 0 0-\.576/);
 });
 
-test("popup surface fills the viewport while preserving the horizontal shell", () => {
+test("popup surface keeps a stable shell with internal scrolling", () => {
+  const html = declarations("html.surface-popup");
   const popup = declarations("body.surface-popup");
   const librarySurface = declarations("body.surface-popup .library");
 
-  assert.match(css, /html\.surface-popup \{ overflow-y: hidden; \}/);
-  assert.match(popup, /width: max\(800px, 100vw\)/);
-  assert.match(popup, /height: 100dvh/);
+  assert.match(html, /overflow: hidden/);
+  assert.match(popup, /width: 800px/);
+  assert.match(popup, /height: 600px/);
   assert.match(popup, /min-width: 800px/);
   assert.match(popup, /min-height: 0/);
-  assert.match(popup, /overflow-x: auto/);
-  assert.match(popup, /overflow-y: hidden/);
+  assert.match(popup, /overflow: hidden/);
+  assert.doesNotMatch(popup, /100vw|100dvh/);
   assert.match(librarySurface, /--sidebar-width: 300px/);
-  assert.match(librarySurface, /height: 100dvh/);
+  assert.match(librarySurface, /height: 600px/);
   assert.match(librarySurface, /min-width: 800px/);
   assert.match(librarySurface, /min-height: 0/);
-  assert.match(librarySurface, /grid-template-columns: 300px minmax\(0, 1fr\)/);
+  assert.match(librarySurface, /grid-template-columns: var\(--sidebar-width\) minmax\(0, 1fr\)/);
+  assert.doesNotMatch(librarySurface, /grid-template-columns: 300px/);
+  assert.doesNotMatch(librarySurface, /100vw|100dvh/);
   assert.match(css, /body\.surface-popup \.content \{ min-width: 0; overflow: auto; \}/);
-  assert.match(css, /@media \(max-device-height: 800px\), \(max-device-width: 800px\) \{[\s\S]*?body\.surface-popup \{ width: max\(700px, 100vw\); min-width: 700px; \}/);
+  assert.doesNotMatch(css, /max\(700px,\s*100vw\)/);
+});
+
+test("sidebar width supports local persistence, reset, and default feedback", () => {
+  assert.match(library, /const SIDEBAR_WIDTH_KEY = "private-bookmarks\.sidebar-width";/);
+  assert.match(library, /function readSidebarWidth\(\)/);
+  assert.match(library, /function persistSidebarWidth\(width\)/);
+  assert.match(library, /state\.sidebarWidth = readSidebarWidth\(\)/);
+  assert.match(library, /data-sidebar-width-reset/);
+  assert.match(library, /sidebar-default-hint/);
+  assert.match(library, /persistSidebarWidth\(null\)/);
+  assert.match(css, /\.sidebar-resizer\.is-default/);
+  assert.match(css, /\.sidebar-default-hint/);
 });
 
 test("bookmark editing keeps the list visible in a desktop split pane", () => {
@@ -318,7 +333,7 @@ test("shared surfaces mark their host before rendering and keep distinct layouts
   assert.match(popup, /<body data-surface="popup">/);
   assert.match(sidepanel, /<body data-surface="sidepanel">/);
   assert.match(css, /body\.surface-popup[\s\S]*?min-width: 800px/);
-  assert.match(css, /body\.surface-popup \.library[\s\S]*?grid-template-columns: 300px minmax\(0, 1fr\)/);
+  assert.match(css, /body\.surface-popup \.library[\s\S]*?grid-template-columns: var\(--sidebar-width\) minmax\(0, 1fr\)/);
   assert.match(css, /body\.surface-sidepanel \.library[\s\S]*?--sidebar-width: clamp\(240px, 30vw, 280px\)/);
   assert.match(css, /@media \(max-width: 519px\)[\s\S]*?body\.surface-sidepanel \.library\.sidebar-open \.sidebar/);
   assert.match(library, /function openFullPage\(route = "library\.html"\)/);

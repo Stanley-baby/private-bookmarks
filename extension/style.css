@@ -72,6 +72,8 @@ a { color: inherit; text-decoration: none; }
 .sidebar-resizer { position: absolute; z-index: 6; top: 0; bottom: 0; left: calc(var(--sidebar-width) - 3px); width: 6px; cursor: col-resize; touch-action: none; }
 .sidebar-resizer::after { position: absolute; top: 0; bottom: 0; left: 2px; width: 1px; content: ""; background: transparent; }
 .sidebar-resizer:hover::after, .sidebar-resizer.is-dragging::after { background: var(--accent); }
+.sidebar-default-hint { position: absolute; top: 50%; left: 50%; display: none; padding: 2px 5px; border-radius: 4px; color: var(--page); background: var(--accent); font-size: 11px; line-height: 16px; pointer-events: none; transform: translate(-50%, -50%); white-space: nowrap; }
+.sidebar-resizer.is-default.is-dragging .sidebar-default-hint { display: block; }
 body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; user-select: none !important; }
 .sidebar-head { display: flex; flex: 0 0 48px; align-items: center; gap: 6px; min-height: 48px; padding: 8px; }
 .mobile-sidebar-toggle, .mobile-sidebar-close { display: none; }
@@ -94,6 +96,9 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .account-menu button:focus-visible { color: var(--page); background: var(--accent); outline: 0; }
 .account-menu .menu-separator { display: block; width: 130px; height: 1px; min-height: 1px; margin: 5px 0; background: transparent; box-shadow: inset 0 .5px 0 var(--line); }
 .icon-button { width: 32px; min-width: 32px; height: 32px; min-height: 32px; margin-left: auto; padding: 0; color: var(--muted); font-size: 19px; }
+.sidebar-head > .sidebar-width-reset { display: inline-grid; width: 28px; min-width: 28px; height: 28px; min-height: 28px; margin-left: 0; align-items: center; justify-content: center; padding: 0 4px; line-height: 28px; }
+.sidebar-head > .sidebar-width-reset[hidden] { display: none; }
+.sidebar-head > .sidebar-width-reset .tree-svg { width: 16px; height: 16px; }
 .sidebar-head > .icon-button { display: inline-grid; width: 36px; min-width: 36px; height: 28px; min-height: 28px; align-items: center; justify-content: center; padding: 0 8px; line-height: 28px; }
 .sidebar-head > .icon-button .tree-svg { width: 20px; height: 20px; }
 .nav { flex: 1; padding: 0 0 20px; overflow: auto; scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text), transparent 82%) transparent; }
@@ -1052,26 +1057,24 @@ dialog menu { display: flex; justify-content: end; gap: 6px; margin: 0; padding:
   body.surface-sidepanel .cards.layout-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
-/* Action popups keep the same management shell as the full library. Chrome may
-   cap the outer popup, so the shell scrolls horizontally instead of dropping
-   the navigation column. */
-html.surface-popup { overflow-y: hidden; }
+/* Action popups keep the same management shell as the full library. Keep the
+   outer shell fixed so Chrome does not size it from the popup viewport. */
+html.surface-popup { overflow: hidden; }
 body.surface-popup {
-  width: max(800px, 100vw);
-  height: 100dvh;
+  width: 800px;
+  height: 600px;
   min-width: 800px;
   min-height: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: hidden;
 }
 
 body.surface-popup .library {
   --sidebar-width: 300px;
-  height: 100dvh;
+  height: 600px;
   min-width: 800px;
   min-height: 0;
   padding: 0;
-  grid-template-columns: 300px minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
 }
 
 body.surface-popup .sidebar {
@@ -1086,11 +1089,6 @@ body.surface-popup .content { min-width: 0; overflow: auto; }
 body.surface-popup .mobile-sidebar-toggle,
 body.surface-popup .mobile-sidebar-close { display: none; }
 body.surface-popup .sidebar-resizer { display: block; }
-
-@media (max-device-height: 800px), (max-device-width: 800px) {
-  body.surface-popup { width: max(700px, 100vw); min-width: 700px; }
-  body.surface-popup .library { min-width: 700px; }
-}
 
 /* Side panels use the full available width. At narrow widths navigation becomes
    an existing hamburger-controlled drawer rather than disappearing. */
