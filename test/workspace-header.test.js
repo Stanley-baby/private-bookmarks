@@ -27,3 +27,15 @@ test("quick filters reset stale navigation scope before searching", () => {
   assert.match(handler, /state\.view = "all";[\s\S]*state\.collectionId = null;[\s\S]*state\.tag = "";[\s\S]*state\.selected\.clear\(\);[\s\S]*commitSearch/);
   assert.match(library, /找到 \$\{items\.length\} 个书签/);
 });
+
+test("selection mutations refresh the selection header count", () => {
+  const selectAllStart = library.indexOf("function selectAll(sectionId)");
+  const selectAllEnd = library.indexOf("\n}\n\nfunction bindWorkspaceHeader", selectAllStart);
+  const selectAll = library.slice(selectAllStart, selectAllEnd);
+  const checkboxStart = library.indexOf('root.querySelectorAll("[data-select]")');
+  const checkboxEnd = library.indexOf('\n  root.querySelectorAll("[data-favorite]")', checkboxStart);
+  const checkboxHandler = library.slice(checkboxStart, checkboxEnd);
+
+  assert.match(selectAll, /refreshSelectionUi\(\{ refreshHeader: true \}\)/);
+  assert.match(checkboxHandler, /refreshSelectionUi\(\{ refreshHeader: true \}\)/);
+});

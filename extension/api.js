@@ -19,10 +19,22 @@ export async function connect(endpoint, key) {
   if (extensionStorage && !await chrome.permissions.request({ origins: [`${url.origin}/*`] })) throw new TypeError("未获得私有实例地址的访问权限");
   const value = { endpoint: url.origin, key: String(key).trim() };
   if (!value.key) throw new TypeError("需要访问密钥");
-  if (extensionStorage) await extensionStorage.set({ [CONNECTION_KEY]: value });
-  else localStorage.setItem(CONNECTION_KEY, JSON.stringify(value));
-  await api("/v1/health");
-  return value;
+  const previous = await activeConnection();
+  try {
+    if (extensionStorage) await extensionStorage.set({ [CONNECTION_KEY]: value });
+    else localStorage.setItem(CONNECTION_KEY, JSON.stringify(value));
+    await api("/v1/health");
+    return value;
+  } catch (error) {
+    try {
+      if (previous) {
+        if (extensionStorage) await extensionStorage.set({ [CONNECTION_KEY]: previous });
+        else localStorage.setItem(CONNECTION_KEY, JSON.stringify(previous));
+      } else if (extensionStorage) await extensionStorage.remove(CONNECTION_KEY);
+      else localStorage.removeItem(CONNECTION_KEY);
+    } catch { /* keep the original health-check error */ }
+    throw error;
+  }
 }
 
 export async function disconnect() {

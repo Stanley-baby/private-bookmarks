@@ -1221,6 +1221,12 @@ body.surface-sidepanel .content { min-width: 0; overflow: auto; }
 .settings-button-option-icon { display: block; width: 20px; height: 20px; }
 .settings-button-option-icon .tree-svg { display: block; width: 20px; height: 20px; }
 .settings-account-input-wrap { display: flex; width: 100%; height: 28px; min-height: 28px; align-items: center; padding: 0 8px; overflow: hidden; border-radius: 4px; background: light-dark(rgba(0, 0, 0, .05), rgba(255, 255, 255, .07)); transition: box-shadow .1s ease-in-out, background .1s ease-in-out; }
+.settings-account-connection { display: grid; max-width: 498px; gap: 10px; }
+.settings-account-connection form { display: grid; gap: 10px; }
+.settings-account-connection label { display: grid; gap: 5px; color: var(--muted); font-size: 13px; }
+.settings-account-connection input { min-height: 32px; }
+.settings-account-connection-actions { display: flex; align-items: center; gap: 8px; }
+.settings-account-connection-actions button { min-height: 32px; }
 .settings-account-input-wrap:focus-within { background: var(--page); box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 .5px var(--accent); }
 .settings-account-input-wrap input { width: 100%; min-width: 0; padding: 0; overflow: hidden; border: 0; outline: 0; color: var(--text); background: transparent; font: inherit; line-height: 21px; text-overflow: ellipsis; }
 .settings-account-input-wrap input[readonly] { color: var(--muted); }

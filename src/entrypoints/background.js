@@ -1,6 +1,7 @@
 import { getActionMode, listBookmarks, saveBookmark, setActionMode, setSyncSettings, syncSettings } from "../local/db";
 import { scheduleSync, syncOnce } from "../local/sync";
 import { createWebdavBackup, configureWebdav, listBackups, restoreWebdavBackup } from "../backup/webdav";
+import { extractPageMetadata } from "../../extension/page-metadata.js";
 
 async function activeTab() {
   return (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
@@ -8,9 +9,16 @@ async function activeTab() {
 
 async function saveTab(tab) {
   if (!tab?.url || !/^https?:/.test(tab.url)) throw new TypeError("只能保存 HTTP(S) 页面");
-  const item = await saveBookmark({ link: tab.url, title: tab.title || tab.url });
+  let metadata = { link: tab.url, title: tab.title || tab.url };
+  try { metadata = { ...metadata, ...(await pageMetadata(tab)) }; } catch { /* keep the existing quick-save fallback */ }
+  const item = await saveBookmark(metadata);
   if (tab.id) await chrome.action.setBadgeText({ tabId: tab.id, text: "✓" });
   return item;
+}
+
+async function pageMetadata(tab) {
+  const [result] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: extractPageMetadata });
+  return result.result;
 }
 
 async function applyActionMode(mode) {
@@ -85,6 +93,15 @@ export default defineBackground(() => {
     suggest((await listBookmarks()).filter((item) => `${item.title} ${item.link} ${item.tags.join(" ")}`.toLocaleLowerCase().includes(needle)).slice(0, 8).map((item) => ({ content: item.link, description: `${item.title} — ${item.link}` })));
   });
   chrome.omnibox.onInputEntered.addListener((url) => chrome.tabs.create({ url }));
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message.type !== "private-bookmarks-page-metadata") return;
+    (async () => {
+      const tab = message.tabId ? await chrome.tabs.get(message.tabId) : await activeTab();
+      if (!tab?.id || !/^https?:/.test(tab.url || "")) throw new TypeError("只能保存 HTTP(S) 页面");
+      sendResponse({ metadata: await pageMetadata(tab) });
+    })().catch((error) => sendResponse({ error: error.message }));
+    return true;
+  });
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.type !== "private-bookmarks-set-action-mode") return;
     setActionMode(message.mode).then(async (mode) => { await applyActionMode(mode); sendResponse({ mode }); }).catch((error) => sendResponse({ error: error.message }));

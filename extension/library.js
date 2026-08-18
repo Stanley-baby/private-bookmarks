@@ -1,4 +1,4 @@
-import { api, connection, disconnect } from "./api.js?v=20260808-pin2";
+import { api, connect, connection, disconnect, requestPagePermission } from "./api.js?v=20260808-pin2";
 import { COLLECTION_ICON_DEFAULT_CATALOG, normalizeCollectionIconCatalog, readCollectionIconCache, writeCollectionIconCache } from "./collection-icon-catalog.js";
 import { bookmarkType, dateFilterSuggestions, duplicateLinks, languageFilterSuggestions, matchesSearchFilters, parseSearchQuery } from "./filters.js";
 import { canonicalImportLink, parseImportText } from "./import.js";
@@ -36,6 +36,10 @@ function isPopupSurface() {
   return surfaceName() === "popup";
 }
 
+function isExtensionSurface() {
+  return ["popup", "sidepanel"].includes(surfaceName());
+}
+
 function sidebarWidthStorageKey() {
   return `${SIDEBAR_WIDTH_KEY}.${surfaceName()}`;
 }
@@ -61,6 +65,19 @@ function openFullPage(route = "library.html") {
   const href = globalThis.chrome?.runtime?.getURL?.(route) || new URL(route, location.href).href;
   if (globalThis.chrome?.tabs?.create) return globalThis.chrome.tabs.create({ url: href });
   return globalThis.open?.(href, "_blank", "noopener");
+}
+
+async function currentPageDraft() {
+  if (!isExtensionSurface() || !globalThis.chrome?.tabs?.query) return {};
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id || !/^https?:$/.test(new URL(tab.url || "").protocol)) return {};
+    if (!await requestPagePermission(tab.url)) return {};
+    const response = await chrome.runtime.sendMessage({ type: "private-bookmarks-page-metadata", tabId: tab.id });
+    return response?.metadata?.link ? response.metadata : {};
+  } catch {
+    return {};
+  }
 }
 
 const DEFAULT_BUTTON_GROUP = Object.freeze({ select: true, current_tab: false, new_tab: true, preview: false, web: false, copy: false, ask: false, important: false, tags: false, edit: true, remove: true });
@@ -122,7 +139,7 @@ const state = {
   collapsedCollections: new Set(), dragBookmark: null, dragCollection: null, searchTimer: null, sidebarWidth: null, sidebarDefaultWidth: null, cardMenuId: null, cardActionProxies: null, editingId: "", editSnapshot: "",
   searchMenuOpen: false, searchFilterGroup: null, searchInCollection: false, searchActiveIndex: -1, sortMenuOpen: false, viewMenuOpen: false, workspaceMenuSectionId: null, workspaceCollectionMenuId: null, exportMenuSectionId: null, themeMenuOpen: false, recentSearches: readSearchHistory(), groupMenuId: null, collectionMenuId: null, pickerCollectionMenuId: null, pickerGroupMenuId: null, inlineCollectionCreate: null, tagMenuOpen: false, tagItemMenu: null, collectionValueAction: null, collectionValueId: null, collectionSelection: null,
   selectionMoreOpen: false, selectionMoreSectionId: null, selectionSectionId: null, selectionScreenshotWorking: false, sidebarOpen: false, accountMenuOpen: false, mediaUploadEnabled: false, aiRecommendationsAvailable: false, aiSettings: null, aiBusy: false,
-  settingsOpen: initialSettingsRoute, settingsSection: initialSettingsSection || "app", settingsMenu: null, settingsNeedsReload: false, settingsSavePromise: null, connectionInfo: null,
+  settingsOpen: initialSettingsRoute, settingsSection: initialSettingsSection || "app", settingsMenu: null, settingsNeedsReload: false, settingsSavePromise: null, connectionInfo: null, addButtonSaved: false,
   viewSwitching: false,
   loading: false,
   importPreview: readImportProgress(), importBusy: false, backups: readBackupHistory(), backupSource: "local", backupBusy: false, backupLoading: false, backupIncludeMedia: false, cloudConnections: [], cloudBackups: { dropbox: [], google: [], onedrive: [] }, cloudBackupLoading: {}, cloudBackupErrors: {}, cloudBusy: false, lock: { enabled: false, locked: false, autoLock: "15" },
@@ -2043,6 +2060,7 @@ function editFormSnapshot() {
     reminder: fields.get("reminder") || "",
     cover: fields.get("cover") || "",
     media: fields.get("media") || "[]",
+    type: fields.get("type") || "link",
     collectionId: fields.get("collectionId") || "",
     tags: fields.get("tags") || "[]",
     favorite: fields.has("favorite"),
@@ -2051,11 +2069,11 @@ function editFormSnapshot() {
 }
 
 function editFormIsDirty() {
-  return Boolean(state.editingId && state.editSnapshot && state.editSnapshot !== editFormSnapshot());
+  return Boolean((state.editingId || editBookmarkDialog.dataset.newBookmark === "1") && state.editSnapshot && state.editSnapshot !== editFormSnapshot());
 }
 
 function syncEditPanelLayout(open = editBookmarkDialog.open) {
-  root.querySelector(".library")?.classList.toggle("editing", Boolean(open && state.editingId));
+  root.querySelector(".library")?.classList.toggle("editing", Boolean(open && (state.editingId || editBookmarkDialog.dataset.newBookmark === "1")));
 }
 
 function mountEditPanel(wasOpen = editBookmarkDialog.open) {
@@ -2068,7 +2086,10 @@ function mountEditPanel(wasOpen = editBookmarkDialog.open) {
 
 function activeEditItem() {
   const id = state.editingId || (editBookmarkDialog.open ? editBookmarkDialog.dataset.bookmarkId : "");
-  return state.items.find((item) => item.id === id) || state.allItems.find((item) => item.id === id) || null;
+  const item = state.items.find((entry) => entry.id === id) || state.allItems.find((entry) => entry.id === id);
+  if (item || editBookmarkDialog.dataset.newBookmark !== "1") return item || null;
+  const form = editBookmarkDialog.querySelector("form");
+  return { id: "", link: form?.elements.link?.value || "", cover: form?.elements.cover?.value || "", media: editMediaDraft() };
 }
 
 function editMediaDraft() {
@@ -2087,7 +2108,7 @@ function editCoverDraft() {
 
 function syncEditCoverPreview(item = activeEditItem()) {
   const image = editBookmarkDialog.querySelector("#edit-cover");
-  if (!image || !item) return;
+  if (!image) return;
   image.onerror = () => {
     image.onerror = null;
     image.src = "icons/bookmark.svg";
@@ -2538,18 +2559,30 @@ function accountEndpoint() {
 }
 
 function accountSettingsMarkup() {
+  const currentConnection = state.connectionInfo;
   const bookmarks = Array.isArray(state.allItems) ? state.allItems.length : state.items.length;
   const collections = Math.max(0, state.collections.filter((item) => item.id !== "unsorted").length);
   const trash = Number(state.trashCount) || 0;
   const mediaLabel = state.mediaUploadEnabled ? "已启用" : "未配置";
   const instanceName = settingsPreference("instanceName", "私有书签");
+  const disconnectAction = currentConnection ? `<div class="settings-account-action-list"><button type="button" class="settings-account-action" data-account-settings-action="disconnect">${treeIcon("exit")}<span>断开当前设备</span></button></div>` : "";
   return `<div class="settings-content"><div class="settings-grid settings-account-grid">
+    <div class="settings-label">Cloudflare Worker</div>
+    <div class="settings-account-connection">
+      <form data-account-connection-form>
+        <label>实例地址<input name="endpoint" type="url" value="${escapeHtml(currentConnection?.endpoint || "")}" placeholder="https://bookmarks.example.workers.dev" required></label>
+        <label>访问密钥<input name="key" type="password" value="" placeholder="${currentConnection ? "重新输入访问密钥" : "访问密钥"}" autocomplete="off" required></label>
+        <div class="settings-account-connection-actions"><button type="submit" class="primary" data-account-connect>${currentConnection ? "重新连接" : "连接私有实例"}</button></div>
+        <p class="error hidden" role="alert"></p>
+      </form>
+      <p class="settings-sub-label" data-account-connection-status>${currentConnection ? `已连接：${escapeHtml(accountEndpoint())}` : "未连接 Worker；书签只保存在此设备。"}</p>
+    </div>
     <div class="settings-label">实例名称</div>
     <label class="settings-account-input-wrap"><input type="text" maxlength="200" value="${escapeHtml(instanceName)}" data-account-instance-name autocomplete="off"></label>
     <div class="settings-label">实例地址</div>
     <label class="settings-account-input-wrap"><input type="text" value="${escapeHtml(accountEndpoint())}" readonly aria-readonly="true"></label>
     <div class="settings-label">访问密钥</div>
-    <div class="settings-account-value settings-account-muted">已配置（仅存储在此设备）</div>
+    <div class="settings-account-value settings-account-muted">${currentConnection ? "已配置（仅存储在此设备）" : "未连接 Worker"}</div>
     <div class="settings-label">头像</div>
     <div class="settings-account-avatar-row"><span class="settings-account-avatar">${treeIcon("user")}</span><span class="settings-account-muted">固定实例图标</span></div>
     <div class="settings-separator"></div>
@@ -2563,7 +2596,7 @@ function accountSettingsMarkup() {
     <div class="settings-account-value settings-account-muted">${mediaLabel}</div>
     <div class="settings-separator"></div>
     <span></span>
-    <div class="settings-account-action-list"><button type="button" class="settings-account-action" data-account-settings-action="disconnect">${treeIcon("exit")}<span>断开当前设备</span></button></div>
+    ${disconnectAction}
   </div></div>`;
 }
 
@@ -3276,7 +3309,7 @@ function renderSettings() {
     legacyInput.parentElement.classList.remove("settings-disabled");
     legacyInput.parentElement.insertAdjacentHTML("beforeend", `<button type="button" class="settings-inline-help" aria-label="旧视图说明" aria-describedby="nested-view-legacy-help" title="查看旧视图说明">说明<span id="nested-view-legacy-help" class="settings-inline-help-popover" role="tooltip"><strong>旧视图说明</strong><span>勾选：父收藏集页面只显示当前收藏集中的书签，子收藏集不会展开。</span><span>取消勾选：父收藏集页面按区块显示当前收藏集及所有子收藏集的书签。</span></span></button>`);
   }
-  const aiNote = root.querySelector(".settings-sub-label");
+  const aiNote = state.settingsSection === "app" ? root.querySelector(".settings-sub-label") : null;
   if (aiNote) {
     const settings = state.aiSettings;
     aiNote.textContent = settings?.provider === "openai"
@@ -3400,6 +3433,23 @@ function formError(form, message) {
   error.classList.remove("hidden");
 }
 
+async function submitAccountConnection(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector("[data-account-connect]");
+  form.querySelector(".error")?.classList.add("hidden");
+  if (button) button.disabled = true;
+  try {
+    const data = new FormData(form);
+    const value = await connect(data.get("endpoint"), data.get("key"));
+    state.connectionInfo = value;
+    await load();
+  } catch (error) {
+    formError(form, error.message);
+    if (button) button.disabled = false;
+  }
+}
+
 function bindSettings() {
   root.querySelector(".settings-mobile-menu")?.addEventListener("click", () => root.querySelector(".settings-shell")?.classList.toggle("settings-sidebar-open"));
   root.querySelectorAll("[data-settings-back], [data-settings-close]").forEach((button) => button.onclick = () => {
@@ -3448,6 +3498,7 @@ function bindSettings() {
   root.querySelectorAll("[data-cloud-backup-delete]").forEach((button) => button.addEventListener("click", () => deleteCloudBackup(button.dataset.cloudBackupProvider, button.dataset.cloudBackupDelete).catch(showError)));
   root.querySelectorAll("[data-cloud-action]").forEach((button) => button.addEventListener("click", () => cloudAction(button.dataset.cloudAction).catch(showError)));
   root.querySelectorAll("[data-cloud-disconnect]").forEach((button) => button.addEventListener("click", () => disconnectCloud(button.dataset.cloudDisconnect).catch(showError)));
+  root.querySelector("[data-account-connection-form]")?.addEventListener("submit", submitAccountConnection);
   root.querySelector("[data-account-instance-name]")?.addEventListener("change", (event) => {
     const value = event.currentTarget.value.trim() || "私有书签";
     setSettingsPreference("instanceName", value.slice(0, 200));
@@ -3548,7 +3599,7 @@ async function load({ viewOnly = false } = {}) {
         state.collectionItemsCollectionId = null;
       }
       if (!state.allItems.length && state.view === "all" && !state.collectionId) state.allItems = items;
-      render();
+      renderViewOnly();
       return;
     }
     const rawCollectionPath = collectionItemsPath();
@@ -3620,6 +3671,25 @@ function collectionSectionMarkup(section, duplicates, viewSwitching) {
   return `<section class="workspace workspace-section${emptyCollection ? " workspace-empty" : ""}" data-section-id="${escapeHtml(section.key)}"${section.id ? ` data-collection-id="${escapeHtml(section.id)}"` : ""}>${workspaceHeaderMarkup(section.items, selection, section.key, section.title, section)}${menus}${content}${footer}</section>`;
 }
 
+function renderViewOnly() {
+  if (state.settingsOpen) return renderSettings();
+  const workspaceSections = root.querySelector(".workspace-sections");
+  if (!workspaceSections) return render();
+  const viewSwitching = state.viewSwitching;
+  state.viewSwitching = false;
+  const sections = collectionSections();
+  const duplicates = duplicateLinks(sidebarItems());
+  const workspaces = sections.map((section) => collectionSectionMarkup(section, duplicates, viewSwitching)).join("");
+  workspaceSections.innerHTML = localizeHtml(workspaces);
+  const search = root.querySelector("#search");
+  if (search) search.value = state.query;
+  renderSearchMenu();
+  applyViewFields();
+  bind();
+  layoutMasonry();
+  positionCardMenu();
+}
+
 function render() {
   searchMenuElement()?.remove();
   if (state.settingsOpen) return renderSettings();
@@ -3637,7 +3707,7 @@ function render() {
   }
   const workspaces = sections.map((section) => collectionSectionMarkup(section, duplicates, viewSwitching)).join("");
   state.sidebarDefaultWidth = null;
-  root.innerHTML = localizeHtml(`<main class="library">${sidebarMarkup()}<section class="content"><header class="topbar"><label class="quick-search"><span>⌕</span><span id="search-filter-label" class="search-filter-label">搜索</span><input id="search" aria-controls="search-filter-menu" aria-labelledby="search-filter-label" value="${escapeHtml(state.query)}" placeholder="搜索" autocomplete="off"><kbd>⌘ K</kbd></label><div class="top-actions"><button id="check-links" class="top-action-icon"${state.connectionInfo ? "" : " disabled"} title="${state.connectionInfo ? t("检查链接") : t("连接私有实例后可用")}" aria-label="${state.connectionInfo ? t("检查链接") : t("连接私有实例后可用")}">${treeIcon("refresh")}</button><div class="theme-menu-wrap"><button id="theme" class="top-action-icon theme-trigger" title="主题：${themeOption().label}" aria-label="主题：${themeOption().label}" aria-haspopup="menu" aria-expanded="${state.themeMenuOpen}" data-theme-trigger>${treeIcon(themeOption().icon)}</button>${themeMenuMarkup()}</div><button id="import" class="top-action-icon" title="导入书签" aria-label="导入书签">${treeIcon("upload")}</button><button id="add-bookmark" class="primary add-bookmark">${treeIcon("add")}<span>添加</span></button></div></header><div class="workspace-sections">${workspaces}</div></section></main>`);
+  root.innerHTML = localizeHtml(`<main class="library">${sidebarMarkup()}<section class="content"><header class="topbar"><label class="quick-search"><span>⌕</span><span id="search-filter-label" class="search-filter-label">搜索</span><input id="search" aria-controls="search-filter-menu" aria-labelledby="search-filter-label" value="${escapeHtml(state.query)}" placeholder="搜索" autocomplete="off"><kbd>⌘ K</kbd></label><div class="top-actions"><button id="check-links" class="top-action-icon"${state.connectionInfo ? "" : " disabled"} title="${state.connectionInfo ? t("检查链接") : t("连接私有实例后可用")}" aria-label="${state.connectionInfo ? t("检查链接") : t("连接私有实例后可用")}">${treeIcon("refresh")}</button><div class="theme-menu-wrap"><button id="theme" class="top-action-icon theme-trigger" title="主题：${themeOption().label}" aria-label="主题：${themeOption().label}" aria-haspopup="menu" aria-expanded="${state.themeMenuOpen}" data-theme-trigger>${treeIcon(themeOption().icon)}</button>${themeMenuMarkup()}</div><button id="import" class="top-action-icon" title="导入书签" aria-label="导入书签">${treeIcon("upload")}</button><button id="add-bookmark" class="primary add-bookmark" data-added="${state.addButtonSaved}">${treeIcon(state.addButtonSaved ? "check" : "add")}<span>${state.addButtonSaved ? "已添加" : "添加"}</span></button></div></header><div class="workspace-sections">${workspaces}</div></section></main>`);
   const nav = root.querySelector(".nav");
   if (nav && navScrollTop != null) nav.scrollTop = navScrollTop;
   const sidebar = root.querySelector(".sidebar");
@@ -4310,10 +4380,16 @@ function selectAll(sectionId) {
   if (allSelected) items.forEach((item) => state.selected.delete(item.id));
   else items.forEach((item) => state.selected.add(item.id));
   if (!state.selected.size) state.selectionSectionId = null;
-  refreshSelectionUi();
+  refreshSelectionUi({ refreshHeader: true });
 }
 
 function bindWorkspaceHeader() {
+  root.querySelectorAll(".workspace-title-link").forEach((link) => link.onclick = (event) => {
+    event.preventDefault();
+    const collectionId = link.closest(".workspace")?.dataset.sectionId;
+    if (!collectionId || collectionId === state.collectionId) return;
+    switchView("all", collectionId);
+  });
   root.querySelectorAll(".workspace").forEach((workspace) => {
     const sectionId = workspace.dataset.sectionId;
     const selectAllControl = workspace.querySelector("[data-select-all]");
@@ -4716,15 +4792,15 @@ function bind() {
     state.searchMenuOpen = true;
     renderSearchMenu();
   };
-  search.addEventListener("focus", openSearchMenu);
-  search.addEventListener("click", openSearchMenu);
-  search.addEventListener("input", () => {
+  search.onfocus = openSearchMenu;
+  search.onclick = openSearchMenu;
+  search.oninput = () => {
     clearTimeout(state.searchTimer);
     state.searchTimer = setTimeout(() => {
       commitSearch(search.value);
     }, 180);
-  });
-  search.addEventListener("keydown", (event) => {
+  };
+  search.onkeydown = (event) => {
     if ((event.key === "ArrowUp" || event.key === "ArrowDown") && state.searchMenuOpen) {
       const options = [...(searchMenuElement()?.querySelectorAll('[role="option"]') || [])];
       if (!options.length) return;
@@ -4751,12 +4827,12 @@ function bind() {
       }
     }
     commitSearch(search.value, true, "push");
-  });
+  };
   root.querySelectorAll("[data-select]").forEach((input) => input.onchange = () => {
     state.selectionSectionId = input.closest(".workspace")?.dataset.sectionId || null;
     input.checked ? state.selected.add(input.dataset.select) : state.selected.delete(input.dataset.select);
     if (!state.selected.size) state.selectionSectionId = null;
-    refreshSelectionUi();
+    refreshSelectionUi({ refreshHeader: true });
   });
   root.querySelectorAll("[data-favorite]").forEach((button) => button.onclick = async () => {
     const item = state.items.find((entry) => entry.id === button.dataset.favorite);
@@ -4776,25 +4852,27 @@ function bind() {
     showError(new TypeError(t("预览功能暂未接入。")));
   });
   prepareCardActionProxies();
-  root.querySelectorAll("[data-edit]").forEach((button) => button.onclick = () => {
-    const item = state.items.find((entry) => entry.id === button.dataset.edit);
+  const openEdit = (item, focus = "") => {
     if (!item) return;
     const form = editBookmarkDialog.querySelector("form");
-    if (editBookmarkDialog.open && state.editingId === item.id) {
-      if (button.dataset.editFocus === "tags") form.querySelector("#edit-tag-input")?.focus();
+    if (editBookmarkDialog.open && state.editingId === item.id && item.id) {
+      if (focus === "tags") form.querySelector("#edit-tag-input")?.focus();
       return;
     }
     if (editBookmarkDialog.open && editFormIsDirty() && !window.confirm("当前编辑尚未保存，切换会放弃修改。确定继续吗？")) return;
-    state.editingId = item.id;
+    const isNew = !item.id;
+    state.editingId = item.id || "";
+    editBookmarkDialog.dataset.newBookmark = isNew ? "1" : "";
     form._recommendationCreatedCollections = [];
-    form.elements.link.value = item.link;
-    form.elements.title.value = item.title;
-    form.elements.description.value = item.description;
-    form.elements.note.value = item.note;
-    form.elements.reminder.value = dateTimeInputValue(item.reminder);
+    form.elements.link.value = item.link || "";
+    form.elements.title.value = item.title || "";
+    form.elements.description.value = item.description || "";
+    form.elements.note.value = item.note || "";
+    form.elements.reminder.value = dateTimeInputValue(item.reminder || "");
+    form.elements.type.value = item.type || bookmarkType(item);
     form.elements.cover.value = item.cover || "";
     form.elements.media.value = JSON.stringify(Array.isArray(item.media) ? item.media : []);
-    form.elements.collectionId.innerHTML = collectionOptions(state.collections, item.collectionId);
+    form.elements.collectionId.innerHTML = collectionOptions(state.collections, item.collectionId || state.collectionId || state.preferences?.defaultCollectionId || "unsorted");
     const coverTrigger = form.querySelector("#edit-cover-trigger");
     coverTrigger.querySelector("#edit-cover-more").innerHTML = treeIcon("caret");
     coverTrigger.onclick = () => openCoverPicker();
@@ -4963,7 +5041,7 @@ function bind() {
     const tagField = form.querySelector(".edit-tags-field");
     const tagMenu = form.querySelector("#edit-tag-menu");
     const availableTags = tagList(state.items);
-    let editTags = [...item.tags];
+    let editTags = [...(item.tags || [])];
     const candidate = () => tagInput.value.trim().replace(/^#/, "").slice(0, 100);
     const syncTags = () => {
       tagValue.value = JSON.stringify(editTags);
@@ -5023,13 +5101,13 @@ function bind() {
       const option = event.target.closest("[data-tag-option], [data-create-tag]");
       if (option) addTag(option.dataset.tagOption || candidate());
     };
-    editBookmarkDialog.dataset.bookmarkId = item.id;
+    editBookmarkDialog.dataset.bookmarkId = item.id || "";
     bindRecommendationForm(form, {
       getTags: () => [...editTags],
       setTags: (tags) => { editTags = [...tags]; syncTags(); updateTagMenu(); },
       syncCollection,
     });
-    form.elements.favorite.checked = item.favorite;
+    form.elements.favorite.checked = Boolean(item.favorite);
     const notePreview = editBookmarkDialog.querySelector("#edit-note-preview");
     const markdownButton = editBookmarkDialog.querySelector("#edit-note-markdown");
     form.elements.note.hidden = false;
@@ -5049,9 +5127,12 @@ function bind() {
       if (!previewing) notePreview.innerHTML = renderMarkdown(form.elements.note.value);
     };
     syncEditCoverPreview(item);
-    editBookmarkDialog.querySelector("#edit-open-link").href = item.link;
-    editBookmarkDialog.querySelector("#edit-saved-at").textContent = `${t("已保存 ")}${dateTimeLabel(item.updatedAt || item.createdAt)}`;
+    const openLink = editBookmarkDialog.querySelector("#edit-open-link");
+    openLink.href = item.link || "#";
+    openLink.hidden = !item.link;
+    editBookmarkDialog.querySelector("#edit-saved-at").textContent = isNew ? "" : `${t("已保存 ")}${dateTimeLabel(item.updatedAt || item.createdAt)}`;
     const deleteButton = editBookmarkDialog.querySelector("#edit-delete");
+    deleteButton.hidden = isNew;
     deleteButton.textContent = t(state.view === "trash" ? "恢复" : "删除");
     deleteButton.onclick = async () => {
       if (state.view === "trash") await mutate(`/v1/bookmarks/${item.id}/restore`, { method: "POST", body: JSON.stringify({ revision: item.revision }) });
@@ -5062,7 +5143,7 @@ function bind() {
       editBookmarkDialog.close("cancel");
       load().catch(showError);
     };
-    editBookmarkDialog.dataset.highlights = JSON.stringify(item.highlights);
+    editBookmarkDialog.dataset.highlights = JSON.stringify(item.highlights || []);
     const highlightsButton = form.querySelector("#edit-highlights");
     if (highlightsButton) highlightsButton.onclick = () => {
       editBookmarkDialog.dataset.highlights = JSON.stringify(editHighlights({ ...item, highlights: JSON.parse(editBookmarkDialog.dataset.highlights) }));
@@ -5070,8 +5151,9 @@ function bind() {
     if (!editBookmarkDialog.open) editBookmarkDialog.show();
     state.editSnapshot = editFormSnapshot();
     syncEditPanelLayout();
-    if (button.dataset.editFocus === "tags") queueMicrotask(() => form.querySelector("#edit-tag-input")?.focus());
-  });
+    if (focus === "tags") queueMicrotask(() => form.querySelector("#edit-tag-input")?.focus());
+  };
+  root.querySelectorAll("[data-edit]").forEach((button) => button.onclick = () => openEdit(state.items.find((entry) => entry.id === button.dataset.edit), button.dataset.editFocus));
   root.querySelectorAll("[data-delete]").forEach((button) => button.onclick = async () => {
     const item = state.items.find((entry) => entry.id === button.dataset.delete);
     if (state.view === "trash") await mutate(`/v1/bookmarks/${item.id}/restore`, { method: "POST", body: JSON.stringify({ revision: item.revision }) });
@@ -5098,19 +5180,20 @@ function bind() {
     renderSidebar();
     focusInlineCollection("sidebar");
   });
-  root.querySelector("#add-bookmark").onclick = () => {
-    const form = bookmarkDialog.querySelector("form");
-    form.reset();
-    form.elements.tags.value = "[]";
-    form._recommendationCreatedCollections = [];
-    form.elements.collectionId.innerHTML = collectionOptions(state.collections, state.collectionId || state.preferences.defaultCollectionId);
-    bindRecommendationForm(form, {
-      getTags: () => {
-        try { return JSON.parse(form.elements.tags.value || "[]"); } catch { return []; }
-      },
-      setTags: (tags) => { form.elements.tags.value = JSON.stringify(tags); },
-    });
-    bookmarkDialog.showModal();
+  root.querySelector("#add-bookmark").onclick = async () => {
+    const button = root.querySelector("#add-bookmark");
+    button.disabled = true;
+    try {
+      const page = await currentPageDraft();
+      openEdit({
+        ...page,
+        type: page.type || "link",
+        tags: [],
+        collectionId: state.collectionId || state.preferences?.defaultCollectionId || "unsorted",
+      });
+    } finally {
+      button.disabled = false;
+    }
   };
   root.querySelector("#import").onclick = () => isPopupSurface()
     ? openFullPage("library.html?settings=import")
@@ -5119,11 +5202,12 @@ function bind() {
     if (!state.connectionInfo) return;
     return api("/v1/health-checks", { method: "POST", body: JSON.stringify({ collectionId: state.collectionId }) }).then(() => load()).catch(showError);
   };
-  root.querySelector("[data-theme-trigger]")?.addEventListener("click", (event) => {
+  const themeTrigger = root.querySelector("[data-theme-trigger]");
+  if (themeTrigger) themeTrigger.onclick = (event) => {
     event.stopPropagation();
     state.themeMenuOpen = !state.themeMenuOpen;
     renderThemeMenu();
-  });
+  };
   bindThemeMenu();
   bindDragDrop();
 }
@@ -5577,44 +5661,47 @@ bookmarkDialog.addEventListener("close", async () => {
 
 editBookmarkDialog.addEventListener("close", async () => {
   const form = editBookmarkDialog.querySelector("form");
+  const isNew = editBookmarkDialog.dataset.newBookmark === "1";
   const bookmarkId = state.editingId || editBookmarkDialog.dataset.bookmarkId;
   state.editingId = "";
   state.editSnapshot = "";
   editBookmarkDialog.dataset.bookmarkId = "";
+  editBookmarkDialog.dataset.newBookmark = "";
   syncEditPanelLayout(false);
   if (editBookmarkDialog.returnValue !== "save") {
     if (await cleanupRecommendationCollections(form)) load().catch(showError);
     return;
   }
   const item = state.items.find((entry) => entry.id === bookmarkId);
-  if (!item) {
+  if (!isNew && !item) {
     if (await cleanupRecommendationCollections(form)) load().catch(showError);
     return;
   }
   try {
     const fields = new FormData(form);
-    const saved = await mutate(`/v1/bookmarks/${item.id}`, {
-      method: "PATCH",
-      body: JSON.stringify({
-        revision: item.revision,
-        link: fields.get("link"),
-        title: fields.get("title"),
-        description: fields.get("description"),
-        note: fields.get("note"),
-        reminder: fields.get("reminder"),
-        cover: fields.get("cover") || "",
-        media: JSON.parse(fields.get("media") || "[]"),
-        collectionId: fields.get("collectionId"),
-        tags: JSON.parse(fields.get("tags") || "[]"),
-        favorite: fields.has("favorite"),
-        highlights: JSON.parse(editBookmarkDialog.dataset.highlights),
-      }),
-    });
+    const body = {
+      link: fields.get("link"),
+      type: fields.get("type") || "link",
+      title: fields.get("title"),
+      description: fields.get("description"),
+      note: fields.get("note"),
+      reminder: fields.get("reminder"),
+      cover: fields.get("cover") || "",
+      media: JSON.parse(fields.get("media") || "[]"),
+      collectionId: fields.get("collectionId"),
+      tags: JSON.parse(fields.get("tags") || "[]"),
+      favorite: fields.has("favorite"),
+      highlights: JSON.parse(editBookmarkDialog.dataset.highlights || "[]"),
+    };
+    const saved = isNew
+      ? await api("/v1/bookmarks", { method: "POST", body: JSON.stringify(body) })
+      : await mutate(`/v1/bookmarks/${item.id}`, { method: "PATCH", body: JSON.stringify({ revision: item.revision, ...body }) });
     if (!saved) {
       if (await cleanupRecommendationCollections(form)) load().catch(showError);
       return;
     }
     form._recommendationCreatedCollections = [];
+    if (isNew && isExtensionSurface()) state.addButtonSaved = true;
   } catch (error) {
     if (await cleanupRecommendationCollections(form)) load().catch(showError);
     showError(error);
