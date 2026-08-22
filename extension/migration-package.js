@@ -168,6 +168,180 @@ function validateSnapshot(snapshot) {
   validateRecords({ ...snapshot, browserStorage: snapshot.browserStorage, tombstones: snapshot.tombstones, cursor: snapshot.cursor }, false);
 }
 
+function snapshotSummary(snapshot) {
+  const normalized = normalizeSnapshot(snapshot);
+  const settingsCategories = Object.keys(normalized.settings).filter((key) => key !== TOMBSTONE_SETTING).sort();
+  return {
+    recordCounts: {
+      bookmarks: normalized.bookmarks.length,
+      collections: normalized.collections.length,
+      settings: settingsCategories.length,
+      outbox: normalized.outbox.length,
+      conflicts: normalized.conflicts.length,
+      tombstones: normalized.tombstones.length,
+    },
+    settingsCategories,
+    browserStorageCategories: Object.keys(normalized.browserStorage).sort(),
+    outboxCount: normalized.outbox.length,
+    conflictsCount: normalized.conflicts.length,
+    tombstoneCount: normalized.tombstones.length,
+    cursor: normalized.cursor,
+  };
+}
+
+function hasLibraryData(snapshot) {
+  const normalized = normalizeSnapshot(snapshot);
+  return normalized.bookmarks.length > 0
+    || normalized.collections.some((item) => item.id !== "unsorted")
+    || Object.keys(normalized.settings).some((key) => key !== "initialized" && key !== TOMBSTONE_SETTING)
+    || Object.keys(normalized.browserStorage).length > 0
+    || normalized.outbox.length > 0
+    || normalized.conflicts.length > 0
+    || normalized.tombstones.length > 0;
+}
+
+function sameValue(left, right) {
+  return stableStringify(left) === stableStringify(right);
+}
+
+function sameSnapshot(left, right) {
+  const comparable = (value) => {
+    const snapshot = normalizeSnapshot(value);
+    for (const [field, key] of [["bookmarks", "id"], ["collections", "id"], ["outbox", "id"], ["conflicts", "key"], ["tombstones", "entity"]]) {
+      snapshot[field].sort((a, b) => `${a[key] || ""}:${a.id || ""}`.localeCompare(`${b[key] || ""}:${b.id || ""}`));
+    }
+    return snapshot;
+  };
+  return sameValue(comparable(left), comparable(right));
+}
+
+function recoveryId(id, used, label) {
+  let suffix = 1;
+  let candidate = `${id}-${label}-recovery`;
+  while (used.has(candidate)) candidate = `${id}-${label}-recovery-${suffix++}`;
+  used.add(candidate);
+  return candidate;
+}
+
+function mergeSnapshots(currentValue, incomingValue, checksum) {
+  const current = normalizeSnapshot(currentValue);
+  const incoming = normalizeSnapshot(incomingValue);
+  const bookmarks = current.bookmarks.map(clone);
+  const collections = current.collections.map(clone);
+  const bookmarkIds = new Set([...bookmarks, ...incoming.bookmarks].map((item) => item.id));
+  const collectionIds = new Set([...collections, ...incoming.collections].map((item) => item.id));
+  const collectionMap = new Map();
+
+  for (const item of incoming.collections) {
+    const existing = collections.find((value) => value.id === item.id);
+    if (!existing) {
+      collectionMap.set(item.id, item.id);
+      collectionIds.add(item.id);
+      continue;
+    }
+    if (sameValue(existing, item)) {
+      collectionMap.set(item.id, item.id);
+      continue;
+    }
+    const id = recoveryId(item.id, collectionIds, "collection");
+    collectionMap.set(item.id, id);
+  }
+  for (const item of incoming.collections) {
+    const existing = collections.find((value) => value.id === item.id);
+    if (existing && collectionMap.get(item.id) === item.id) continue;
+    const id = collectionMap.get(item.id);
+    const copied = id !== item.id;
+    collections.push({ ...clone(item), id, ...(copied ? { name: `${item.name || "收藏夹"}（恢复副本）` } : {}), parentId: collectionMap.get(item.parentId) || item.parentId || null });
+  }
+
+  for (const item of incoming.bookmarks) {
+    const existing = bookmarks.find((value) => value.id === item.id);
+    const collectionId = collectionMap.get(item.collectionId) || item.collectionId;
+    if (!existing) {
+      bookmarks.push({ ...clone(item), collectionId });
+      bookmarkIds.add(item.id);
+      continue;
+    }
+    if (sameValue(existing, item)) continue;
+    const id = recoveryId(item.id, bookmarkIds, "bookmark");
+    bookmarks.push({ ...clone(item), id, title: `${item.title || item.link || "书签"}（恢复副本）`, collectionId });
+  }
+
+  const settings = { ...clone(current.settings) };
+  const settingRecovery = [];
+  for (const [key, value] of Object.entries(incoming.settings)) {
+    if (settings[key] === undefined) settings[key] = clone(value);
+    else if (key === "sync" && isObject(settings[key]) && isObject(value)) {
+      const merged = { ...settings[key] };
+      for (const [field, next] of Object.entries(value)) {
+        if (merged[field] === undefined) merged[field] = clone(next);
+        else if (!sameValue(merged[field], next)) settingRecovery.push({ key: `sync.${field}`, value: clone(next) });
+      }
+      settings[key] = merged;
+    }
+    else if (!sameValue(settings[key], value)) settingRecovery.push({ key, value: clone(value) });
+  }
+
+  const browserStorage = { ...clone(current.browserStorage) };
+  const browserStorageRecovery = [];
+  for (const [key, value] of Object.entries(incoming.browserStorage)) {
+    if (browserStorage[key] === undefined) browserStorage[key] = clone(value);
+    else if (!sameValue(browserStorage[key], value)) browserStorageRecovery.push({ key, value: clone(value) });
+  }
+
+  const outbox = current.outbox.map(clone);
+  const outboxIds = new Set(outbox.map((item) => Number(item.id)).filter(Number.isFinite));
+  let nextOutboxId = Math.max(0, ...outboxIds) + 1;
+  for (const item of incoming.outbox) {
+    const existing = outbox.find((value) => Number(value.id) === Number(item.id));
+    if (!existing) outbox.push(clone(item));
+    else if (!sameValue(existing, item)) {
+      while (outboxIds.has(nextOutboxId)) nextOutboxId += 1;
+      outbox.push({ ...clone(item), id: nextOutboxId });
+      outboxIds.add(nextOutboxId);
+      nextOutboxId += 1;
+    }
+  }
+
+  const conflicts = current.conflicts.map(clone);
+  const conflictKeys = new Set(conflicts.map((item) => item.key));
+  for (const item of incoming.conflicts) {
+    const existing = conflicts.find((value) => value.key === item.key);
+    if (!existing) conflicts.push(clone(item));
+    else if (!sameValue(existing, item)) {
+      let key = `${item.key}#recovery`;
+      let suffix = 1;
+      while (conflictKeys.has(key)) key = `${item.key}#recovery-${suffix++}`;
+      conflicts.push({ ...clone(item), key });
+      conflictKeys.add(key);
+    }
+  }
+
+  const tombstonesByKey = new Map([...current.tombstones, ...incoming.tombstones].map((item) => [tombstoneKey(item), clone(item)]));
+  for (const item of current.tombstones) {
+    const incomingItem = incoming.tombstones.find((value) => tombstoneKey(value) === tombstoneKey(item));
+    if (incomingItem) tombstonesByKey.set(tombstoneKey(item), {
+      ...item,
+      ...clone(incomingItem),
+      revision: Math.max(Number(item.revision) || 0, Number(incomingItem.revision) || 0),
+    });
+  }
+  const tombstones = [...tombstonesByKey.values()];
+  const cursorsDiffer = current.cursor && incoming.cursor && current.cursor !== incoming.cursor;
+  const cursor = cursorsDiffer ? "" : current.cursor || incoming.cursor || "";
+  if (isObject(settings.sync) || cursor) settings.sync = { ...(settings.sync || {}), cursor };
+  if (settingRecovery.length || browserStorageRecovery.length) {
+    const prior = Array.isArray(settings.migrationRecovery) ? settings.migrationRecovery : [];
+    settings.migrationRecovery = [...prior, {
+      checksum,
+      settings: settingRecovery,
+      browserStorage: browserStorageRecovery,
+    }];
+  }
+
+  return { bookmarks, collections, settings, browserStorage, outbox, conflicts, tombstones, cursor };
+}
+
 function containsSessionKey(value) {
   if (Array.isArray(value)) return value.some(containsSessionKey);
   if (!isObject(value)) return false;
@@ -287,9 +461,42 @@ function setPersistentStorage(storage, value) {
   });
 }
 
+function clearPersistentStorage(storage) {
+  if (!storage) return Promise.resolve();
+  if (storage.clear) {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = () => { if (!settled) { settled = true; resolve(); } };
+      let result;
+      try { result = storage.clear(finish); } catch (error) { reject(error); return; }
+      if (result?.then) result.then(finish, reject);
+    });
+  }
+  if (!storage.get || !storage.remove) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    storage.get(null, (values = {}) => {
+      const keys = Object.keys(values);
+      if (!keys.length) return resolve();
+      let result;
+      try { result = storage.remove(keys, resolve); } catch (error) { reject(error); return; }
+      if (result?.then) result.then(resolve, reject);
+    });
+  });
+}
+
 async function readMigrationSnapshot(options = {}) {
   const database = await readDatabaseSnapshot(options);
   return normalizeSnapshot({ ...database, browserStorage: await readPersistentStorage(storageObject(options)) });
+}
+
+function emptySnapshot() {
+  return { bookmarks: [], collections: [], settings: {}, browserStorage: {}, outbox: [], conflicts: [], tombstones: [], cursor: "" };
+}
+
+async function currentSnapshot(options = {}) {
+  if (options.readSnapshot) return normalizeSnapshot(await options.readSnapshot());
+  if (options.writeSnapshot) return null;
+  return readMigrationSnapshot(options);
 }
 
 async function writeMigrationSnapshot(value, options = {}) {
@@ -305,7 +512,9 @@ async function writeMigrationSnapshot(value, options = {}) {
   for (const record of snapshot.conflicts) transaction.objectStore("conflicts").put(record);
   await transactionDone(transaction);
   db.close();
-  await setPersistentStorage(storageObject(options), snapshot.browserStorage);
+  const storage = storageObject(options);
+  await clearPersistentStorage(storage);
+  await setPersistentStorage(storage, snapshot.browserStorage);
   return snapshot;
 }
 
@@ -327,9 +536,125 @@ export async function exportMigrationPackage(options = {}) {
   });
 }
 
-export async function importMigrationPackage(value, options = {}) {
+export async function previewMigrationPackage(value, options = {}) {
   const parsed = await parseMigrationPackage(value, options);
   const snapshot = normalizeSnapshot(parsed);
-  await (options.writeSnapshot || ((next) => writeMigrationSnapshot(next, options)))(snapshot);
-  return { checksum: parsed.checksum };
+  const summary = snapshotSummary(snapshot);
+  const result = {
+    status: "preview",
+    mode: "preview",
+    format: parsed.format,
+    version: parsed.version,
+    source: clone(parsed.source),
+    checksum: parsed.checksum,
+    ...summary,
+  };
+  if (options.includeCurrent || options.readSnapshot) {
+    const current = await currentSnapshot(options);
+    if (current) result.current = snapshotSummary(current);
+  }
+  return result;
+}
+
+async function safetySnapshot(snapshot, options, source) {
+  const value = await createMigrationPackage(snapshot, {
+    cryptoImpl: options.cryptoImpl,
+    source: source || { extensionId: "", extensionVersion: "" },
+  });
+  return parseMigrationPackage(value, options);
+}
+
+function writerFor(options) {
+  return options.writeSnapshot || ((snapshot) => writeMigrationSnapshot(snapshot, options));
+}
+
+async function verifySnapshot(snapshot, options, reader, customWriter) {
+  if (options.verifySnapshot) return options.verifySnapshot(snapshot);
+  if (customWriter || !reader) return true;
+  const actual = normalizeSnapshot(await reader());
+  if (!sameSnapshot(actual, snapshot)) {
+    const expected = normalizeSnapshot(snapshot);
+    const error = new MigrationError("migration_validation_failed");
+    error.details = {
+      expected: snapshotSummary(expected),
+      actual: snapshotSummary(actual),
+      mismatchedFields: ["bookmarks", "collections", "settings", "browserStorage", "outbox", "conflicts", "tombstones", "cursor"].filter((field) => !sameValue(expected[field], actual[field])),
+      recordIds: {
+        expectedBookmarks: expected.bookmarks.map((item) => item.id),
+        actualBookmarks: actual.bookmarks.map((item) => item.id),
+        expectedCollections: expected.collections.map((item) => item.id),
+        actualCollections: actual.collections.map((item) => item.id),
+      },
+    };
+    throw error;
+  }
+  return true;
+}
+
+export async function applyMigrationPackage(value, mode = "replace", options = {}) {
+  if (isObject(mode)) {
+    options = mode;
+    mode = options.mode || "replace";
+  }
+  if (!["import", "replace", "merge", "cancel"].includes(mode)) fail("invalid_migration_action");
+  const parsed = await parseMigrationPackage(value, options);
+  if (mode === "cancel") return { status: "cancelled", mode, checksum: parsed.checksum };
+
+  const incoming = normalizeSnapshot(parsed);
+  const reader = options.readSnapshot || (!options.writeSnapshot ? () => readMigrationSnapshot(options) : null);
+  const current = await currentSnapshot(options);
+  if (mode === "import" && current && hasLibraryData(current)) return { status: "rejected", mode, reason: "library_not_empty", checksum: parsed.checksum };
+
+  const existing = current || emptySnapshot();
+  const desired = mode === "merge" ? mergeSnapshots(existing, incoming, parsed.checksum) : incoming;
+  validateSnapshot(desired);
+  const writer = writerFor(options);
+  const customWriter = Boolean(options.writeSnapshot);
+  const safety = mode === "replace" && current ? await safetySnapshot(existing, options, { extensionId: "", extensionVersion: "" }) : null;
+
+  try {
+    await writer(desired);
+    await verifySnapshot(desired, options, reader, customWriter);
+    return {
+      status: "applied",
+      mode,
+      checksum: parsed.checksum,
+      recoveryCopies: mode === "merge" ? countRecoveryCopies(existing, desired) : 0,
+      ...(safety ? { safetySnapshot: safety } : {}),
+    };
+  } catch (reason) {
+    if (!current) throw reason;
+    try {
+      await writer(existing);
+    } catch {
+      const error = new MigrationError("migration_rollback_failed");
+      error.cause = reason;
+      throw error;
+    }
+    return {
+      status: "rolled_back",
+      mode,
+      checksum: parsed.checksum,
+      errorCode: reason?.code || "migration_write_failed",
+      ...(reason?.details ? { validation: reason.details } : {}),
+      ...(safety ? { safetySnapshot: safety } : {}),
+    };
+  }
+}
+
+function countRecoveryCopies(current, merged) {
+  const currentKeys = new Set([
+    ...current.bookmarks.map((item) => item.id),
+    ...current.collections.map((item) => item.id),
+  ]);
+  const settingRecovery = Array.isArray(merged.settings?.migrationRecovery)
+    ? merged.settings.migrationRecovery.reduce((total, item) => total + (item.settings?.length || 0) + (item.browserStorage?.length || 0), 0)
+    : 0;
+  return merged.bookmarks.filter((item) => !currentKeys.has(item.id)).filter((item) => /（恢复副本）$/.test(item.title || "")).length
+    + merged.collections.filter((item) => !currentKeys.has(item.id)).filter((item) => /（恢复副本）$/.test(item.name || "")).length
+    + settingRecovery;
+}
+
+export async function importMigrationPackage(value, options = {}) {
+  return applyMigrationPackage(value, options.mode || "replace", options);
 }

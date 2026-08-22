@@ -51,7 +51,7 @@ test("account settings exposes a Worker connection form without disabling local 
 
 test("legacy export and React migration file transfer share the package seam", () => {
   assert.match(library, /exportMigrationPackage/);
-  assert.match(library, /importMigrationPackage/);
+  assert.match(library, /(?:importMigrationPackage|applyMigrationPackage)/);
   assert.match(library, /data-migration-export/);
   assert.match(library, /data-migration-import/);
   assert.match(library, /private-bookmarks-migration\.json/);

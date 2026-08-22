@@ -7,7 +7,7 @@ import { renderMarkdown } from "./markdown.js";
 import { mediaArchiveEntries } from "./media-archive.js";
 import { recommendBookmark } from "./recommendations.js";
 import { collectionOptions, connectionView, escapeHtml, isCurrentRequest, lockView, shouldShowGlobalLoading } from "./ui.js?v=20260811-navigation3";
-import { exportMigrationPackage, importMigrationPackage } from "./migration-package.js";
+import { applyMigrationPackage, exportMigrationPackage, previewMigrationPackage } from "./migration-package.js";
 
 const root = document.querySelector("#app");
 const collectionValueDialog = document.querySelector("#collection-value-dialog");
@@ -143,7 +143,7 @@ const state = {
   settingsOpen: initialSettingsRoute, settingsSection: initialSettingsSection || "app", settingsMenu: null, settingsNeedsReload: false, settingsSavePromise: null, connectionInfo: null, addButtonSaved: false,
   viewSwitching: false,
   loading: false,
-  importPreview: readImportProgress(), importBusy: false, backups: readBackupHistory(), backupSource: "local", backupBusy: false, backupLoading: false, backupIncludeMedia: false, cloudConnections: [], cloudBackups: { dropbox: [], google: [], onedrive: [] }, cloudBackupLoading: {}, cloudBackupErrors: {}, cloudBusy: false, lock: { enabled: false, locked: false, autoLock: "15" },
+  importPreview: readImportProgress(), importBusy: false, migrationPreview: null, migrationBusy: false, backups: readBackupHistory(), backupSource: "local", backupBusy: false, backupLoading: false, backupIncludeMedia: false, cloudConnections: [], cloudBackups: { dropbox: [], google: [], onedrive: [] }, cloudBackupLoading: {}, cloudBackupErrors: {}, cloudBusy: false, lock: { enabled: false, locked: false, autoLock: "15" },
 };
 state.sidebarWidth = readSidebarWidth();
 
@@ -2636,14 +2636,68 @@ async function downloadMigrationPackage() {
   window.setTimeout(() => { URL.revokeObjectURL(url); link.remove(); }, 1000);
 }
 
+function migrationCountMarkup(summary, label = "") {
+  if (!summary) return "";
+  const counts = summary.recordCounts || {};
+  return `<div class="settings-import-stats" data-migration-counts><strong>${escapeHtml(label)}</strong><span>${counts.bookmarks || 0} 书签</span><span>${counts.collections || 0} 收藏夹</span><span>${counts.settings || 0} 设置类别</span><span>${summary.outboxCount || 0} 待同步</span><span>${summary.conflictsCount || 0} 冲突</span><span>${counts.tombstones || 0} tombstone</span></div>`;
+}
+
+function migrationPreviewMarkup(preview) {
+  if (!preview) return "";
+  if (preview.status && !preview.checksum) return `<p class="settings-import-status">${escapeHtml(preview.status)}</p>`;
+  if (preview.error) return `<section class="settings-import-preview"><p class="settings-import-error">${escapeHtml(preview.error)}</p><button type="button" class="settings-import-clear" data-migration-action="cancel">清除</button></section>`;
+  const source = preview.source || {};
+  const result = preview.result;
+  const disabled = state.migrationBusy ? "disabled" : "";
+  const currentBusy = preview.current?.recordCounts?.bookmarks || preview.current?.recordCounts?.collections;
+  const resultMarkup = result ? `<p class="settings-import-status" data-migration-result>迁移结果：${escapeHtml(result.status === "applied" ? `已${result.mode === "merge" ? "合并" : result.mode === "import" ? "导入" : "替换"}` : result.status === "cancelled" ? "已取消" : result.status === "rolled_back" ? `失败，已回滚${result.errorCode ? `（${result.errorCode}）` : ""}` : `已拒绝${result.reason ? `（${result.reason === "library_not_empty" ? "当前资料库非空" : result.reason}）` : ""}`)}${result.recoveryCopies ? `，生成 ${result.recoveryCopies} 个恢复副本` : ""}${result.validation ? ` · 校验摘要 ${escapeHtml(JSON.stringify(result.validation))}` : ""}</p>${result.safetySnapshot ? `<button type="button" class="settings-import-clear" data-migration-download-safety>下载替换前安全快照</button>` : ""}` : "";
+  return `<section class="settings-import-preview" data-migration-preview><div class="settings-import-preview-head"><strong>迁移预览</strong><span>${escapeHtml(preview.name || "")}</span></div><dl class="settings-migration-meta"><div><dt>来源</dt><dd>${escapeHtml(source.extensionId || "未知")}</dd></div><div><dt>版本</dt><dd>${escapeHtml(source.extensionVersion || "未知")} · 格式 v${preview.version}</dd></div><div><dt>校验和</dt><dd><code>${escapeHtml(preview.checksum)}</code></dd></div></dl>${migrationCountMarkup(preview, "来源资料库")}${migrationCountMarkup(preview.current, "当前资料库")}${preview.settingsCategories?.length ? `<p>设置类别：${preview.settingsCategories.map((item) => escapeHtml(item)).join("、")}</p>` : ""}${preview.browserStorageCategories?.length ? `<p>持久浏览器设置：${preview.browserStorageCategories.map((item) => escapeHtml(item)).join("、")}</p>` : ""}<p class="settings-import-warning">替换会先创建并验证安全快照；合并遇到同 ID 差异时保留恢复副本；取消不会写入任何数据。</p><div class="settings-import-actions"><button type="button" class="primary" data-migration-action="import" ${disabled}>导入${currentBusy ? "（当前资料库非空）" : ""}</button><button type="button" class="primary" data-migration-action="replace" ${disabled}>替换</button><button type="button" data-migration-action="merge" ${disabled}>合并</button><button type="button" class="settings-import-clear" data-migration-action="cancel" ${disabled}>取消</button></div>${resultMarkup}</section>`;
+}
+
+async function prepareMigrationFile(file) {
+  if (!file || state.migrationBusy) return;
+  state.migrationPreview = { status: "正在解析…" };
+  renderSettings();
+  try {
+    const value = await file.text();
+    state.migrationPreview = { ...(await previewMigrationPackage(value, { includeCurrent: true })), name: file.name, package: value };
+  } catch (error) {
+    state.migrationPreview = { error: error.message || "无法解析迁移包" };
+  }
+  renderSettings();
+}
+
+function downloadMigrationValue(value, name) {
+  const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: "application/json" }));
+  const link = Object.assign(document.createElement("a"), { href: url, download: name });
+  document.body.append(link); link.click();
+  window.setTimeout(() => { URL.revokeObjectURL(url); link.remove(); }, 1000);
+}
+
+async function runMigrationAction(mode) {
+  const preview = state.migrationPreview;
+  if (!preview?.package || state.migrationBusy) return;
+  if (mode === "replace" && !confirm("替换会覆盖当前资料库。执行前会创建安全快照，继续吗？")) return;
+  state.migrationBusy = true;
+  renderSettings();
+  try {
+    const result = await applyMigrationPackage(preview.package, mode);
+    state.migrationPreview = { ...preview, result };
+    if (result.status === "applied") await load();
+  } catch (error) {
+    state.migrationPreview = { ...preview, error: error.message || "迁移失败" };
+  } finally {
+    state.migrationBusy = false;
+    renderSettings();
+  }
+}
+
 async function uploadMigrationPackage(file) {
-  if (!confirm("导入迁移包会替换当前本地资料库。继续吗？")) return;
-  await importMigrationPackage(await file.text());
-  location.reload();
+  await prepareMigrationFile(file);
 }
 
 function importSettingsMarkup() {
-  return `<div class="settings-content settings-import-content"><div class="settings-grid settings-import-grid"><div class="settings-label">迁移到 React/WXT</div><div><div class="settings-import-alert"><strong>迁移包</strong><br>迁移包包含本地资料库和持久设置，不包含会话解锁状态或明文密钥。<br><button type="button" class="primary" data-migration-export>导出迁移包</button> <label class="settings-import-upload button primary">导入迁移包<input type="file" class="hidden" data-migration-import accept="application/json,.json"></label></div></div><div class="settings-label">档案</div><div><div class="settings-import-alert"><strong>上传书签文件 (html、csv、txt 或 enex)</strong>.<br>你可以从浏览器或服务的“导出书签”部分得到这个文件<br><br><a href="https://help.raindrop.io/import#supported-formats" target="_blank" rel="noopener">帮助 ${microIcon("microOpen")}</a></div><label class="settings-import-upload button primary" data-import-upload role="button" tabindex="0" aria-label="上传文件…">${treeIcon("upload")}<span>上传文件…</span><input type="file" class="hidden" data-import-file accept="application/json,text/html,text/csv,text/plain,application/enex+xml,application/xml,text/xml,.json,.html,.htm,.csv,.txt,.enex"></label>${importPreviewMarkup(state.importPreview)}</div></div></div>`;
+  return `<div class="settings-content settings-import-content"><div class="settings-grid settings-import-grid"><div class="settings-label">迁移到 React/WXT</div><div><div class="settings-import-alert"><strong>迁移包</strong><br>迁移包包含本地资料库和持久设置，不包含会话解锁状态或明文密钥。先预览来源、校验和、记录数和同步状态，再选择导入、替换、合并或取消。<br><button type="button" class="primary" data-migration-export>导出迁移包</button> <label class="settings-import-upload button primary">导入迁移包<input type="file" class="hidden" data-migration-import accept="application/json,.json"></label></div>${migrationPreviewMarkup(state.migrationPreview)}</div><div class="settings-label">档案</div><div><div class="settings-import-alert"><strong>上传书签文件 (html、csv、txt 或 enex)</strong>.<br>你可以从浏览器或服务的“导出书签”部分得到这个文件<br><br><a href="https://help.raindrop.io/import#supported-formats" target="_blank" rel="noopener">帮助 ${microIcon("microOpen")}</a></div><label class="settings-import-upload button primary" data-import-upload role="button" tabindex="0" aria-label="上传文件…">${treeIcon("upload")}<span>上传文件…</span><input type="file" class="hidden" data-import-file accept="application/json,text/html,text/csv,text/plain,application/enex+xml,application/xml,text/xml,.json,.html,.htm,.csv,.txt,.enex"></label>${importPreviewMarkup(state.importPreview)}</div></div></div>`;
 }
 
 function backupFileName(item, format) {
@@ -3471,6 +3525,15 @@ function bindSettings() {
   root.querySelector("[data-migration-import]")?.addEventListener("change", (event) => {
     const file = event.currentTarget.files?.[0];
     if (file) uploadMigrationPackage(file).catch(showError);
+  });
+  root.querySelectorAll("[data-migration-action]").forEach((button) => button.addEventListener("click", () => {
+    const action = button.dataset.migrationAction;
+    if (action === "cancel" && !state.migrationPreview?.package) { state.migrationPreview = null; renderSettings(); return; }
+    runMigrationAction(action).catch(showError);
+  }));
+  root.querySelector("[data-migration-download-safety]")?.addEventListener("click", () => {
+    const safety = state.migrationPreview?.result?.safetySnapshot;
+    if (safety) downloadMigrationValue(safety, "private-bookmarks-pre-replace-safety.json");
   });
   root.querySelectorAll("[data-settings-back], [data-settings-close]").forEach((button) => button.onclick = () => {
     state.accountMenuOpen = false;

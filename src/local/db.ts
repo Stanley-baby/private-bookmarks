@@ -32,8 +32,10 @@ import { applyBookmarkBatch, mergeBookmarkConflict, normalizeBookmark } from "./
 import { LOCAL_DATABASE, LOCAL_DATABASE_VERSION, openLocalDatabase } from "../../extension/local-storage.js";
 
 export {
+  applyMigrationPackage,
   exportMigrationPackage,
   importMigrationPackage,
+  previewMigrationPackage,
 } from "../../extension/migration-package.js";
 
 declare const chrome: any;
