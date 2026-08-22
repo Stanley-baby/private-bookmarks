@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node --check src/core.js && node --check src/d1-store.js && node --check src/health.js && node --check worker.js && node --check extension/api.js && node --check extension/background.js && node --check extension/content.js && node --check extension/import.js && node --check extension/lock.js && node --check extension/popup.js && node --check extension/library.js && node --check extension/media-archive.js && node --check extension/recommendations.js && node --check extension/ui.js",
+    "check": "node --check src/core.js && node --check src/d1-store.js && node --check src/health.js && node --check src/migration/package.js && node --check worker.js && node --check extension/api.js && node --check extension/background.js && node --check extension/content.js && node --check extension/import.js && node --check extension/lock.js && node --check extension/popup.js && node --check extension/library.js && node --check extension/media-archive.js && node --check extension/recommendations.js && node --check extension/ui.js",
     "dev:extension": "wxt",
     "build:extension": "wxt build",
     "dev:ui": "python3 -m http.server 4173 --bind 127.0.0.1 --directory extension",

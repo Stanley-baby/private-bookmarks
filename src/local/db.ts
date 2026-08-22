@@ -30,6 +30,14 @@ export type Collection = { id: string; name: string; parentId: string | null; po
 export type ActionMode = "popup" | "sidepanel";
 import { applyBookmarkBatch, mergeBookmarkConflict, normalizeBookmark } from "./model.js";
 
+export {
+  exportMigrationPackage,
+  importMigrationPackage,
+  previewMigrationPackage,
+  readMigrationSnapshot,
+  writeMigrationSnapshot,
+} from "../migration/package.js";
+
 declare const chrome: any;
 
 const DATABASE = "private-bookmarks-local";
