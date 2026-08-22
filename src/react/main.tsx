@@ -2,15 +2,17 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEven
 import { createRoot } from "react-dom/client";
 import { changePin, disablePin, enablePin, forgetPin, lockNow, lockState, prepareLock, setAutoLock, startLockMonitor, unlock } from "../../extension/shared/lock.js";
 import { configureWebdav, createWebdavBackup, listBackups, restoreWebdavBackup } from "../backup/webdav";
-import { applyMigrationPackage, batchBookmarks, exportLibrary, exportMigrationPackage, getActionMode, importLibrary, importMigrationPackage, initialize, initialized, listBookmarks, listCollections, listConflicts, previewMigrationPackage, resolveConflict, restoreBookmark, saveBookmark, saveBookmarkWithCollection, saveCollection, setSyncSettings, syncSettings, trashBookmark, webdavSettings, type ActionMode, type Bookmark, type BookmarkBatchAction, type BookmarkConflictChoices, type Collection } from "../../extension/shared/local-db.js";
+import { batchBookmarks, exportLibrary, exportMigrationPackage, getActionMode, importLibrary, initialize, initialized, listBookmarks, listCollections, listConflicts, resolveConflict, restoreBookmark, saveBookmark, saveBookmarkWithCollection, saveCollection, setSyncSettings, syncSettings, trashBookmark, webdavSettings, type ActionMode, type Bookmark, type BookmarkBatchAction, type BookmarkConflictChoices, type Collection } from "../../extension/shared/local-db.js";
 import { syncOnce } from "../local/sync";
 import { BOOKMARK_CONFLICT_FIELDS, fileToCover, mergeBookmarkConflict } from "../../extension/shared/local-model.js";
 import { recommendBookmark } from "../../extension/shared/recommendations.js";
 import { workerClient } from "../../extension/shared/worker-client.js";
+import { createMigrationTransfer } from "./migration-transfer.js";
 import "./styles.css";
 
 declare const chrome: any;
 type Surface = "popup" | "sidepanel" | "library" | "welcome";
+type MigrationMode = "import" | "replace" | "merge" | "cancel";
 const surface = (): Surface => ["popup", "sidepanel", "welcome"].includes(document.body.dataset.surface || "") ? document.body.dataset.surface as Surface : "library";
 type LockStatus = Awaited<ReturnType<typeof lockState>>;
 type Connection = { endpoint: string; key: string };
@@ -38,27 +40,27 @@ function Setup({ done }: { done: () => void }) {
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const run = async (action: () => Promise<unknown>) => { setBusy(true); setError(""); try { await action(); done(); } catch (reason) { setError(reason instanceof Error ? reason.message : "初始化失败"); } finally { setBusy(false); } };
   const cloud = () => run(async () => { if (!await workerClient.connection()) throw new TypeError("尚未配置 Cloudflare 实例"); const [backup, boot] = await Promise.all([workerClient.request("/v1/export"), workerClient.request("/v1/bootstrap")]); await importLibrary({ ...backup, collections: backup.collections || boot.collections || [] }); });
-  return <main className="setup"><div className="brand"><span className="brand-mark">◆</span><strong>私有书签</strong></div><h1>建立本地资料库</h1><p className="muted">无需后端也能使用。</p><div className="setup-actions"><button className="primary" disabled={busy} onClick={() => run(initialize)}>创建空资料库</button><label className="file-button">从备份恢复<input type="file" accept="application/json" disabled={busy} onChange={(event) => { const file = event.target.files?.[0]; if (file) run(async () => importLibrary(JSON.parse(await file.text()))); }} /></label><label className="file-button">导入迁移包<input type="file" accept="application/json,.json" disabled={busy} onChange={(event) => { const file = event.target.files?.[0]; if (file) run(async () => importMigrationPackage(await file.text())); }} /></label><button disabled={busy} onClick={cloud}>从 Cloudflare 导入</button></div>{error && <p className="error">{error}</p>}</main>;
+  return <main className="setup"><div className="brand"><span className="brand-mark">◆</span><strong>私有书签</strong></div><h1>建立本地资料库</h1><p className="muted">无需后端也能使用。</p><div className="setup-actions"><button className="primary" disabled={busy} onClick={() => run(initialize)}>创建空资料库</button><label className="file-button">从备份恢复<input type="file" accept="application/json" disabled={busy} onChange={(event) => { const file = event.target.files?.[0]; if (file) run(async () => importLibrary(JSON.parse(await file.text()))); }} /></label><button disabled={busy} onClick={cloud}>从 Cloudflare 导入</button></div><MigrationTransfer onApplied={async () => done()} />{error && <p className="error">{error}</p>}</main>;
 }
 
 function MigrationTransfer({ onApplied }: { onApplied: () => Promise<void> }) {
-  const [value, setValue] = useState(""), [preview, setPreview] = useState<any>(null), [result, setResult] = useState<any>(null), [busy, setBusy] = useState(false), [error, setError] = useState("");
+  const transfer = useRef(createMigrationTransfer()).current;
+  const [preview, setPreview] = useState<any>(null), [result, setResult] = useState<any>(null), [busy, setBusy] = useState(false), [error, setError] = useState("");
   const prepare = async (file?: File) => {
     if (!file) return;
-    setBusy(true); setError(""); setResult(null);
+    setBusy(true); setError(""); setPreview(null); setResult(null);
     try {
-      const text = await file.text();
-      setValue(text);
-      setPreview(await previewMigrationPackage(text, { includeCurrent: true }));
+      setPreview(await transfer.select(file));
     } catch (reason) { setError(reason instanceof Error ? reason.message : "无法解析迁移包"); }
     finally { setBusy(false); }
   };
-  const apply = async (mode: "import" | "replace" | "merge" | "cancel") => {
-    if (!value || busy) return;
+  const apply = async (mode: MigrationMode) => {
+    if (busy) return;
     if (mode === "replace" && !window.confirm("替换会覆盖当前资料库，执行前会创建安全快照。继续吗？")) return;
     setBusy(true); setError("");
     try {
-      const next = await applyMigrationPackage(value, mode);
+      const next = await transfer.apply(mode);
+      if (!next) return;
       setResult(next);
       if (next.status === "applied") await onApplied();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "迁移失败"); }
