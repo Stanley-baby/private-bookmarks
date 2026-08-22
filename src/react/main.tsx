@@ -48,7 +48,7 @@ function MigrationTransfer({ onApplied }: { onApplied: () => Promise<void> }) {
   const [preview, setPreview] = useState<any>(null), [result, setResult] = useState<any>(null), [busy, setBusy] = useState(false), [error, setError] = useState("");
   const prepare = async (file?: File) => {
     if (!file) return;
-    setBusy(true); setError(""); setResult(null);
+    setBusy(true); setError(""); setPreview(null); setResult(null);
     try {
       setPreview(await transfer.select(file));
     } catch (reason) { setError(reason instanceof Error ? reason.message : "无法解析迁移包"); }

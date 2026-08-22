@@ -49,3 +49,22 @@ test("migration file selection previews without applying until an explicit decis
   assert.deepEqual(await transfer.apply("cancel"), { status: "cancelled", mode: "cancel" });
   assert.equal(applyCalls, 1);
 });
+
+test("a failed later migration preview cannot apply the previous package", async () => {
+  let applyCalls = 0;
+  const transfer = createMigrationTransfer({
+    preview: async (value) => {
+      if (value === "invalid-package") throw new Error("invalid migration package");
+      return { status: "preview" };
+    },
+    apply: async () => {
+      applyCalls += 1;
+      return { status: "applied" };
+    },
+  });
+
+  await transfer.select({ text: async () => "valid-package" });
+  await assert.rejects(() => transfer.select({ text: async () => "invalid-package" }), /invalid migration package/);
+  assert.equal(await transfer.apply("replace"), null);
+  assert.equal(applyCalls, 0);
+});

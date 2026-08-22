@@ -4,6 +4,7 @@ export function createMigrationTransfer({ preview = previewMigrationPackage, app
   let value = "";
   return {
     async select(file) {
+      value = "";
       const next = await file.text();
       const result = await preview(next, { includeCurrent: true });
       value = next;
