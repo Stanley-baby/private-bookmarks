@@ -1,0 +1,82 @@
+- main [ref=e539]:
+  - complementary [ref=e540]:
+    - generic [ref=e541]:
+      - button "私有书签" [ref=e543] [cursor=pointer]
+      - button "新建收藏夹" [ref=e549] [cursor=pointer]
+    - navigation [ref=e552]:
+      - generic [ref=e553]:
+        - button "所有书签 1" [ref=e554] [cursor=pointer]:
+          - generic [ref=e558]: 所有书签
+          - generic [ref=e559]: "1"
+        - button "未分类" [ref=e560] [cursor=pointer]
+      - generic [ref=e568]:
+        - generic [ref=e569]:
+          - button "收藏" [expanded] [ref=e570] [cursor=pointer]
+          - button "收藏选项" [ref=e571] [cursor=pointer]
+        - generic [ref=e575]:
+          - button "A 1" [ref=e576] [cursor=pointer]:
+            - generic [ref=e583]: A
+            - generic [ref=e584]: "1"
+          - generic:
+            - button "A选项"
+        - generic [ref=e586]:
+          - button "B" [ref=e587] [cursor=pointer]
+          - generic:
+            - button "B选项"
+      - generic [ref=e595]:
+        - button "快速过滤…" [expanded] [ref=e597] [cursor=pointer]
+        - button "链接 1" [ref=e598] [cursor=pointer]:
+          - generic [ref=e602]: 链接
+          - generic [ref=e603]: "1"
+        - button "没有标签 1" [ref=e604] [cursor=pointer]:
+          - generic [ref=e610]: 没有标签
+          - generic [ref=e611]: "1"
+        - button "待检查 1" [ref=e612] [cursor=pointer]:
+          - generic [ref=e616]: 待检查
+          - generic [ref=e617]: "1"
+      - generic [ref=e619]:
+        - button "标签 (0)" [expanded] [ref=e620] [cursor=pointer]
+        - button "标签 更多" [ref=e621] [cursor=pointer]
+  - separator "调整侧边栏宽度" [ref=e624]
+  - generic [ref=e625]:
+    - generic [ref=e626]:
+      - generic [ref=e628]:
+        - generic [ref=e633]: 搜索
+        - textbox "搜索" [ref=e634]
+        - button "搜索设置 / 筛选" [ref=e636] [cursor=pointer]
+      - generic [ref=e641]:
+        - button "连接私有实例后可用" [disabled] [ref=e642] [cursor=pointer]
+        - button "主题：跟随系统" [ref=e646] [cursor=pointer]
+        - button "导入书签" [ref=e651] [cursor=pointer]
+        - button "添加" [ref=e656] [cursor=pointer]
+    - generic [ref=e661]:
+      - generic [ref=e662]:
+        - button "选择所有" [ref=e664] [cursor=pointer]:
+          - generic "选择所有":
+            - checkbox
+        - link "A" [ref=e665] [cursor=pointer]:
+          - /url: library.html?collection=09e7bcc9-189f-4e6c-b71e-45fd9fcd6a78
+        - link "在新标签页中打开" [ref=e666] [cursor=pointer]:
+          - /url: library.html?collection=09e7bcc9-189f-4e6c-b71e-45fd9fcd6a78
+        - generic [ref=e669]:
+          - button "排序" [ref=e670] [cursor=pointer]:
+            - generic: 手动
+          - group "视图" [ref=e671]:
+            - button "视图" [ref=e672] [cursor=pointer]:
+              - generic: 列表
+          - button "导出书签" [ref=e674] [cursor=pointer]
+          - button "A更多" [ref=e679] [cursor=pointer]
+      - list [ref=e683]:
+        - listitem [ref=e684]:
+          - generic [ref=e686]:
+            - generic [ref=e687]: 测试长标题：用于验证列表、卡片、标签与收藏集菜单在多区块页面中的布局表现
+            - generic [ref=e689]:
+              - generic [ref=e690]:
+                - link [ref=e691] [cursor=pointer]:
+                  - /url: "#"
+                - text: ·
+              - generic [ref=e698]: example.com ·
+              - generic [ref=e699]: 8月15日
+          - link "测试长标题：用于验证列表、卡片、标签与收藏集菜单在多区块页面中的布局表现" [ref=e700] [cursor=pointer]:
+            - /url: https://example.com/long-list-test
+      - generic [ref=e701]: 1 个书签

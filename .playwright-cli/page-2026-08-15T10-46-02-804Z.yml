@@ -1,0 +1,95 @@
+- main [ref=e861]:
+  - complementary [ref=e862]:
+    - generic [ref=e863]:
+      - button "私有书签" [ref=e865] [cursor=pointer]
+      - button "新建收藏夹" [ref=e871] [cursor=pointer]
+    - navigation [ref=e1038]:
+      - generic [ref=e1039]:
+        - button "所有书签 2" [ref=e1040] [cursor=pointer]:
+          - generic [ref=e1044]: 所有书签
+          - generic [ref=e1045]: "2"
+        - button "未分类" [ref=e1046] [cursor=pointer]
+      - generic [ref=e1054]:
+        - generic [ref=e1055]:
+          - button "收藏" [expanded] [ref=e1056] [cursor=pointer]
+          - button "收藏选项" [ref=e1057] [cursor=pointer]
+        - textbox "新收藏" [active] [ref=e1064]
+        - generic [ref=e1066]:
+          - button "A 1" [ref=e1067] [cursor=pointer]:
+            - generic [ref=e1074]: A
+            - generic [ref=e1075]: "1"
+          - generic:
+            - button "A选项"
+        - generic [ref=e1077]:
+          - button "B 1" [ref=e1078] [cursor=pointer]:
+            - generic [ref=e1085]: B
+            - generic [ref=e1086]: "1"
+          - generic:
+            - button "B选项"
+      - generic [ref=e1087]:
+        - button "快速过滤…" [expanded] [ref=e1089] [cursor=pointer]
+        - button "链接 2" [ref=e1090] [cursor=pointer]:
+          - generic [ref=e1094]: 链接
+          - generic [ref=e1095]: "2"
+        - button "没有标签 2" [ref=e1096] [cursor=pointer]:
+          - generic [ref=e1102]: 没有标签
+          - generic [ref=e1103]: "2"
+        - button "待检查 2" [ref=e1104] [cursor=pointer]:
+          - generic [ref=e1108]: 待检查
+          - generic [ref=e1109]: "2"
+      - generic [ref=e1111]:
+        - button "标签 (0)" [expanded] [ref=e1112] [cursor=pointer]
+        - button "标签 更多" [ref=e1113] [cursor=pointer]
+  - separator "调整侧边栏宽度" [ref=e947]
+  - generic [ref=e948]:
+    - generic [ref=e949]:
+      - generic [ref=e951]:
+        - generic [ref=e956]: 搜索
+        - textbox "搜索" [ref=e957]
+        - button "搜索设置 / 筛选" [ref=e959] [cursor=pointer]
+      - generic [ref=e964]:
+        - button "连接私有实例后可用" [disabled] [ref=e965] [cursor=pointer]
+        - button "主题：跟随系统" [ref=e969] [cursor=pointer]
+        - button "导入书签" [ref=e974] [cursor=pointer]
+        - button "添加" [ref=e979] [cursor=pointer]
+    - generic [ref=e984]:
+      - generic [ref=e985]:
+        - button "选择所有" [ref=e987] [cursor=pointer]:
+          - generic "选择所有":
+            - checkbox
+        - generic [ref=e988]: 所有书签
+        - link "在新标签页中打开" [ref=e989] [cursor=pointer]:
+          - /url: library.html
+        - generic [ref=e992]:
+          - button "排序" [ref=e993] [cursor=pointer]:
+            - generic: 手动
+          - group "视图" [ref=e994]:
+            - button "视图" [ref=e995] [cursor=pointer]:
+              - generic: 列表
+          - button "导出书签" [ref=e997] [cursor=pointer]
+      - list [ref=e1002]:
+        - listitem [ref=e1003]:
+          - generic [ref=e1005]:
+            - generic [ref=e1006]: 第二个收藏集的长标题用于测试菜单碰撞和卡片布局
+            - generic [ref=e1008]:
+              - generic [ref=e1009]:
+                - link [ref=e1010] [cursor=pointer]:
+                  - /url: "#"
+                - text: ·
+              - generic [ref=e1017]: example.com ·
+              - generic [ref=e1018]: 8月15日
+          - link "第二个收藏集的长标题用于测试菜单碰撞和卡片布局" [ref=e1019] [cursor=pointer]:
+            - /url: https://example.com/second-collection
+        - listitem [ref=e1020]:
+          - generic [ref=e1022]:
+            - generic [ref=e1023]: 测试长标题：用于验证列表、卡片、标签与收藏集菜单在多区块页面中的布局表现
+            - generic [ref=e1025]:
+              - generic [ref=e1026]:
+                - link [ref=e1027] [cursor=pointer]:
+                  - /url: "#"
+                - text: ·
+              - generic [ref=e1034]: example.com ·
+              - generic [ref=e1035]: 8月15日
+          - link "测试长标题：用于验证列表、卡片、标签与收藏集菜单在多区块页面中的布局表现" [ref=e1036] [cursor=pointer]:
+            - /url: https://example.com/long-list-test
+      - generic [ref=e1037]: 2 个书签

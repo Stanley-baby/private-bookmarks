@@ -1,0 +1,85 @@
+name: Deploy Cloudflare Worker (staging)
+
+on:
+  push:
+    branches:
+      - "staging/**"
+      - "codex/**"
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch to test and deploy to the isolated staging Worker
+        required: true
+        default: staging
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: private-bookmarks-staging-${{ github.event.inputs.branch || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.branch || github.ref }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: npx wxt prepare
+      - run: npx tsc --noEmit
+      - run: npm test
+      - run: npm run check
+      - run: npm run build:extension
+      - name: Validate isolated staging target
+        run: |
+          set -eu
+          grep -F 'name = "private-bookmarks-staging"' wrangler.toml
+          grep -F 'database_name = "private-bookmarks-staging"' wrangler.toml
+          grep -F 'bucket_name = "private-bookmarks-covers-staging"' wrangler.toml
+          npx --yes wrangler@4.24.3 deploy --env staging --dry-run | tee /tmp/private-bookmarks-staging-dry-run.txt
+          grep -F 'env.DB (private-bookmarks-staging)' /tmp/private-bookmarks-staging-dry-run.txt
+          grep -F 'env.COVERS (private-bookmarks-covers-staging)' /tmp/private-bookmarks-staging-dry-run.txt
+          ! grep -E 'env\.(DB|COVERS) \((private-bookmarks|private-bookmarks-covers)\)' /tmp/private-bookmarks-staging-dry-run.txt
+      - name: Configure staging secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ACCESS_KEY_STAGING: ${{ secrets.ACCESS_KEY_STAGING }}
+          OAUTH_ENCRYPTION_KEY_STAGING: ${{ secrets.OAUTH_ENCRYPTION_KEY_STAGING }}
+          DROPBOX_CLIENT_ID_STAGING: ${{ secrets.DROPBOX_CLIENT_ID_STAGING }}
+          DROPBOX_CLIENT_SECRET_STAGING: ${{ secrets.DROPBOX_CLIENT_SECRET_STAGING }}
+          GOOGLE_CLIENT_ID_STAGING: ${{ secrets.GOOGLE_CLIENT_ID_STAGING }}
+          GOOGLE_CLIENT_SECRET_STAGING: ${{ secrets.GOOGLE_CLIENT_SECRET_STAGING }}
+          ONEDRIVE_CLIENT_ID_STAGING: ${{ secrets.ONEDRIVE_CLIENT_ID_STAGING }}
+          ONEDRIVE_CLIENT_SECRET_STAGING: ${{ secrets.ONEDRIVE_CLIENT_SECRET_STAGING }}
+        run: |
+          set -eu
+          [ -n "${ACCESS_KEY_STAGING:-}" ] || { echo 'ACCESS_KEY_STAGING is required'; exit 1; }
+          put_secret() {
+            target="$1"
+            value="$2"
+            [ -n "${value:-}" ] || return 0
+            printf '%s' "$value" | npx --yes wrangler@4.24.3 secret put "$target" --env staging
+          }
+          put_secret ACCESS_KEY "$ACCESS_KEY_STAGING"
+          put_secret OAUTH_ENCRYPTION_KEY "${OAUTH_ENCRYPTION_KEY_STAGING:-}"
+          put_secret DROPBOX_CLIENT_ID "${DROPBOX_CLIENT_ID_STAGING:-}"
+          put_secret DROPBOX_CLIENT_SECRET "${DROPBOX_CLIENT_SECRET_STAGING:-}"
+          put_secret GOOGLE_CLIENT_ID "${GOOGLE_CLIENT_ID_STAGING:-}"
+          put_secret GOOGLE_CLIENT_SECRET "${GOOGLE_CLIENT_SECRET_STAGING:-}"
+          put_secret ONEDRIVE_CLIENT_ID "${ONEDRIVE_CLIENT_ID_STAGING:-}"
+          put_secret ONEDRIVE_CLIENT_SECRET "${ONEDRIVE_CLIENT_SECRET_STAGING:-}"
+      - name: Migrate staging D1 and deploy staging Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -eu
+          npx --yes wrangler@4.24.3 d1 migrations apply DB --remote --env staging
+          npx --yes wrangler@4.24.3 deploy --env staging

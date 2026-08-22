@@ -1,0 +1,43 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>快速过滤测试数据</title>
+<style>
+  body { max-width: 560px; margin: 48px auto; padding: 0 24px; color: #222; font: 16px/1.6 system-ui, sans-serif; }
+  button { padding: 8px 14px; cursor: pointer; }
+  #status { min-height: 1.6em; }
+</style>
+<h1>快速过滤测试数据</h1>
+<p>向当前浏览器插件资料库追加 30 条固定测试书签，不会覆盖已有书签。</p>
+<button id="add" type="button">追加测试书签</button>
+<p id="status" role="status"></p>
+<script type="module">
+  import { api } from "./api.js";
+  import { appendQuickFilterBookmarks, prepareQuickFilterLinks, syncQuickFilterHealth } from "./quick-filter-seed.js?v=2";
+
+  const button = document.querySelector("#add");
+  const status = document.querySelector("#status");
+  button.onclick = async () => {
+    button.disabled = true;
+    status.textContent = "正在追加…";
+    try {
+      const result = await appendQuickFilterBookmarks(api);
+      const links = await prepareQuickFilterLinks(api);
+      let health = "";
+      try {
+        const synced = await syncQuickFilterHealth(api);
+        health = `状态已同步 ${synced.updated} 条。`;
+      } catch {
+        try {
+          await api("/v1/health-checks", { method: "POST", body: "{}" });
+          health = `链接检查完成，已更新 ${links.updated} 条测试链接。`;
+        } catch (error) {
+          health = `链接检查不可用：${error?.message || "未知错误"}`;
+        }
+      }
+      status.textContent = `已追加 ${result.added} 条，跳过 ${result.skipped} 条；链接更新 ${links.updated} 条。${health} 现在可以返回 library.html 测试快速过滤。`;
+    } catch (error) {
+      status.textContent = `追加失败：${error?.message || "未知错误"}`;
+      button.disabled = false;
+    }
+  };
+</script>

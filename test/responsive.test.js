@@ -4,6 +4,9 @@ import test from "node:test";
 
 const css = readFileSync(new URL("../extension/style.css", import.meta.url), "utf8");
 const library = readFileSync(new URL("../extension/library.js", import.meta.url), "utf8");
+const surface = readFileSync(new URL("../src/legacy/surface.js", import.meta.url), "utf8");
+const popup = readFileSync(new URL("../src/entrypoints/popup.html", import.meta.url), "utf8");
+const sidepanel = readFileSync(new URL("../src/entrypoints/sidepanel.html", import.meta.url), "utf8");
 
 function declarations(selector) {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -22,6 +25,102 @@ test("workspace controls keep full labels until the content becomes compact", ()
   assert.match(library, /class="workspace-tool-label workspace-sort-label"/);
   assert.match(compactRules, /\.workspace-tools \.workspace-tool-label \{ display: none; \}/);
   assert.match(compactRules, /\.workspace-sort,\s*\n\s*\.view-trigger,\s*\n\s*\.workspace-tools > \.export \{ width: 36px;/);
+});
+
+test("compact workspace controls share one 36 by 28 icon box", () => {
+  const compactRules = css.match(/@container \(width < 600px\) \{([\s\S]*?)\n\}/)?.[1] || "";
+
+  assert.match(compactRules, /\.workspace-sort,\s*\n\s*\.view-trigger,\s*\n\s*\.workspace-tools > \.export \{[^}]*min-width: 36px;[^}]*height: 28px;[^}]*min-height: 28px;/);
+  assert.match(compactRules, /\.workspace-tools > \.export \{[^}]*grid-template-rows: 28px;/);
+  assert.doesNotMatch(compactRules, /\.workspace-tools > \.export \{[^}]*grid-template-rows: 32px;/);
+  assert.match(css, /\.workspace-sort-icon \.tree-svg,\s*\.view-trigger \.tree-svg,\s*\.workspace-tools > \.export \.tree-svg \{[^}]*width: 20px; height: 20px/);
+});
+
+test("compact export wrapper does not offset the icon button", () => {
+  const compactRules = css.match(/@container \(width < 600px\) \{([\s\S]*?)\n\}/)?.[1] || "";
+
+  assert.match(compactRules, /\.workspace-export-menu-wrap \{[^}]*padding: 0;/);
+});
+
+test("sidebar account and create controls share the reference button geometry", () => {
+  const createButton = declarations(".sidebar-head > .icon-button");
+
+  assert.match(createButton, /display: inline-grid/);
+  assert.match(createButton, /width: 36px; min-width: 36px/);
+  assert.match(createButton, /height: 28px; min-height: 28px/);
+  assert.match(createButton, /padding: 0 8px/);
+  assert.match(css, /\.sidebar-head > \.icon-button \.tree-svg \{ width: 20px; height: 20px; \}/);
+});
+
+test("selection toolbar keeps actions intact before switching to icon mode", () => {
+  const actions = declarations(".workspace-selection-head .selection-action");
+  const compactRules = css.match(/@container \(width < 600px\) \{([\s\S]*?)\n\}/)?.[1] || "";
+
+  assert.match(actions, /flex: 0 0 auto/);
+  assert.doesNotMatch(compactRules, /\.workspace-selection-head \.selection-count \{ display: none; \}/);
+  assert.match(compactRules, /\.workspace-selection-head \.selection-context \{ color: var\(--text\); font-size: 16px; font-weight: 600; \}/);
+  assert.doesNotMatch(compactRules, /\.workspace-selection-head \.selection-name\s*,[\s\S]*display: none/);
+  assert.doesNotMatch(compactRules, /\.workspace-selection-head > \.workspace-space\s*\{[^}]*display: none/);
+  assert.match(compactRules, /\.workspace-selection-head \{[^}]*overflow: visible;/);
+  assert.doesNotMatch(compactRules, /\.workspace-selection-head \{[^}]*overflow-x: auto;/);
+  assert.match(compactRules, /\.workspace-selection-head \.selection-action,\s*\n\s*\.workspace-selection-head \.selection-more \{[^}]*min-width: 36px;[^}]*flex: 0 0 36px;/);
+  assert.match(compactRules, /\.workspace-selection-head \.selection-action > span \{ display: none; \}/);
+});
+
+test("selection toolbar mirrors the reference header alignment and summary", () => {
+  assert.match(library, /const selectedLabel = languageIsEnglish\(\) \? `\$\{selection\.length\} selected` : `\$\{selection\.length\} 个已选`;/);
+  assert.match(library, /class="selection-count" aria-live="polite"/);
+  assert.match(library, /class="selection-context"/);
+  assert.match(library, /class="workspace-last-action"><button class="selection-action selection-cancel"/);
+  assert.match(css, /\.workspace-last-action \{[^}]*flex-shrink: 0;[^}]*margin-right: -8px/);
+  assert.match(css, /\.workspace-selection-head \.selection-count \{[^}]*flex: 0 0 auto;/);
+  assert.match(css, /\.workspace-selection-head \.selection-action > span \{[^}]*overflow: hidden;[^}]*text-overflow: ellipsis/);
+});
+
+test("selection toolbar keeps reference icons at 20px", () => {
+  const header = library.slice(library.indexOf("function selectionHeaderMarkup"), library.indexOf("function workspaceHeaderMarkup"));
+  for (const icon of ["add", "moveTo", "tagAction", "trash", "download", "open", "moreHorizontal", "selectionClose", "web", "refresh", "likeActive", "like"]) {
+    const source = icon === "download" ? library.slice(library.indexOf("function exportMenuTriggerMarkup"), library.indexOf("function selectionHeaderMarkup")) : header;
+    assert.match(source, new RegExp(`treeIcon\\("${icon}"\\)`));
+  }
+  assert.match(library, /viewBox="0 0 \$\{small \? "10 10" : "20 20"\}"/);
+  assert.match(css, /\.workspace-selection-head \.selection-action \.tree-svg \{ width: 20px; height: 20px; \}/);
+  assert.match(library, /download: '<path[^']*a1 1 0 0 0-\.576/);
+});
+
+test("popup surface keeps a stable shell with internal scrolling", () => {
+  const html = declarations("html.surface-popup");
+  const popup = declarations("body.surface-popup");
+  const librarySurface = declarations("body.surface-popup .library");
+
+  assert.match(html, /overflow: hidden/);
+  assert.match(popup, /width: 800px/);
+  assert.match(popup, /height: 600px/);
+  assert.match(popup, /min-width: 800px/);
+  assert.match(popup, /min-height: 0/);
+  assert.match(popup, /overflow: hidden/);
+  assert.doesNotMatch(popup, /100vw|100dvh/);
+  assert.match(librarySurface, /--sidebar-width: 300px/);
+  assert.match(librarySurface, /height: 600px/);
+  assert.match(librarySurface, /min-width: 800px/);
+  assert.match(librarySurface, /min-height: 0/);
+  assert.match(librarySurface, /grid-template-columns: var\(--sidebar-width\) minmax\(0, 1fr\)/);
+  assert.doesNotMatch(librarySurface, /grid-template-columns: 300px/);
+  assert.doesNotMatch(librarySurface, /100vw|100dvh/);
+  assert.match(css, /body\.surface-popup \.content \{ min-width: 0; overflow: auto; \}/);
+  assert.doesNotMatch(css, /max\(700px,\s*100vw\)/);
+});
+
+test("sidebar width supports local persistence, reset, and default feedback", () => {
+  assert.match(library, /const SIDEBAR_WIDTH_KEY = "private-bookmarks\.sidebar-width";/);
+  assert.match(library, /function readSidebarWidth\(\)/);
+  assert.match(library, /function persistSidebarWidth\(width\)/);
+  assert.match(library, /state\.sidebarWidth = readSidebarWidth\(\)/);
+  assert.match(library, /data-sidebar-width-reset/);
+  assert.match(library, /sidebar-default-hint/);
+  assert.match(library, /persistSidebarWidth\(null\)/);
+  assert.match(css, /\.sidebar-resizer\.is-default/);
+  assert.match(css, /\.sidebar-default-hint/);
 });
 
 test("bookmark editing keeps the list visible in a desktop split pane", () => {
@@ -65,6 +164,15 @@ test("settings text keeps readable colors in dark mode", () => {
   ]) assert.match(declarations(selector), /color: light-dark\(#1a1a1a, #ececee\)/);
 });
 
+test("legacy nested-collection mode explains both behaviors", () => {
+  assert.match(library, /legacyInput\.dataset\.settingsToggle = "nestedViewLegacy"/);
+  assert.match(library, /class="settings-inline-help"/);
+  assert.match(library, /勾选：父收藏集页面只显示当前收藏集中的书签，子收藏集不会展开/);
+  assert.match(library, /取消勾选：父收藏集页面按区块显示当前收藏集及所有子收藏集的书签/);
+  assert.match(css, /\.settings-inline-help:hover \.settings-inline-help-popover/);
+  assert.match(css, /\.settings-inline-help:focus-visible \.settings-inline-help-popover/);
+});
+
 test("account settings route exposes self-hosted instance fields", () => {
   assert.match(library, /initialSettingsSection = \["app", "account", "import"\]/);
   assert.match(library, /\["account", "帐户", "user", true\]/);
@@ -94,6 +202,7 @@ test("import settings route matches the reference upload surface", () => {
 
 test("primary font sizes match the reference plugin", () => {
   assert.match(declarations(":root"), /font: 14px\/1\.4 /);
+  assert.match(declarations("body"), /font: inherit/);
   assert.match(declarations('[data-font-size="large"]'), /font-size: 15\.75px/);
   assert.match(declarations(".settings-shell"), /font: 15px\/21px /);
 
@@ -103,4 +212,131 @@ test("primary font sizes match the reference plugin", () => {
     ".settings-button-group-menu",
     ".settings-button-option",
   ]) assert.match(declarations(selector), /font-size: 15px/);
+});
+
+test("P2 density tokens keep controls reachable and bookmark rows compact", () => {
+  assert.match(declarations(":root"), /font: 14px\/1\.4 .*Helvetica, Arial, sans-serif/);
+  assert.match(declarations(".topbar"), /height: 48px/);
+  assert.match(declarations(".workspace-head"), /min-height: 48px/);
+  assert.match(css, /\.tree-item, \.collection-row \{[^}]*min-height: 32px/);
+  assert.match(declarations(".quick-search"), /height: 32px/);
+  assert.match(declarations(".bookmark-card"), /min-height: 68px/);
+  assert.match(css, /\.card-cover \{[^}]*width: 56px; height: 48px/);
+  assert.match(css, /\.card-title \{[^}]*font-size: 15px;[^}]*line-height: 21px/);
+  assert.match(declarations(".bookmark-count-footer"), /height: 48px; min-height: 48px/);
+  assert.match(declarations(".empty"), /padding: 32px 16px/);
+  assert.match(css, /button:focus-visible, input:focus-visible/);
+  assert.match(css, /\.bookmark-card:hover \.card-actions/);
+});
+
+test("grid cards keep bounded columns, stable covers, readable clamped copy, and list invariants", () => {
+  const grid = declarations(".cards.layout-grid");
+  const gridCard = declarations(".layout-grid .bookmark-card");
+  const gridCover = declarations(".layout-grid .card-cover");
+  const gridTitle = declarations(".layout-grid .card-title");
+  const gridActions = declarations(".layout-grid .card-actions");
+
+  assert.match(grid, /grid-template-columns: repeat\(auto-fill, minmax\(min\(calc\(50% - 32px\), var\(--grid-item-width\)\), 1fr\)\)/);
+  assert.match(grid, /gap: 16px/);
+  assert.match(gridCard, /min-width: 0/);
+  assert.match(gridCard, /display: flex/);
+  assert.match(gridCard, /flex-direction: column/);
+  assert.match(gridCard, /min-height: 0/);
+  assert.match(gridCard, /gap: 0/);
+  assert.match(gridCard, /border: 0/);
+  assert.match(gridCard, /border-radius: 4px/);
+  assert.doesNotMatch(gridCard, /min-height: 288px/);
+  assert.match(gridCover, /aspect-ratio: 16 \/ 9/);
+  assert.match(css, /\.layout-grid \.card-cover img \{[^}]*object-fit: cover/);
+  assert.match(css, /\.layout-grid \.card-cover img\[src\$="icons\/bookmark\.svg"\] \{[^}]*object-fit: contain/);
+  assert.match(gridTitle, /font-size: 15px/);
+  assert.match(gridTitle, /line-height: 21px/);
+  assert.match(gridTitle, /-webkit-line-clamp: 3/);
+  assert.doesNotMatch(gridTitle, /min-height: 42px/);
+  assert.match(css, /\.layout-grid \.card-note, \.layout-grid \.card-description \{[^}]*-webkit-line-clamp: 2/);
+  assert.match(css, /\.layout-grid \.card-tags \{[^}]*font-size: 12px/);
+  assert.match(css, /\.layout-grid \.card-source \{[^}]*font-size: 12px/);
+  assert.doesNotMatch(css, /\.layout-grid \.bookmark-card:hover \{[^}]*transform: translateY\(-1px\)/);
+  assert.match(css, /\.layout-grid \.card-permalink:focus-visible \{[^}]*outline: 2px solid var\(--accent\)/);
+  assert.match(gridActions, /top: 8px/);
+  assert.match(css, /@media \(hover: none\) \{ \.bookmark-card \.card-actions \{ display: inline-grid; \} \}/);
+  assert.match(declarations(".bookmark-card"), /min-height: 68px/);
+  assert.match(css, /\.card-cover \{[^}]*width: 56px; height: 48px/);
+  assert.match(css, /body\.surface-sidepanel[\s\S]*?min-width: 0/);
+  assert.match(css, /@media \(max-width: 519px\) \{[\s\S]*?body\.surface-sidepanel \.cards\.layout-grid \{ grid-template-columns: minmax\(0, 1fr\); \}/);
+});
+
+test("grid card metadata keeps two rows, leaf collection text, and full labels", () => {
+  const card = library.slice(library.indexOf("function card("), library.indexOf("function bookmarkActionMarkup"));
+
+  assert.match(card, /const collectionLabel = gridView \|\| masonryView \? collectionName\(item\.collectionId\) : collectionPathLabel/);
+  assert.match(card, /const collectionAttributes = gridView \? ` title="\$\{escapeHtml\(collectionPathLabel\)\}" aria-label="\$\{escapeHtml\(collectionPathLabel\)\}"`/);
+  assert.match(card, /data-card-source-row="primary"/);
+  assert.match(card, /data-card-source-row="secondary"/);
+  assert.match(card, /const gridBadges =/);
+  assert.match(card, /compactDateTimeLabel\(item\.reminder\)/);
+  assert.match(card, /class="card-source-separator"/);
+  assert.match(card, /const metadataMarkup = `<div class="card-source">\$\{gridView \? gridSource : source\}<\/div>`/);
+  assert.match(card, /const cardTitleAttributes = gridView \? ` title="\$\{escapeHtml\(bookmarkLabel\)\}" aria-label="\$\{escapeHtml\(bookmarkLabel\)\}"`/);
+});
+
+test("grid card metadata clamps text without shrinking its icons", () => {
+  const gridSource = declarations(".layout-grid .card-source");
+  const row = declarations(".layout-grid .card-source-row");
+  const path = declarations(".layout-grid .card-source-row .card-path");
+  const pathIcon = declarations(".layout-grid .card-source-row .card-path-icon");
+  const microIcon = declarations(".layout-grid .card-source-row .search-micro-icon");
+
+  assert.match(gridSource, /display: grid/);
+  assert.match(gridSource, /height: auto; min-height: 36px/);
+  assert.match(gridSource, /grid-template-rows: repeat\(2, minmax\(18px, auto\)\)/);
+  assert.match(row, /min-width: 0/);
+  assert.match(row, /overflow: hidden/);
+  assert.match(path, /min-width: 0/);
+  assert.match(path, /overflow: hidden/);
+  assert.match(css, /\.card-path-label \{[^}]*text-overflow: ellipsis/);
+  assert.match(pathIcon, /flex: 0 0 20px/);
+  assert.match(microIcon, /flex: 0 0 10px/);
+  assert.match(css, /\.layout-grid \.card-source-badges \{[^}]*display: flex/);
+  assert.match(css, /\.layout-grid \.card-source-row\[data-card-source-row="secondary"\] > \.card-reminder \{[^}]*max-width: 106px/);
+});
+
+test("empty states share centered geometry across layouts and surfaces", () => {
+  const workspace = declarations(".workspace:has(.cards > .empty)");
+  const cards = declarations(".cards:has(> .empty)");
+  const empty = declarations(".cards:has(> .empty) > .empty");
+
+  assert.match(workspace, /display: grid/);
+  assert.match(workspace, /grid-template-rows: 48px minmax\(0, 1fr\) 48px/);
+  assert.match(workspace, /min-height: calc\(100dvh - 48px\)/);
+  assert.match(cards, /min-height: 0/);
+  assert.match(cards, /padding: 0/);
+  assert.match(cards, /grid-template-rows: minmax\(0, 1fr\)/);
+  assert.match(cards, /align-items: stretch/);
+  assert.match(empty, /display: grid/);
+  assert.match(empty, /align-self: stretch/);
+  assert.match(empty, /place-content: center/);
+  assert.match(empty, /justify-items: center/);
+  assert.match(empty, /grid-column: 1 \/ -1/);
+  assert.match(empty, /min-height: 0/);
+  assert.match(empty, /padding: 32px 16px/);
+  assert.doesNotMatch(css, /\.cards\.layout-masonry > \.empty/);
+  assert.match(css, /\.library \{[^}]*height: 100vh/);
+  assert.match(css, /body\.surface-popup \{[\s\S]*?min-height: 0/);
+  assert.doesNotMatch(css, /body\.surface-popup \.bookmark-count-footer/);
+  assert.match(css, /body\.surface-sidepanel \{[\s\S]*?min-height: 100vh/);
+});
+
+test("shared surfaces mark their host before rendering and keep distinct layouts", () => {
+  assert.match(surface, /document\.documentElement\.dataset\.surface = surface/);
+  assert.match(surface, /document\.body\.classList\.add\(marker\)/);
+  assert.match(popup, /<body data-surface="popup">/);
+  assert.match(sidepanel, /<body data-surface="sidepanel">/);
+  assert.match(css, /body\.surface-popup[\s\S]*?min-width: 800px/);
+  assert.match(css, /body\.surface-popup \.library[\s\S]*?grid-template-columns: var\(--sidebar-width\) minmax\(0, 1fr\)/);
+  assert.match(css, /body\.surface-sidepanel \.library[\s\S]*?--sidebar-width: clamp\(240px, 30vw, 280px\)/);
+  assert.match(css, /@media \(max-width: 519px\)[\s\S]*?body\.surface-sidepanel \.library\.sidebar-open \.sidebar/);
+  assert.match(library, /function openFullPage\(route = "library\.html"\)/);
+  assert.match(library, /isPopupSurface\(\)\s*\? openFullPage\("library\.html\?settings=import"\)/);
+  assert.match(library, /isPopupSurface\(\)\s*\? openFullPage\("library\.html\?settings=backups"\)/);
 });

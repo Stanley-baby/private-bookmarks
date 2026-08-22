@@ -1,13 +1,17 @@
-import { api, connection, disconnect } from "./api.js?v=20260808-pin2";
+import { api, connect, connection, disconnect, requestPagePermission } from "./api.js?v=20260808-pin2";
+import { COLLECTION_ICON_DEFAULT_CATALOG, normalizeCollectionIconCatalog, readCollectionIconCache, writeCollectionIconCache } from "./collection-icon-catalog.js";
 import { bookmarkType, dateFilterSuggestions, duplicateLinks, languageFilterSuggestions, matchesSearchFilters, parseSearchQuery } from "./filters.js";
 import { canonicalImportLink, parseImportText } from "./import.js";
 import { disablePin, enablePin, lockNow, lockState, prepareLock, setAutoLock, startLockMonitor } from "./lock.js?v=20260808-pin2";
 import { renderMarkdown } from "./markdown.js";
+import { mediaArchiveEntries } from "./media-archive.js";
 import { recommendBookmark } from "./recommendations.js";
 import { collectionOptions, connectionView, escapeHtml, isCurrentRequest, lockView, shouldShowGlobalLoading } from "./ui.js?v=20260811-navigation3";
+import { exportMigrationPackage, importMigrationPackage } from "./migration-package.js";
 
 const root = document.querySelector("#app");
 const collectionValueDialog = document.querySelector("#collection-value-dialog");
+const collectionIconPickerDialog = document.querySelector("#collection-icon-picker-dialog");
 const collectionShareDialog = document.querySelector("#collection-share-dialog");
 const bookmarkDialog = document.querySelector("#bookmark-dialog");
 const editBookmarkDialog = document.querySelector("#edit-bookmark-dialog");
@@ -19,10 +23,64 @@ const defaultViewDialog = document.querySelector("#default-view-dialog");
 const SEARCH_HISTORY_KEY = "private-bookmarks.search-history";
 const IMPORT_PROGRESS_KEY = "private-bookmarks.import-progress";
 const BACKUP_HISTORY_KEY = "private-bookmarks.backup-history";
+const SIDEBAR_WIDTH_KEY = "private-bookmarks.sidebar-width";
 const initialRoute = new URL(location.href).searchParams;
 const initialSetting = initialRoute.get("settings");
 const initialSettingsSection = ["app", "account", "import"].includes(initialSetting) ? initialSetting : initialSetting === "backups" ? "backups" : initialSetting === "pin" ? "pin" : "";
 const initialSettingsRoute = Boolean(initialSettingsSection);
+
+function surfaceName() {
+  return document.body?.dataset.surface || document.documentElement?.dataset.surface || "library";
+}
+
+function isPopupSurface() {
+  return surfaceName() === "popup";
+}
+
+function isExtensionSurface() {
+  return ["popup", "sidepanel"].includes(surfaceName());
+}
+
+function sidebarWidthStorageKey() {
+  return `${SIDEBAR_WIDTH_KEY}.${surfaceName()}`;
+}
+
+function readSidebarWidth() {
+  try {
+    const width = Number(localStorage.getItem(sidebarWidthStorageKey()));
+    return Number.isFinite(width) && width > 0 ? width : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistSidebarWidth(width) {
+  try {
+    const key = sidebarWidthStorageKey();
+    if (width == null) localStorage.removeItem(key);
+    else localStorage.setItem(key, String(width));
+  } catch { /* storage is optional */ }
+}
+
+function openFullPage(route = "library.html") {
+  const href = globalThis.chrome?.runtime?.getURL?.(route) || new URL(route, location.href).href;
+  if (globalThis.chrome?.tabs?.create) return globalThis.chrome.tabs.create({ url: href });
+  return globalThis.open?.(href, "_blank", "noopener");
+}
+
+async function currentPageDraft() {
+  if (!isExtensionSurface() || !globalThis.chrome?.tabs?.query) return {};
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id || !/^https?:$/.test(new URL(tab.url || "").protocol)) return {};
+    if (!await requestPagePermission(tab.url)) return {};
+    const response = await chrome.runtime.sendMessage({ type: "private-bookmarks-page-metadata", tabId: tab.id });
+    return response?.metadata?.link ? response.metadata : {};
+  } catch {
+    return {};
+  }
+}
+
 const DEFAULT_BUTTON_GROUP = Object.freeze({ select: true, current_tab: false, new_tab: true, preview: false, web: false, copy: false, ask: false, important: false, tags: false, edit: true, remove: true });
 const BUTTON_GROUP_OPTIONS = [
   ["select", "选择", "selectAll"], ["current_tab", "直接在浏览器打开", "click"], ["new_tab", "在新标签页中打开", "open"],
@@ -78,15 +136,16 @@ function persistBackupHistory(history) {
 
 const state = {
   view: initialRoute.get("view") || "all", collectionId: initialRoute.get("collection"), query: initialRoute.get("search") || "", tag: "", selected: new Set(), favoriteCount: 0, tags: [],
-  items: [], allItems: [], collections: [], collectionCounts: {}, trashCount: 0, trashedCollections: [], preferences: null, layout: "list",
-  collapsedCollections: new Set(), dragBookmark: null, dragCollection: null, searchTimer: null, sidebarWidth: null, cardMenuId: null, cardActionProxies: null, editingId: "", editSnapshot: "",
-  searchMenuOpen: false, searchFilterGroup: null, sortMenuOpen: false, viewMenuOpen: false, themeMenuOpen: false, recentSearches: readSearchHistory(), groupMenuId: null, collectionMenuId: null, pickerCollectionMenuId: null, pickerGroupMenuId: null, inlineCollectionCreate: null, tagMenuOpen: false, tagItemMenu: null, collectionValueAction: null, collectionValueId: null, collectionSelection: null,
-  selectionMoreOpen: false, selectionScreenshotWorking: false, sidebarOpen: false, accountMenuOpen: false, mediaUploadEnabled: false, aiRecommendationsAvailable: false, aiSettings: null, aiBusy: false,
-  settingsOpen: initialSettingsRoute, settingsSection: initialSettingsSection || "app", settingsMenu: null, settingsNeedsReload: false, settingsSavePromise: null, connectionInfo: null,
+  items: [], allItems: [], collectionItems: null, collectionItemsCollectionId: null, collections: [], collectionCounts: {}, trashCount: 0, trashedCollections: [], preferences: null, layout: "list",
+  collapsedCollections: new Set(), dragBookmark: null, dragCollection: null, searchTimer: null, sidebarWidth: null, sidebarDefaultWidth: null, cardMenuId: null, cardActionProxies: null, editingId: "", editSnapshot: "",
+  searchMenuOpen: false, searchFilterGroup: null, searchInCollection: false, searchActiveIndex: -1, sortMenuOpen: false, viewMenuOpen: false, workspaceMenuSectionId: null, workspaceCollectionMenuId: null, exportMenuSectionId: null, themeMenuOpen: false, recentSearches: readSearchHistory(), groupMenuId: null, collectionMenuId: null, pickerCollectionMenuId: null, pickerGroupMenuId: null, inlineCollectionCreate: null, tagMenuOpen: false, tagItemMenu: null, collectionValueAction: null, collectionValueId: null, collectionSelection: null,
+  selectionMoreOpen: false, selectionMoreSectionId: null, selectionSectionId: null, selectionScreenshotWorking: false, sidebarOpen: false, accountMenuOpen: false, mediaUploadEnabled: false, aiRecommendationsAvailable: false, aiSettings: null, aiBusy: false,
+  settingsOpen: initialSettingsRoute, settingsSection: initialSettingsSection || "app", settingsMenu: null, settingsNeedsReload: false, settingsSavePromise: null, connectionInfo: null, addButtonSaved: false,
   viewSwitching: false,
   loading: false,
   importPreview: readImportProgress(), importBusy: false, backups: readBackupHistory(), backupSource: "local", backupBusy: false, backupLoading: false, backupIncludeMedia: false, cloudConnections: [], cloudBackups: { dropbox: [], google: [], onedrive: [] }, cloudBackupLoading: {}, cloudBackupErrors: {}, cloudBusy: false, lock: { enabled: false, locked: false, autoLock: "15" },
 };
+state.sidebarWidth = readSidebarWidth();
 
 function setGlobalLoading(loading) {
   if (!root) return;
@@ -118,13 +177,13 @@ function setSettingsRoute(open, section = state.settingsSection || "app") {
 
 const EN_TEXT = Object.freeze({
   " 个书签": " bookmarks",
-  "默认模式": "Default mode", "基础模式": "Basic mode", "严格模式": "Strict mode",
+  "默认模式": "Default mode", "默认": "Default", "恢复默认宽度": "Reset sidebar width", "基础模式": "Basic mode", "严格模式": "Strict mode",
   "使用此封面": "Use this cover", "此书签还没有可用的候选封面。": "This bookmark has no candidate covers.", "正在加载…": "Loading…", "正在创建…": "Creating…", "上传文件（需要配置 R2）": "Upload file (R2 required)", "正在上传封面…": "Uploading cover…", "已保存 ": "Saved ", "删除标签": "Remove tag", "编辑 Markdown": "Edit Markdown",
   "打开所有书签": "Open all bookmarks", "展开所有收藏集": "Expand all collections", "折叠所有收藏集": "Collapse all collections", "按名称排序所有收藏集": "Sort all collections by name", "删除所有空收藏集": "Delete all empty collections", "没有找到收藏集": "No collections found",
-  "全部": "All",
+  "全部": "All", "搜索图标...": "Search icons...", "没有找到图标": "No icons found",
   "应用": "App", "帐户": "Account", "订阅": "Subscription", "导入": "Import", "整合方式": "Integrations", "备份": "Backups", "帮助": "Help", "设置": "Settings", "私有书签": "Private Bookmarks", "私有实例": "Private instance", "实例名称": "Instance name", "实例地址": "Instance address", "访问密钥": "Access key", "已配置（仅存储在此设备）": "Configured (stored on this device only)", "头像": "Avatar", "固定实例图标": "Fixed instance icon", "认证方式": "Authentication", "访问密钥认证": "Access key authentication", "实例类型": "Instance type", "自托管实例": "Self-hosted instance", "数据统计": "Data", "书签数量": "Bookmarks", "收藏夹数量": "Collections", "废纸篓项目数": "Trash items", "媒体上传": "Media uploads", "已启用": "Enabled", "未配置": "Not configured", "断开当前设备": "Disconnect this device", "确认断开当前设备吗？": "Disconnect this device?", "档案": "File", "上传书签文件 (html、csv 或 txt)": "Upload bookmark file (html, csv, or txt)", "上传书签文件 (html、csv、txt 或 enex)": "Upload bookmark file (html, csv, txt, or enex)", "你可以从浏览器或服务的“导出书签”部分得到这个文件": "You can get this file from the browser or service's bookmark export section", "如何使用？": "How to use?", "上传文件…": "Upload file…", "导入预览": "Import preview", "文件": "File", "格式": "Format", "有效书签": "Valid bookmarks", "重复书签": "Duplicate bookmarks", "无效项目": "Invalid items", "跳过重复项目": "Skip duplicates", "导入这些书签": "Import these bookmarks", "恢复私有书签备份": "Restore Private Bookmarks backup", "备份会替换整个资料库": "This backup replaces the entire library", "当前快照已下载": "The current snapshot was downloaded", "正在解析…": "Parsing…", "正在导入…": "Importing…", "导入完成": "Import complete", "没有可导入的书签": "No bookmarks to import", "清除": "Clear", "条": " items", "个": " ",
   "语言": "Language", "界面样式": "Interface theme", "字体大小": "Font size", "大": "Large", "默认视图模式": "Default view", "默认视图已更改": "Default view changed", "新收藏夹现在将使用": "New collections will now use", "视图模式。": "view mode.", "是否将此更改应用于所有现有收藏夹？": "Apply this change to all existing collections?", "保持不变": "Keep unchanged", "全部更新": "Update all", "列表": "List", "卡片": "Cards", "标题": "Title", "心情看板": "Moodboard", "点击书签时": "When clicking bookmarks", "在新标签页中打开": "Open in new tab", "在当前标签页中打开": "Open in current tab", "按钮组": "Button group", "搜索": "Search", "按相关性排序": "Sort by relevance", "排序标签": "Sort tags", "按名称": "By name", "按书签数量": "By bookmark count", "失效链接": "Broken links", "嵌套收藏": "Nested collections", "旧视图": "Legacy view", "询问 AI": "Ask AI", "推荐的收藏集和标签": "Recommended collections and tags", "AI 推荐标签和备注": "AI suggested tags and note", "仅 Pro 可用。AI 功能暂未接入。": "Only available for Pro. AI is not connected yet.", "AI 功能暂未接入。": "AI is not connected yet.", "推荐功能使用本地已有书签，不会上传数据。": "Recommendations use existing bookmark data and do not upload it.", "AI 版需要在 Worker 中配置 Workers AI。": "The AI version requires a Workers AI binding on the Worker.",
-  "所有书签": "All bookmarks", "未分类": "Unsorted", "星标": "Favorites", "待检查": "Pending check", "废纸篓": "Trash", "收藏": "Collections", "快速过滤…": "Quick filters…", "备注": "Notes", "高亮": "Highlights", "提醒": "Reminders", "重复书签": "Duplicates", "没有标签": "Untagged", "标签": "Tags", "链接": "Links", "文章": "Articles", "图片": "Images", "视频": "Videos", "音频": "Audio", "文档": "Documents", "建议的": "Suggested", "最近使用的": "Recently used", "删除最近项": "Remove recent item", "搜索帮助": "Search help", "排序": "Sort", "网站": "Website", "视图": "View", "封面": "Cover", "图标": "Icon", "左": "Left", "右": "Right", "书签信息": "Bookmark info", "描述": "Description", "在列表中显示": "Show in list", "在卡片中显示": "Show in cards", "在标题中显示": "Show in titles", "在心情看板中显示": "Show in moodboard", "应用到全部": "Apply to all", "添加": "Add", "导出书签": "Export bookmarks", "检查链接": "Check links", "导入书签": "Import bookmarks", "直接在浏览器打开": "Open in browser", "移动": "Move", "添加标签": "Add tags", "删除": "Delete", "取消": "Cancel", "更多": "More", "选择所有": "Select all", "创建页面截图": "Create page screenshot", "正在创建页面截图…": "Creating page screenshot…", "刷新预览": "Refresh preview", "添加到收藏夹": "Add to favorites", "从收藏夹移除": "Remove from favorites", "移除标签": "Remove tags", "此视图中还没有书签。": "No bookmarks in this view.", "主题：": "Theme: ", "主题": "Theme", "浅色": "Light", "深色": "Dark", "跟随系统": "System", "日落": "Sunset", "Default mode": "Default mode", "中文（汉语）": "中文（汉语）", "新标签": "New tag", "显示": "Show", "隐藏标签": "Hide tags", "按名称排序标签": "Sort tags by name", "按书签数排序标签": "Sort tags by count", "显示侧边栏": "Show sidebar", "关闭侧边栏": "Close sidebar",
+  "所有书签": "All bookmarks", "未分类": "Unsorted", "星标": "Favorites", "待检查": "Pending check", "废纸篓": "Trash", "收藏": "Collections", "快速过滤…": "Quick filters…", "备注": "Notes", "高亮": "Highlights", "提醒": "Reminders", "重复书签": "Duplicates", "没有标签": "Untagged", "标签": "Tags", "链接": "Links", "文章": "Articles", "图片": "Images", "视频": "Videos", "音频": "Audio", "文档": "Documents", "建议的": "Suggested", "在当前收藏集中": "In current collection", "最近使用的": "Recently used", "删除最近项": "Remove recent item", "搜索帮助": "Search help", "排序": "Sort", "网站": "Website", "视图": "View", "封面": "Cover", "图标": "Icon", "左": "Left", "右": "Right", "书签信息": "Bookmark info", "描述": "Description", "在列表中显示": "Show in list", "在卡片中显示": "Show in cards", "在标题中显示": "Show in titles", "在心情看板中显示": "Show in moodboard", "应用到全部": "Apply to all", "添加": "Add", "导出书签": "Export bookmarks", "检查链接": "Check links", "导入书签": "Import bookmarks", "直接在浏览器打开": "Open in browser", "移动": "Move", "添加标签": "Add tags", "删除": "Delete", "取消": "Cancel", "更多": "More", "选择所有": "Select all", "创建页面截图": "Create page screenshot", "正在创建页面截图…": "Creating page screenshot…", "刷新预览": "Refresh preview", "添加到收藏夹": "Add to favorites", "从收藏夹移除": "Remove from favorites", "移除标签": "Remove tags", "此视图中还没有书签。": "No bookmarks in this view.", "主题：": "Theme: ", "主题": "Theme", "浅色": "Light", "深色": "Dark", "跟随系统": "System", "日落": "Sunset", "Default mode": "Default mode", "中文（汉语）": "中文（汉语）", "新标签": "New tag", "显示": "Show", "隐藏标签": "Hide tags", "按名称排序标签": "Sort tags by name", "按书签数排序标签": "Sort tags by count", "显示侧边栏": "Show sidebar", "关闭侧边栏": "Close sidebar",
   "关闭": "Close", "返回书签": "Back to bookmarks", "显示设置菜单": "Show settings menu", "可选": "Optional", "选项": " options", "书签详情": "Bookmark details", "暂未支持": "Not supported yet", "打开原网页": "Open original page", "更改图标": "Change icon", "添加描述": "Add description", "添加备注": "Add note", "预览 Markdown": "Preview Markdown", "添加标签…": "Add tags…", "最喜爱的": "Favorite", "添加 URL…": "Add URL…", "上传封面文件": "Upload cover file", "可用封面": "Available covers", "分享收藏夹": "Share collection", "复制": "Copy", "系统分享": "Share", "添加书签": "Add bookmark", "编辑": "Edit", "询问": "Ask", "Web存档": "Web archive", "保存": "Save", "添加 URL": "Add URL", "选择收藏集": "Select collection", "查找或创建新的收藏集…": "Find or create a collection…", "网址": "URL", "收藏夹": "Collection", "封面 URL": "Cover URL", "选择": "Select", "选择全部": "Select all", "恢复": "Restore", "截屏": "Screenshot", "创建嵌套的集合": "Create nested collection", "创建收藏集": "Create collection", "改名": "Rename", "分享": "Share", "显示分组": "Show group", "隐藏分组": "Hide group", "展开": "Expand", "折叠": "Collapse", "收起": "Collapse", "创建群组": "Create group", "删除分组": "Delete group", "新建收藏夹": "New collection", "新收藏": "New collection", "新群组": "New group", "更多操作": "More actions", "复制链接": "Copy link", "将链接复制到剪贴板": "Copy link to clipboard", "列表视图": "List view", "网格视图": "Grid view", "手动排序": "Manual order", "最近添加": "Recently added", "标题 (A-Z)": "Title (A-Z)", "网站 (A-Z)": "Website (A-Z)", "调整侧边栏宽度": "Resize sidebar", "当前标签页": "Current tab", "预览模式": "Preview mode", "Web 预览模式": "Web preview mode", "搜索设置 / 筛选": "Search settings / filters", "缩小搜索范围": "Narrow your search", "在条件前添加短横(-) 将其排除在搜索范围之外": "Prefix a condition with a hyphen (-) to exclude it from search", "浏览器扩展": "Browser extension", "下载应用": "Download app", "帮助与支持": "Help and support", "博客": "Blog", "更新内容?": "What's new?", "注销": "Log out", "按日期 ↑": "By date ↑", "按日期 ↓": "By date ↓", "类型": "Type", "创建日期": "Created", "在标题/描述中": "In title/description", "在URL中": "In URL", "移动到…": "Move to…", "移动到": "Move to", "全选": "Select all", "取消星标": "Remove favorite", "添加星标": "Add favorite", "收藏选项": "Collection options", "收藏集选项": "Collection options", "收藏夹名称": "Collection name", "高亮颜色": "Highlight color", "（无备注）": "(No note)", "应用锁": "App lock", "定时锁定": "Auto-lock", "每次打开": "Every time opened", "1 分钟": "1 minute", "5 分钟": "5 minutes", "15 分钟": "15 minutes", "30 分钟": "30 minutes", "1 小时": "1 hour", "从不": "Never", "启用应用锁": "Enable app lock", "关闭应用锁": "Disable app lock", "立即锁定": "Lock now", "当前已启用": "Enabled on this device", "永远不用担心数据丢失。创建本地快照，保存收藏夹、书签、标签和高亮。": "Never worry about losing your data. Create a local snapshot of collections, bookmarks, tags and highlights.", "创建的快照只保存在此浏览器，完整内容仍可随时下载到本地。": "Snapshots are stored only in this browser and can be downloaded locally at any time.", "创建新的备份": "Create new backup", "备份正在创建": "Your new backup is being created. You can leave this page and come back later.", "下载完整备份": "Get backup", "下载上传文件": "Download uploaded files", "恢复备份": "Restore backup", "历史备份": "Backup history", "云备份": "Cloud backup", "云备份在自托管实例中暂不可用。": "Cloud backup is not available for this self-hosted instance.", "没有历史备份": "No backups created on this device yet.", "下载 JSON": "JSON", "备份创建于": "Created", "云端": "Cloud", "返回导入": "Go to import", "推荐": "Recommendations", "推荐收藏集": "Suggested collection", "推荐标签": "Suggested tags", "应用本地建议": "Apply local suggestions", "生成 AI 建议": "Generate AI suggestions", "应用 AI 建议": "Apply AI suggestions", "正在分析…": "Analyzing…", "没有足够相似的书签": "No similar bookmarks yet", "AI 返回了空建议": "AI returned no suggestions", "AI 建议": "AI suggestions"
 });
 
@@ -178,7 +237,7 @@ function localizeHtml(markup) {
 
 const dialogTextSources = new WeakMap();
 const dialogAttributeSources = new WeakMap();
-const dialogDynamicSelector = "#cover-picker-items, #collection-picker-list, #batch-tag-menu, #edit-tag-menu, #edit-tag-tokens, #edit-note-preview";
+const dialogDynamicSelector = "#cover-picker-items, #collection-picker-list, #collection-icon-picker-content, #batch-tag-menu, #edit-tag-menu, #edit-tag-tokens, #edit-note-preview";
 
 function localizeDialogs() {
   document.querySelectorAll("dialog").forEach((dialog) => {
@@ -287,8 +346,7 @@ const treeIcons = {
   click: '<path fill-rule="evenodd" d="M9.5 2a.5.5 0 0 1 .5.5v5.792l4.096-4.095a.5.5 0 0 1 .707.707l-4.096 4.095L16.5 9a.5.5 0 1 1 0 1l-5.794-.001 4.097 4.097a.5.5 0 0 1-.707.707L10 10.707V16.5a.5.5 0 1 1-1 0v-5.794l-4.096 4.097a.5.5 0 0 1-.707-.707L8.292 10H2.5a.5.5 0 0 1 0-1h5.793L4.197 4.904a.5.5 0 0 1 .707-.707L9 8.293V2.5a.5.5 0 0 1 .5-.5Z"></path>',
   open: '<path fill-rule="evenodd" d="M17.993 7V2.5c0-.277-.222-.5-.5-.5h-4.5c-.277 0-.5.222-.5.5s.223.5.5.5h3.246l-8.392 8.392a.5.5 0 1 0 .707.707l8.44-8.44V7a.5.5 0 1 0 1 0ZM14 16l-9.033.017a.984.984 0 0 1-.983-.984L4 6c0-.543.457-1 1-1h4.5V4H5C3.913 4 3 5.11 3 6.197v8.836C3 16.119 3.881 17 4.967 17h8.836C14.889 17 16 16.086 16 15v-4.5h-1V15c0 .543-.457 1-1 1Z"></path>',
   moveTo: '<path d="M1 8h11v2l3 3h1v3H1z" opacity=".12"></path><path d="M1 15h15v1H1z" opacity=".12"></path><path d="m6 3 2 2h7v1H7.5l-2-2H1v3h11v1H1v8h15v-3h1v2.998C17 16.55 16.545 17 16 17H1c-.552 0-1-.45-1-1.007V4.007C0 3.45.451 3 .99 3H6Zm11 0v6.929L18.688 8H20l-3.5 4L13 8h1.313L16 9.929V3h1Z"></path>',
-  selectionClose: '<path fill-rule="evenodd" d="m10.95 10.25 6.4 6.4c.2.2.2.52 0 .7-.2.2-.5.2-.7 0l-6.4-6.4-6.4 6.4c-.2.2-.52 0-.7 0-.2-.18-.2-.5 0-.7l6.4-6.4-6.4-6.4c-.2-.2-.2-.5 0-.7.18-.2.5-.2.7 0l6.4 6.4 6.4-6.4c.2-.2.5-.2.7 0 .2.2.2.5 0 .7l-6.4 6.4Z"></path>',
-  close: '<path fill-rule="evenodd" d="m10.95 10.25 6.4 6.4c.2.2.2.52 0 .7-.2.2-.5.2-.7 0l-6.4-6.4-6.4 6.4c-.2.2-.52.2-.7 0-.2-.18-.2-.5 0-.7l6.4-6.4-6.4-6.4c-.2-.2-.2-.5 0-.7.18-.2.5-.2.7 0l6.4 6.4 6.4-6.4c.2-.2.5-.2.7 0 .2.2.2.5.2.7l-6.4 6.4Z"></path>',
+  close: '<path fill-rule="evenodd" d="m10.95 10.25 6.4 6.4c.2.2.2.52 0 .7-.2.2-.5.2-.7 0l-6.4-6.4-6.4 6.4c-.2.2-.52.2-.7 0-.2-.18-.2-.5 0-.7l6.4-6.4-6.4-6.4c-.2-.2-.2-.5 0-.7.18-.2.5-.2.7 0l6.4 6.4 6.4-6.4c.2-.2.5-.2.7 0 .2.2.2.5 0 .7l-6.4 6.4Z"></path>',
   show: '<path d="M10 4c4.09 0 7.585 2.545 9 6.136-1.415 3.592-4.91 6.137-9 6.137s-7.585-2.545-9-6.137C2.415 6.545 5.91 4 10 4Zm0 1a8.673 8.673 0 0 0-7.843 4.979l-.072.157.072.158a8.674 8.674 0 0 0 7.553 4.974l.29.005a8.673 8.673 0 0 0 7.843-4.979l.071-.158-.071-.157a8.674 8.674 0 0 0-7.553-4.974L10 5Zm0 1.682a3.451 3.451 0 0 1 3.455 3.454A3.451 3.451 0 0 1 10 13.591a3.451 3.451 0 0 1-3.455-3.455A3.451 3.451 0 0 1 10 6.682Zm0 1a2.451 2.451 0 0 0-2.455 2.454A2.451 2.451 0 0 0 10 12.591a2.451 2.451 0 0 0 2.455-2.455A2.451 2.451 0 0 0 10 7.682Z"></path><path d="M10 4c4.09 0 7.585 2.545 9 6.136-1.415 3.592-4.91 6.137-9 6.137s-7.585-2.545-9-6.137C2.415 6.545 5.91 4 10 4Zm0 3.682a2.451 2.451 0 0 0-2.455 2.454A2.451 2.451 0 0 0 10 12.591a2.451 2.451 0 0 0 2.455-2.455A2.451 2.451 0 0 0 10 7.682Z" opacity=".1"></path>',
   web: '<g fill-rule="evenodd"><path d="M13 8h4v8h-4z" opacity=".15"></path><path d="M2 4.007C2 3.45 2.445 3 3 3h14c.552 0 1 .45 1 1.007v11.986C18 16.55 17.555 17 17 17H3c-.552 0-1-.45-1-1.007V4.007ZM3 4h14v12H3V4Zm0 3h14v1H3V7Zm9 1h1v8h-1V8ZM4 5h1v1H4V5Zm2 0h1v1H6V5Zm2 0h1v1H8V5Z"></path></g>',
   refresh: '<path fill-rule="evenodd" d="M14.94 5.041A7 7 0 1 0 17 10h-1a6 6 0 1 1-1.766-4.251L11.987 8h4.991V3l-2.037 2.041Z"></path>',
@@ -309,13 +367,15 @@ const treeIcons = {
   viewList: '<g fill-rule="evenodd"><g transform="translate(2 3)"><rect width="6" height="6" opacity=".12" rx="1"></rect><path d="M0 .99C0 .445.451 0 .99 0h4.02c.546 0 .99.451.99.99v4.02c0 .546-.451.99-.99.99H.99A.996.996 0 0 1 0 5.01V.99ZM1 1h4v4H1V1Zm7 0h8v1H8zm0 3h5v1H8z"></path></g><g transform="translate(2 11)"><rect width="6" height="6" opacity=".12" rx="1"></rect><path d="M0 .99C0 .445.451 0 .99 0h4.02c.546 0 .99.451.99.99v4.02c0 .546-.451.99-.99.99H.99A.996.996 0 0 1 0 5.01V.99ZM1 1h4v4H1V1Zm7 0h8v1H8zm0 3h5v1H8z"></path></g></g>',
   viewGrid: '<g fill-rule="evenodd" transform="translate(2 3)"><rect width="7" height="7" opacity=".12" rx="1"></rect><rect width="7" height="7" x="8" opacity=".12" rx="1"></rect><rect width="7" height="7" y="8" opacity=".12" rx="1"></rect><rect width="7" height="7" x="8" y="8" opacity=".12" rx="1"></rect><path d="M0 1.003A.996.996 0 0 1 1.003 0h4.994A.996.996 0 0 1 7 1.003v4.994A.996.996 0 0 1 5.997 7H1.003A.996.996 0 0 1 0 5.997V1.003ZM1 1h5v5H1V1Zm7 .003A.996.996 0 0 1 9.003 0h4.994A.996.996 0 0 1 15 1.003v4.994A.996.996 0 0 1 13.997 7H9.003A.996.996 0 0 1 8 5.997V1.003ZM9 1h5v5H9V1ZM0 9.003A.996.996 0 0 1 1.003 8h4.994A.996.996 0 0 1 7 9.003v4.994A.996.996 0 0 1 5.997 15H1.003A.996.996 0 0 1 0 13.997V9.003ZM1 9h5v5H1V9Zm7 .003A.996.996 0 0 1 9.003 8h4.994A.996.996 0 0 1 15 9.003v4.994A.996.996 0 0 1 13.997 15H9.003A.996.996 0 0 1 8 13.997V9.003ZM9 9h5v5H9V9Z"></path></g>',
   viewSimple: '<g fill-rule="evenodd"><path d="M2 5h16v1H2z"></path><path d="M2 8h16v1H2z" opacity=".9"></path><path d="M2 11h16v1H2z" opacity=".8"></path><path d="M2 14h16v1H2z" opacity=".7"></path></g>',
-  viewMasonry: '<g fill-rule="evenodd"><path d="M2 3.998A.994.994 0 0 1 3.003 3h4.994A1 1 0 0 1 9 3.998v7.004A.994.994 0 0 1 7.997 12H3.003A1 1 0 0 1 2 11.002V3.998ZM2 14c0-.552.438-1 1.003-1h4.994A.999.999 0 0 1 9 14v3c0 .552-.438 1-1.003 1H3.003A.999.999 0 0 1 2 17v-3Zm8-10.01A.99.99 0 0 1 11.003 3h4.994c.554 0 1.003.451 1.003.99v4.02a.99.99 0 0 1-1.003.99h-4.994A1.002 1.002 0 0 1 10 8.01V3.99Zm0 7.007c0-.55.438-.997 1.003-.997h4.994c.554 0 1.003.453 1.003.997v6.006c0 .55-.438.997-1.003.997h-4.994A1.004 1.004 0 0 1 10 17.003v-6.006Z" opacity=".09"></path><path d="M2 3.998A.994.994 0 0 1 3.003 3h4.994A1 1 0 0 1 9 3.998v7.004A.994.994 0 0 1 7.997 12H3.003A1 1 0 0 1 2 11.002V3.998ZM2 14c0-.552.438-1 1.003-1h4.994A.999.999 0 0 1 9 14v3c0 .552-.438 1-1.003 1H3.003A.999.999 0 0 1 8 17v-3Zm8-10.01A.99.99 0 0 1 11.003 3h4.994c.554 0 1.003.451 1.003.99v4.02a.99.99 0 0 1-1.003.99h-4.994A1.002 1.002 0 0 1 10 8.01V3.99Zm0 7.007c0-.55.438-.997 1.003-.997h4.994c.554 0 1.003.453 1.003.997v6.006c0 .55-.438.997-1.003.997h-4.994A1.004 1.004 0 0 1 10 17.003v-6.006ZM3 4h5v7H3V4Zm8 7h5v6h-5v-6Zm0-7h5v4h-5V4ZM3 14h5v3H3v-3Z"></path></g>',
-  download: '<path d="M12.172 1a2 2 0 0 1 1.414.586l3.828 3.828A2 2 0 0 1 18 6.828V17a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h8.172Zm0 1H4a1 1 0 0 0-.993.883L3 3v14a1 1 0 0 0 .883.993L4 18h12a1 1 0 0 0 .993-.883L17 17V6.828a1 1 0 0 0-.206-.608l-.087-.099-3.828-3.828a2.002 2.002 0 0 0-.576-.284L12.172 2ZM10 6v6.929L11.687 11H13l-3.5 4L6 11h1.312L9 12.929V6h1Z"></path>',
+  viewMasonry: '<g fill-rule="evenodd"><path d="M2 3.998A.994.994 0 0 1 3.003 3h4.994A1 1 0 0 1 9 3.998v7.004A.994.994 0 0 1 7.997 12H3.003A1 1 0 0 1 2 11.002V3.998ZM2 14c0-.552.438-1 1.003-1h4.994A.999.999 0 0 1 9 14v3c0 .552-.438 1-1.003 1H3.003A.999.999 0 0 1 2 17v-3Zm8-10.01A.99.99 0 0 1 11.003 3h4.994c.554 0 1.003.451 1.003.99v4.02a.99.99 0 0 1-1.003.99h-4.994A1.002 1.002 0 0 1 10 8.01V3.99Zm0 7.007c0-.55.438-.997 1.003-.997h4.994c.554 0 1.003.453 1.003.997v6.006c0 .55-.438.997-1.003.997h-4.994A1.004 1.004 0 0 1 10 17.003v-6.006Z" opacity=".09"></path><path d="M2 3.998A.994.994 0 0 1 3.003 3h4.994A1 1 0 0 1 9 3.998v7.004A.994.994 0 0 1 7.997 12H3.003A1 1 0 0 1 2 11.002V3.998ZM2 14c0-.552.438-1 1.003-1h4.994A.999.999 0 0 1 9 14v3c0 .552-.438 1-1.003 1H3.003A.999.999 0 0 1 2 17v-3Zm8-10.01A.99.99 0 0 1 11.003 3h4.994c.554 0 1.003.451 1.003.99v4.02a.99.99 0 0 1-1.003.99h-4.994A1.002 1.002 0 0 1 10 8.01V3.99Zm0 7.007c0-.55.438-.997 1.003-.997h4.994c.554 0 1.003.453 1.003.997v6.006c0 .55-.438.997-1.003.997h-4.994A1.004 1.004 0 0 1 10 17.003v-6.006ZM3 4h5v7H3V4Zm8 7h5v6h-5v-6Zm0-7h5v4h-5V4ZM3 14h5v3H3v-3Z"></path></g>',
+  download: '<path d="M12.172 1a2 2 0 0 1 1.414.586l3.828 3.828A2 2 0 0 1 18 6.828V17a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h8.172Zm0 1H4a1 1 0 0 0-.993.883L3 3v14a1 1 0 0 0 .883.993L4 18h12a1 1 0 0 0 .993-.883L17 17V6.828a1 1 0 0 0-.206-.608l-.087-.099-3.828-3.828a1 1 0 0 0-.576-.284L12.172 2ZM10 6v6.929L11.687 11H13l-3.5 4L6 11h1.312L9 12.929V6h1Z"></path>',
 };
 
+treeIcons.selectionClose = treeIcons.close;
 treeIcons.check = '<path fill-rule="evenodd" d="m8.126 13.168.686-.058-3-3-.624.78 3 3 .37.297.316-.355 7-8-.748-.664z"></path>';
 treeIcons.blank = '';
 treeIcons.microExpand = '<path d="M1.938 3 5 6.5 8.063 3H9.5L5 8 .5 3z"></path>';
+treeIcons.tag = treeIcons.searchTag;
 treeIcons.cloud = treeIcons.all;
 treeIcons.cloudActive = '<path d="M14.95 3.973a6.597 6.597 0 0 1 2.042 4.44 5 5 0 0 1-1.775 9.582L15 18H5a5 5 0 0 1-1.99-9.588 6.59 6.59 0 0 1 2.04-4.439c2.734-2.63 7.166-2.63 9.9 0Z"></path>';
 treeIcons.inboxActive = '<path d="M17 2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h14Zm0 1H3a1 1 0 0 0-.993.883L2 4v5h4.5a.5.5 0 0 1 .5.5c0 1.742 1.632 2.5 3 2.5s3-.758 3-2.5a.5.5 0 0 1 .41-.492L13.5 9H18V4a1 1 0 0 0-.883-.993L17 3Z"></path>';
@@ -323,7 +383,6 @@ treeIcons.defaultCollection = treeIcons.folder;
 treeIcons.defaultCollectionActive = '<g fill-rule="evenodd" transform="translate(-77 -86)"><path d="M78 92h18v1H78z"></path><rect width="18" height="12" x="78" y="92" opacity=".9" rx="1"></rect><path d="M78 89a1 1 0 0 1 .99-1H84l2 2h-8v-1Zm0 1h17.007c.548 0 .993.444.993 1v1H78v-2Z" opacity=".6"></path></g>';
 treeIcons.trashActive = '<g fill-rule="evenodd"><path d="M13 3v1H7V3h6Zm0 0c0-.6-.4-1-1-1H8c-.6 0-1 .4-1 1v1H4c-.6 0-1 1-1 1h1v11c0 1 1 2 2 2h8c1 0 2-1 2-2V5h1c0-.6-.4-1-1-1h-3V3ZM8 8h1v6H8V8Zm3 0h1v6h-1V8Z" opacity=".9"></path><path d="M3 4h14v1H3z"></path></g>';
 treeIcons.moreHorizontal = treeIcons.more;
-treeIcons.viewMasonry = treeIcons.viewMasonry.replaceAll("A.999.999 0 0 1 9 14", "A.999 1 0 0 1 9 14").replaceAll("A.999 1 0 0 1 8 17", "A.999 1 0 0 1 2 17");
 treeIcons.duplicates = treeIcons.duplicates.replace("v-1Zm0-2h1v1h-1V8", "v-1Zm0-2h1v1h-1v-1Zm0-2h1v1h-1V8").replace("Zm-2 0h1v1h-1V6Zm-2 0h1v1h-1V6Zm-2 0h1v1h-1V6ZM1", "Zm-2 0h1v1h-1V6Zm-2 0h1v1h-1V6ZM1").replace("H2a1 1 0 0 1-1", "H2a.999.999 0 0 1-1");
 treeIcons.ai = treeIcons.ai.replace("a.5.5 0 0 1 0 1H14", "a.5.5 0 1 1 0 1H14").replace("a.5.5 0 0 1 0-1H13", "a.5.5 0 1 1 0-1H13");
 treeIcons.trash = treeIcons.trash.replace("H4c-.6 0-1 1-1 1h1", "H4c-.6 0-1 .4-1 1h1");
@@ -335,6 +394,28 @@ function treeIcon(name, compact = false) {
 
 function microIcon(name) {
   return `<svg class="search-micro-icon" viewBox="0 0 10 10" aria-hidden="true">${treeIcons[name]}</svg>`;
+}
+
+let collectionIconCatalog = COLLECTION_ICON_DEFAULT_CATALOG;
+let collectionIconCatalogRequest = null;
+
+const COLLECTION_ICON_DATA_URL = /^data:image\/(?:jpeg|png|gif|webp|avif);base64,[a-z\d+/]+={0,2}$/i;
+
+function isCollectionIconImage(value) {
+  return Boolean(httpUrl(value) || COLLECTION_ICON_DATA_URL.test(String(value || "").trim()));
+}
+
+function collectionIconValue(id) {
+  const item = state.collections.find((entry) => entry.id === id);
+  return String(item?.icon || state.preferences?.collectionIconByCollectionId?.[id] || "").trim();
+}
+
+function collectionIconMarkup(value, active = false, unsorted = false) {
+  const icon = String(value || "").trim();
+  const fallback = treeIcon(unsorted ? (active ? "inboxActive" : "inbox") : (active ? "defaultCollectionActive" : "defaultCollection"));
+  if (!icon) return fallback;
+  if (!isCollectionIconImage(icon)) return `<span class="collection-emoji">${escapeHtml(icon)}</span>`;
+  return `<span class="collection-image-icon"><img data-collection-icon-image src="${escapeHtml(icon)}" alt="" loading="lazy"><span class="collection-image-fallback">${fallback}</span></span>`;
 }
 
 const MICRO_TYPE_ICONS = Object.freeze({ article: "microArticle", audio: "microAudio", document: "microDocument", image: "microImage", video: "microVideo" });
@@ -426,9 +507,9 @@ function collectionTree(groupId, parentId = null, depth = 0) {
     const control = selecting
       ? `<button class="collection-toggle collection-checkbox ${selected ? "selected" : ""}" data-select-collection="${item.id}" aria-label="${selected ? "取消选择" : "选择"}${escapeHtml(item.name)}">${selected ? "✓" : ""}</button>`
       : `<button class="collection-toggle ${hasChildren ? (collapsed ? "collapsed" : "") : "placeholder"}" ${hasChildren ? `data-toggle-collection="${item.id}" aria-label="${collapsed ? "展开" : "收起"}${escapeHtml(item.name)}" aria-expanded="${!collapsed}"` : "tabindex=\"-1\""}>${treeIcon("arrow")}</button>`;
-    const icon = state.preferences?.collectionIconByCollectionId?.[item.id];
+    const icon = collectionIconValue(item.id);
     const collectionActive = state.collectionId === item.id;
-    return `<div class="collection-branch"><div class="collection-row ${collectionActive ? "active" : ""}" style="--depth:${depth}" data-drop-collection="${item.id}" ${editable && !selecting ? `data-drag-collection="${item.id}" draggable="true"` : ""}>${control}<button class="collection-link" ${selecting ? `data-select-collection="${item.id}"` : `data-collection="${item.id}"`}><span class="collection-icon">${icon ? `<span class="collection-emoji">${escapeHtml(icon)}</span>` : treeIcon(collectionActive ? "defaultCollectionActive" : "defaultCollection")}</span><span class="collection-name">${escapeHtml(item.name)}</span>${sidebarCount(count, "collection-count")}</button>${editable && !selecting ? `<span class="collection-actions"><button data-collection-menu="${item.id}" title="收藏集选项" aria-label="${escapeHtml(item.name)}选项">${treeIcon("moreHorizontal")}</button></span>` : ""}</div>${collectionMenu(item)}${inlineCollectionRow("sidebar", groupId, item.id, depth + 1)}${hasChildren && (!collapsed || selecting) ? collectionTree(groupId, item.id, depth + 1) : ""}</div>`;
+    return `<div class="collection-branch"><div class="collection-row ${collectionActive ? "active" : ""}" style="--depth:${depth}" data-drop-collection="${item.id}" ${editable && !selecting ? `data-drag-collection="${item.id}" draggable="true"` : ""}>${control}<button class="collection-link" ${selecting ? `data-select-collection="${item.id}"` : `data-collection="${item.id}"`}><span class="collection-icon">${collectionIconMarkup(icon, collectionActive)}</span><span class="collection-name">${escapeHtml(item.name)}</span>${sidebarCount(count, "collection-count")}</button>${editable && !selecting ? `<span class="collection-actions"><button data-collection-menu="${item.id}" title="收藏集选项" aria-label="${escapeHtml(item.name)}选项">${treeIcon("moreHorizontal")}</button></span>` : ""}</div>${collectionMenu(item)}${inlineCollectionRow("sidebar", groupId, item.id, depth + 1)}${hasChildren && (!collapsed || selecting) ? collectionTree(groupId, item.id, depth + 1) : ""}</div>`;
   }).join("");
 }
 
@@ -467,22 +548,33 @@ const SEARCH_SUGGESTIONS = [
   { id: "favorite", label: "最喜爱的", token: "important:true", icon: "like", className: "favorite" },
   { id: "tags", label: "标签", token: "#", icon: "searchTag", className: "tags" },
   { id: "note", label: "备注", token: "note:true", icon: "note", className: "note" },
-  { id: "highlights", label: "高亮", token: "highlights:true", icon: "highlights", className: "highlights" },
-  { id: "reminder", label: "提醒", token: "reminder:true", icon: "reminder", className: "reminder" },
   { id: "type", label: "类型", token: "type:", icon: "type", className: "type" },
   { id: "created", label: "创建日期", token: "created:", icon: "calendar", className: "created" },
-  { id: "lang", label: "语言", token: "lang:", icon: "public", className: "language" },
   { id: "info", label: "在标题/描述中", token: "info:", icon: "info", className: "info" },
   { id: "url", label: "在URL中", token: "link:", icon: "link", className: "url" },
-  { id: "broken", label: "失效链接", token: "broken:true", icon: "broken", className: "broken" },
-  { id: "duplicate", label: "重复书签", token: "duplicate:true", icon: "duplicates", className: "duplicate" },
   { id: "untagged", label: "没有标签", token: "notag:true", icon: "tag", className: "untagged" },
 ];
+
+function searchCollectionId() {
+  return state.collectionId && (!state.query.trim() || state.searchInCollection) ? state.collectionId : null;
+}
+
+function collectionItemsPath() {
+  if (!state.collectionId) return null;
+  const params = new URLSearchParams({ collection: state.collectionId });
+  return `/v1/bookmarks?${params}`;
+}
+
+function searchSuggestionItems() {
+  if (state.collectionId && state.searchInCollection && state.collectionItemsCollectionId === state.collectionId && Array.isArray(state.collectionItems)) return state.collectionItems;
+  return state.allItems.length ? state.allItems : state.items;
+}
 
 function queryPath() {
   const params = new URLSearchParams();
   const search = parseSearchQuery(state.query).text;
-  if (state.collectionId) params.set("collection", state.collectionId);
+  const collectionId = searchCollectionId();
+  if (collectionId) params.set("collection", collectionId);
   else if (state.view !== "all") params.set("view", state.view);
   if (search) params.set("search", search);
   if (search && state.preferences?.searchRelevance !== false) params.set("sort", "score");
@@ -492,7 +584,8 @@ function queryPath() {
 function tagQueryPath() {
   const params = new URLSearchParams();
   const search = parseSearchQuery(state.query).text;
-  if (state.collectionId) params.set("collection", state.collectionId);
+  const collectionId = searchCollectionId();
+  if (collectionId) params.set("collection", collectionId);
   else if (state.view !== "all") params.set("view", state.view);
   if (search) params.set("search", search);
   params.set("tagsSort", state.preferences?.tagSort === "count" ? "-count" : "_id");
@@ -500,7 +593,7 @@ function tagQueryPath() {
 }
 
 function searchSuggestionCount(id) {
-  const items = state.allItems.length ? state.allItems : state.items;
+  const items = searchSuggestionItems();
   if (id === "favorite") return items.filter((item) => item.favorite).length;
   if (id === "tags") return items.filter((item) => item.tags.length).length;
   if (id === "note") return items.filter((item) => item.note).length;
@@ -536,8 +629,9 @@ function rememberSearch(query) {
 }
 
 function searchFilterMarkup() {
-  const items = state.allItems.length ? state.allItems : state.items;
+  const items = searchSuggestionItems();
   const activeCreated = parseSearchQuery(state.query).filters.find((filter) => filter.kind === "created" && !filter.excluded)?.value || "";
+  let optionIndex = 0;
   const languageName = (code) => {
     try { return new Intl.DisplayNames([languageIsEnglish() ? "en" : "zh-CN"], { type: "language" }).of(code) || code.toUpperCase(); } catch { return code.toUpperCase(); }
   };
@@ -546,8 +640,10 @@ function searchFilterMarkup() {
     return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat(languageIsEnglish() ? "en" : "zh-CN", { year: "numeric", month: "long" }).format(date);
   };
   const row = ({ id, label, token, icon, className = "", count, expandable = false, kind = token.startsWith("#") ? "#" : token.split(":", 1)[0] }) => {
+    const optionId = `search-filter-option-${optionIndex++}`;
+    const selected = state.searchActiveIndex === optionIndex - 1;
     const attributes = expandable ? `data-search-expand="${id}" data-search-prefix="${escapeHtml(token)}" aria-expanded="${state.searchFilterGroup === id}"` : `data-search-token="${escapeHtml(token)}"`;
-    return `<button type="button" class="search-filter-item" role="option" data-token="${escapeHtml(kind)}" data-id="${escapeHtml(id)}" ${attributes}><span class="search-filter-icon ${className}">${treeIcon(icon)}</span><span class="search-filter-title">${label}</span><small class="search-filter-count">${count ?? ""}</small></button>`;
+    return `<button id="${optionId}" type="button" class="search-filter-item" role="option" aria-selected="${selected}" data-token="${escapeHtml(kind)}" data-id="${escapeHtml(id)}" ${attributes}><span class="search-filter-icon ${className}">${treeIcon(icon)}</span><span class="search-filter-title">${label}</span><small class="search-filter-count">${count ?? ""}</small></button>`;
   };
   let suggestions;
   let sectionTitle = t("建议的");
@@ -565,24 +661,73 @@ function searchFilterMarkup() {
     suggestions = languageFilterSuggestions(items).map(({ value, count }) => row({ id: value, label: escapeHtml(languageIsEnglish() ? `${languageName(value)} language` : `${languageName(value)}语言`), token: `lang:${value}`, icon: "public", count, kind: "lang" })).join("");
     sectionTitle = t("缩小搜索范围");
   } else {
-    suggestions = SEARCH_SUGGESTIONS.filter((item) => item.id !== "lang" || searchSuggestionCount("lang")).map((item) => row({ ...item, label: t(item.label), count: searchSuggestionCount(item.id), expandable: ["type", "created", "lang"].includes(item.id) })).join("");
+    suggestions = SEARCH_SUGGESTIONS
+      .filter((item) => !(state.collectionId && state.searchInCollection && item.id === "untagged" && searchSuggestionCount(item.id) === 0))
+      .map((item) => row({ ...item, label: t(item.label), count: searchSuggestionCount(item.id), expandable: ["type", "created", "lang"].includes(item.id) }))
+      .join("");
   }
-  const recent = state.recentSearches.map((item) => `<button type="button" class="search-filter-item search-recent-item" role="option" data-search-recent="${escapeHtml(item.query)}"><span class="search-filter-icon recent">${treeIcon("search")}</span><span class="search-filter-title">${escapeHtml(item.query)}</span><small class="search-filter-count">${searchHistoryTime(item.usedAt)}</small></button>`).join("");
-  return `<div id="search-filter-menu" class="search-filter-menu ${state.searchMenuOpen ? "" : "hidden"}" role="listbox" aria-label="${t("搜索")}"><div class="search-filter-section-title${sectionClass}">${sectionTitle}</div>${suggestions}<div class="search-filter-section-title search-recent-title"><span>${t("最近使用的")}</span><button type="button" class="search-recent-clear" data-search-recent-clear title="${t("删除最近项")}" aria-label="${t("删除最近项")}">${microIcon("microClose")}</button></div>${recent}<div class="search-filter-help"><span>${languageIsEnglish() ? "Prefix a condition with a hyphen (-) to exclude it from search" : "在条件前添加短横(-) 将其排除在搜索范围之外"}</span><a href="https://help.raindrop.io/using-search" target="_blank" rel="noopener" title="${t("搜索帮助")}" aria-label="${t("搜索帮助")}">${treeIcon("help")}</a></div></div>`;
+  const recent = state.recentSearches.map((item) => {
+    const optionId = `search-filter-option-${optionIndex++}`;
+    const selected = state.searchActiveIndex === optionIndex - 1;
+    return `<button id="${optionId}" type="button" class="search-filter-item search-recent-item" role="option" aria-selected="${selected}" data-search-recent="${escapeHtml(item.query)}"><span class="search-filter-icon recent">${treeIcon("search")}</span><span class="search-filter-title">${escapeHtml(item.query)}</span><small class="search-filter-count">${searchHistoryTime(item.usedAt)}</small></button>`;
+  }).join("");
+  const scope = state.collectionId && !state.searchFilterGroup ? `<div class="search-filter-scope"><label><input type="checkbox" data-search-scope ${state.searchInCollection ? "checked" : ""}><span>${t("在当前收藏集中")}</span></label></div>` : "";
+  return `<div id="search-filter-menu" class="search-filter-menu ${state.searchMenuOpen ? "" : "hidden"}" role="listbox" aria-labelledby="search-filter-label"><div class="search-filter-menu-content">${scope}<div class="search-filter-section-title${sectionClass}">${sectionTitle}</div>${suggestions}<div class="search-filter-section-title search-recent-title"><span>${t("最近使用的")}</span><button type="button" class="search-recent-clear" data-search-recent-clear title="${t("删除最近项")}" aria-label="${t("删除最近项")}">${microIcon("microClose")}</button></div>${recent}<div class="search-filter-help"><span>${languageIsEnglish() ? "Prefix a condition with a hyphen (-) to exclude it from search" : "在条件前添加短横(-) 将其排除在搜索范围之外"}</span><a href="https://help.raindrop.io/using-search" target="_blank" rel="noopener" title="${t("搜索帮助")}" aria-label="${t("搜索帮助")}">${treeIcon("help")}</a></div></div></div>`;
+}
+
+function searchMenuElement() {
+  return document.querySelector("#search-filter-menu");
+}
+
+let searchMenuPositionBound = false;
+
+function positionSearchMenu() {
+  if (!searchMenuPositionBound) {
+    window.addEventListener("resize", positionSearchMenu);
+    document.addEventListener("scroll", positionSearchMenu, true);
+    searchMenuPositionBound = true;
+  }
+  const menu = searchMenuElement();
+  if (!menu || menu.classList.contains("hidden")) return;
+  const input = root.querySelector("#search");
+  if (!input) return;
+  const rect = input.getBoundingClientRect();
+  const width = Math.min(320, window.innerWidth - 16);
+  const height = Math.min(menu.offsetHeight, window.innerHeight - 16);
+  const left = Math.max(8, Math.min(window.innerWidth - width - 8, rect.left));
+  let top = rect.bottom;
+  if (top + height > window.innerHeight - 8) top = rect.top - height - 4;
+  menu.style.minWidth = `${width}px`;
+  menu.style.setProperty("--left", `${Math.round(left)}px`);
+  menu.style.setProperty("--top", `${Math.round(Math.max(8, top))}px`);
+}
+
+function mountSearchMenu() {
+  const menu = searchMenuElement();
+  if (!menu) return;
+  if (menu.parentElement !== document.body) document.body.append(menu);
+  positionSearchMenu();
 }
 
 function renderSearchMenu() {
-  const menu = root.querySelector("#search-filter-menu");
+  const menu = searchMenuElement();
   if (!menu) return;
   root.querySelector("[data-search-filter-toggle]")?.setAttribute("aria-expanded", String(state.searchMenuOpen));
   menu.outerHTML = searchFilterMarkup();
+  const nextMenu = searchMenuElement();
+  const active = nextMenu?.querySelector('[role="option"][aria-selected="true"]');
+  const input = root.querySelector("#search");
+  if (active) input?.setAttribute("aria-activedescendant", active.id);
+  else input?.removeAttribute("aria-activedescendant");
   bindSearchMenu();
+  positionSearchMenu();
 }
 
 function closeSearchMenu() {
   if (!state.searchMenuOpen) return;
   state.searchMenuOpen = false;
   state.searchFilterGroup = null;
+  state.searchActiveIndex = -1;
   const search = root.querySelector("#search");
   if (document.activeElement === search) search.blur();
   renderSearchMenu();
@@ -609,6 +754,14 @@ function commitSearch(value, remember = true, historyMode = "replace") {
   clearTimeout(state.searchTimer);
   state.query = String(value || "").trim();
   state.selected.clear();
+  state.selectionSectionId = null;
+  state.selectionMoreOpen = false;
+  state.selectionMoreSectionId = null;
+  state.exportMenuSectionId = null;
+  state.sortMenuOpen = false;
+  state.viewMenuOpen = false;
+  state.workspaceMenuSectionId = null;
+  state.workspaceCollectionMenuId = null;
   state.cardMenuId = null;
   if (remember) rememberSearch(state.query);
   updateLibraryRoute(historyMode);
@@ -616,28 +769,46 @@ function commitSearch(value, remember = true, historyMode = "replace") {
 }
 
 function bindSearchMenu() {
-  root.querySelectorAll("[data-search-token], [data-search-recent]").forEach((button) => button.onclick = (event) => {
+  const menu = searchMenuElement();
+  if (!menu) return;
+  menu.querySelectorAll("[data-search-token], [data-search-recent]").forEach((button) => button.onclick = (event) => {
     event.stopPropagation();
     const query = button.dataset.searchToken ?? button.dataset.searchRecent;
     const input = root.querySelector("#search");
     if (input) input.value = query;
-    state.searchMenuOpen = false;
+    state.searchMenuOpen = true;
     state.searchFilterGroup = null;
+    state.searchActiveIndex = -1;
     commitSearch(query, true, "push");
   });
-  root.querySelectorAll("[data-search-expand]").forEach((button) => button.onclick = (event) => {
+  menu.querySelectorAll("[data-search-expand]").forEach((button) => button.onclick = (event) => {
     event.stopPropagation();
     state.searchFilterGroup = button.dataset.searchExpand;
+    state.searchActiveIndex = -1;
     const query = button.dataset.searchPrefix;
     const input = root.querySelector("#search");
     if (input) input.value = query;
     commitSearch(query, false);
   });
-  const clear = root.querySelector("[data-search-recent-clear]");
+  const scope = menu.querySelector("[data-search-scope]");
+  if (scope) {
+    scope.onclick = (event) => event.stopPropagation();
+    scope.onchange = () => {
+      state.searchInCollection = scope.checked;
+      state.searchActiveIndex = -1;
+      state.selected.clear();
+      state.selectionSectionId = null;
+      updateLibraryRoute();
+      renderSearchMenu();
+      load({ viewOnly: true }).catch(showError);
+    };
+  }
+  const clear = menu.querySelector("[data-search-recent-clear]");
   if (clear) clear.onclick = (event) => {
     event.stopPropagation();
     state.recentSearches = [];
     try { localStorage.removeItem(SEARCH_HISTORY_KEY); } catch { /* ignore unavailable storage */ }
+    state.searchActiveIndex = -1;
     renderSearchMenu();
   };
 }
@@ -654,74 +825,206 @@ function enhanceSearch() {
   field.querySelector("kbd")?.remove();
   const group = document.createElement("div");
   group.className = "search-filter-group";
-  group.innerHTML = `<button type="button" class="search-filter-toggle" data-search-filter-toggle title="${t("搜索设置 / 筛选")}" aria-label="${t("搜索设置 / 筛选")}" aria-expanded="${state.searchMenuOpen}">${microIcon("microTune")}${microIcon("microArrow")}</button>`;
+  group.innerHTML = `<button type="button" class="search-filter-toggle" data-search-filter-toggle title="${t("搜索设置 / 筛选")}" aria-label="${t("搜索设置 / 筛选")}" aria-controls="search-filter-menu" aria-expanded="${state.searchMenuOpen}">${microIcon("microTune")}${microIcon("microArrow")}</button>`;
   field.append(group);
   shell.insertAdjacentHTML("beforeend", searchFilterMarkup());
+  mountSearchMenu();
 }
 
-function renderSortMenu() {
-  const trigger = root.querySelector("[data-sort-trigger]");
-  const existing = root.querySelector("#sort-menu");
-  trigger?.setAttribute("aria-expanded", String(state.sortMenuOpen));
+function workspaceElement(sectionId) {
+  return [...root.querySelectorAll(".workspace")].find((workspace) => workspace.dataset.sectionId === sectionId) || null;
+}
+
+function renderSortMenu(sectionId = state.workspaceMenuSectionId) {
+  const targetSectionId = sectionId || "all";
+  const trigger = workspaceElement(targetSectionId)?.querySelector("[data-sort-trigger]");
+  const existing = root.querySelector("[data-sort-menu]");
+  trigger?.setAttribute("aria-expanded", String(state.sortMenuOpen && state.workspaceMenuSectionId === targetSectionId));
   if (!state.sortMenuOpen) {
     existing?.remove();
     return;
   }
-  if (existing) existing.outerHTML = sortMenuMarkup();
-  else root.querySelector(".workspace-head")?.insertAdjacentHTML("afterend", sortMenuMarkup());
+  if (existing) existing.outerHTML = sortMenuMarkup(targetSectionId);
+  else workspaceElement(targetSectionId)?.querySelector(".workspace-head")?.insertAdjacentHTML("afterend", sortMenuMarkup(targetSectionId));
   bindSortMenu();
   positionSortMenu();
 }
 
 function bindSortMenu() {
   root.querySelectorAll("[data-sort-option]").forEach((input) => input.onchange = () => {
-    state.preferences = { ...state.preferences, sort: input.dataset.sortOption };
+    const sectionId = input.closest("[data-sort-menu]")?.dataset.sectionId || state.workspaceMenuSectionId;
+    const isCollection = sectionId && state.collections.some((item) => item.id === sectionId);
+    const sortByCollectionId = isCollection
+      ? { ...(state.preferences?.sortByCollectionId || {}), [sectionId]: input.dataset.sortOption }
+      : state.preferences?.sortByCollectionId;
+    state.preferences = { ...state.preferences, ...(isCollection ? { sortByCollectionId } : { sort: input.dataset.sortOption }) };
     state.sortMenuOpen = false;
     render();
-    savePreferences({ sort: input.dataset.sortOption }).catch(showError);
+    savePreferences(isCollection ? { sortByCollectionId } : { sort: input.dataset.sortOption }).catch(showError);
   });
 }
 
-function positionSortMenu() {
-  const menu = root.querySelector("#sort-menu");
-  const trigger = root.querySelector("[data-sort-trigger]");
+let workspaceMenuPositionBound = false;
+
+function positionWorkspaceMenu(menuSelector, triggerSelector) {
+  if (!workspaceMenuPositionBound) {
+    window.addEventListener("resize", positionWorkspaceMenus);
+    document.addEventListener("scroll", positionWorkspaceMenus, true);
+    workspaceMenuPositionBound = true;
+  }
+  const menu = root.querySelector(menuSelector);
+  const trigger = workspaceElement(menu?.dataset.sectionId)?.querySelector(triggerSelector);
   if (!menu || !trigger) return;
   const rect = trigger.getBoundingClientRect();
-  const width = menu.offsetWidth;
-  const height = menu.offsetHeight;
-  const left = Math.max(8, Math.min(window.innerWidth - width - 8, rect.left));
-  const top = Math.max(8, Math.min(window.innerHeight - height - 8, rect.bottom));
-  menu.style.setProperty("--left", `${left}px`);
-  menu.style.setProperty("--top", `${top}px`);
+  const width = Math.min(menu.offsetWidth, window.innerWidth - 16);
+  const height = Math.min(menu.offsetHeight, window.innerHeight - 16);
+  let left = rect.left;
+  let top = rect.bottom;
+  if (top + height > window.innerHeight - 8) top = rect.top - height;
+  left = Math.max(8, Math.min(window.innerWidth - width - 8, left));
+  top = Math.max(8, Math.min(window.innerHeight - height - 8, top));
+  menu.style.setProperty("--left", `${Math.round(left)}px`);
+  menu.style.setProperty("--top", `${Math.round(top)}px`);
+}
+
+function positionSortMenu() {
+  positionWorkspaceMenu("[data-sort-menu]", "[data-sort-trigger]");
 }
 
 function positionViewMenu() {
-  const menu = root.querySelector("#view-menu");
-  const trigger = root.querySelector("[data-view-trigger]");
-  if (!menu || !trigger) return;
-  const rect = trigger.getBoundingClientRect();
-  const width = menu.offsetWidth;
-  const height = menu.offsetHeight;
-  const left = Math.max(8, Math.min(window.innerWidth - width - 8, rect.left));
-  const top = Math.max(8, Math.min(window.innerHeight - height - 8, rect.bottom));
-  menu.style.setProperty("--left", `${left}px`);
-  menu.style.setProperty("--top", `${top}px`);
+  positionWorkspaceMenu("[data-view-menu]", "[data-view-trigger]");
 }
 
-function viewName() {
-  if (state.collectionId) return state.collections.find((item) => item.id === state.collectionId)?.name || "收藏夹";
+function positionWorkspaceMenus() {
+  positionSortMenu();
+  positionViewMenu();
+}
+
+let selectionMorePositionBound = false;
+
+function positionSelectionMoreMenu() {
+  if (!selectionMorePositionBound) {
+    window.addEventListener("resize", positionSelectionMoreMenu);
+    document.addEventListener("scroll", positionSelectionMoreMenu, true);
+    selectionMorePositionBound = true;
+  }
+  root.querySelectorAll("[data-selection-more-menu]").forEach((menu) => {
+    const trigger = workspaceElement(menu.dataset.sectionId)?.querySelector("[data-selection-more]");
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const width = Math.min(menu.offsetWidth, window.innerWidth - 16);
+    const height = Math.min(menu.offsetHeight, window.innerHeight - 16);
+    let left = rect.right - width;
+    let top = rect.bottom + 4;
+    if (top + height > window.innerHeight - 8) top = rect.top - height - 4;
+    left = Math.max(8, Math.min(window.innerWidth - width - 8, left));
+    top = Math.max(8, Math.min(window.innerHeight - height - 8, top));
+    menu.style.width = `${width}px`;
+    menu.style.left = `${Math.round(left)}px`;
+    menu.style.top = `${Math.round(top)}px`;
+  });
+}
+
+let workspaceCollectionMenuPositionBound = false;
+
+function positionWorkspaceCollectionMenu() {
+  if (!workspaceCollectionMenuPositionBound) {
+    window.addEventListener("resize", positionWorkspaceCollectionMenu);
+    document.addEventListener("scroll", positionWorkspaceCollectionMenu, true);
+    workspaceCollectionMenuPositionBound = true;
+  }
+  root.querySelectorAll("[data-workspace-collection-menu-panel]").forEach((menu) => {
+    const trigger = menu.parentElement?.querySelector("[data-workspace-collection-menu]");
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const width = Math.min(menu.offsetWidth, window.innerWidth - 16);
+    const height = Math.min(menu.offsetHeight, window.innerHeight - 16);
+    let left = rect.right - width;
+    left = Math.max(8, Math.min(window.innerWidth - width - 8, left));
+    const currentHead = trigger.closest(".workspace")?.querySelector(".workspace-head");
+    const workspaceHeads = [...root.querySelectorAll(".workspace-head")]
+      .filter((head) => head !== currentHead)
+      .map((head) => head.getBoundingClientRect());
+    const overlapsHead = (candidateTop) => workspaceHeads.some((head) => (
+      left < head.right && left + width > head.left && candidateTop < head.bottom && candidateTop + height > head.top
+    ));
+    let clearBelowTop = rect.bottom + 4;
+    workspaceHeads.forEach((head) => {
+      if (overlapsHead(clearBelowTop)) clearBelowTop = head.bottom + 4;
+    });
+    const candidates = [rect.bottom + 4, rect.top - height - 4, clearBelowTop];
+    let top = candidates.find((candidateTop) => (
+      candidateTop >= 8 && candidateTop + height <= window.innerHeight - 8 && !overlapsHead(candidateTop)
+    )) ?? candidates[0];
+    top = Math.max(8, Math.min(window.innerHeight - height - 8, top));
+    menu.style.width = `${width}px`;
+    menu.style.left = `${Math.round(left)}px`;
+    menu.style.top = `${Math.round(top)}px`;
+  });
+}
+
+let exportMenuPositionBound = false;
+
+function positionExportMenu() {
+  if (!exportMenuPositionBound) {
+    window.addEventListener("resize", positionExportMenu);
+    document.addEventListener("scroll", positionExportMenu, true);
+    exportMenuPositionBound = true;
+  }
+  root.querySelectorAll("[data-export-menu]").forEach((menu) => {
+    const trigger = menu.parentElement?.querySelector("[data-export-menu-trigger]");
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const width = Math.min(menu.offsetWidth, window.innerWidth - 16);
+    const height = Math.min(menu.offsetHeight, window.innerHeight - 16);
+    let left = rect.right - width;
+    let top = rect.bottom + 4;
+    if (top + height > window.innerHeight - 8) top = rect.top - height - 4;
+    left = Math.max(8, Math.min(window.innerWidth - width - 8, left));
+    top = Math.max(8, Math.min(window.innerHeight - height - 8, top));
+    menu.style.width = `${width}px`;
+    menu.style.left = `${Math.round(left)}px`;
+    menu.style.top = `${Math.round(top)}px`;
+  });
+}
+
+function closeExportMenu() {
+  if (!state.exportMenuSectionId) return;
+  state.exportMenuSectionId = null;
+  root.querySelectorAll("[data-export-menu]").forEach((menu) => menu.remove());
+  root.querySelectorAll("[data-export-menu-trigger]").forEach((trigger) => trigger.setAttribute("aria-expanded", "false"));
+}
+
+function viewName(items = visibleItems(), collectionId = state.collectionId) {
+  if (state.query.trim() || state.tag) return `找到 ${items.length} 个书签`;
+  if (collectionId) return state.collections.find((item) => item.id === collectionId)?.name || "收藏夹";
   return t(({ all: "所有书签", favorites: "星标", broken: "失效链接", unknown: "待检查", trash: "废纸篓" })[state.view]);
 }
 
-function workspaceHref() {
+function workspaceIconMarkup(collectionId = state.collectionId) {
+  let icon = state.view === "all" ? "cloudActive" : ({ favorites: "like", trash: "trash", broken: "broken", unknown: "link" }[state.view] || "search");
+  let emoji = "";
+  if (collectionId) {
+    const item = state.collections.find((entry) => entry.id === collectionId);
+    if (collectionId === "unsorted") icon = "inboxActive";
+    else if (item) {
+      emoji = collectionIconValue(item.id);
+      if (!emoji) icon = "defaultCollection";
+    } else icon = "defaultCollection";
+  }
+  return `<div class="workspace-cloud icon-vkJU icon-yhAy"><span class="workspace-icon icon-VKRw${emoji ? " collection-emoji" : ""}">${emoji ? collectionIconMarkup(emoji, true, collectionId === "unsorted") : treeIcon(icon)}</span></div>`;
+}
+
+function workspaceHref(collectionId = state.collectionId) {
   const params = new URLSearchParams();
-  if (state.collectionId) params.set("collection", state.collectionId);
+  if (collectionId) params.set("collection", collectionId);
   else if (state.view !== "all") params.set("view", state.view);
   if (state.query) params.set("search", state.query);
   return `library.html${params.toString() ? `?${params}` : ""}`;
 }
 
 const SORT_OPTIONS = [
+  { value: "manual", label: "手动", icon: "sortCreated" },
   { value: "created", label: "按日期 ↑", icon: "sortCreated" },
   { value: "-created", label: "按日期 ↓", icon: "sortCreated" },
   { value: "title", label: "按名称 (A-Z)", icon: "sortTitle" },
@@ -730,8 +1033,9 @@ const SORT_OPTIONS = [
   { value: "-domain", label: "网站 (Z-A)", icon: "sortDomainDesc" },
 ];
 
-function currentSort() {
-  const value = state.preferences?.sort || "manual";
+function currentSort(sectionId = null) {
+  const scoped = sectionId && state.preferences?.sortByCollectionId?.[sectionId];
+  const value = scoped || state.preferences?.sort || "manual";
   return value === "host" ? "domain" : value;
 }
 
@@ -739,10 +1043,10 @@ function sortOption(value = currentSort()) {
   return SORT_OPTIONS.find((option) => option.value === value);
 }
 
-function sortMenuMarkup() {
+function sortMenuMarkup(sectionId = state.workspaceMenuSectionId) {
   if (!state.sortMenuOpen) return "";
-  const active = currentSort();
-  return `<div id="sort-menu" class="sort-popover" role="menu" data-sort-menu><div class="sort-menu-layout" data-type="default"><div class="sort-menu-label">${t("排序")}</div><div>${SORT_OPTIONS.map((option) => `<label class="sort-option" role="menuitemradio" aria-checked="${active === option.value}"><input type="radio" tabindex="0" data-sort-option="${option.value}" readonly ${active === option.value ? "checked" : ""}><span class="sort-option-icon">${treeIcon(option.icon)}</span><span>${t(option.label)}</span></label>`).join("")}</div></div></div>`;
+  const active = currentSort(sectionId);
+  return `<div id="sort-menu" class="sort-popover" role="menu" data-sort-menu data-section-id="${escapeHtml(sectionId || "all")}"><div class="sort-menu-layout" data-type="default"><div class="sort-menu-label">${t("排序")}</div><div>${SORT_OPTIONS.map((option) => `<label class="sort-option" role="menuitemradio" aria-checked="${active === option.value}"><input type="radio" tabindex="0" data-sort-option="${option.value}" readonly ${active === option.value ? "checked" : ""}><span class="sort-option-icon">${treeIcon(option.icon)}</span><span>${t(option.label)}</span></label>`).join("")}</div></div></div>`;
 }
 
 const VIEW_OPTIONS = [
@@ -756,8 +1060,11 @@ function validLayout(value) {
   return VIEW_OPTIONS.some((option) => option.value === value) ? value : null;
 }
 
-function viewScopeKey() {
-  if (state.collectionId) return `collection:${state.collectionId}`;
+function viewScopeKey(sectionId = null) {
+  const collectionId = sectionId && sectionId !== "all" && state.collections.some((item) => item.id === sectionId)
+    ? sectionId
+    : state.collectionId;
+  if (collectionId) return `collection:${collectionId}`;
   return state.view === "all" ? "all" : `view:${state.view}`;
 }
 
@@ -765,8 +1072,8 @@ function layoutByScope(preferences = state.preferences) {
   return preferences?.layoutByScope && typeof preferences.layoutByScope === "object" ? preferences.layoutByScope : {};
 }
 
-function layoutForScope(preferences = state.preferences) {
-  const scoped = validLayout(layoutByScope(preferences)[viewScopeKey()]);
+function layoutForScope(preferences = state.preferences, sectionId = null) {
+  const scoped = validLayout(layoutByScope(preferences)[viewScopeKey(sectionId)]);
   return scoped || validLayout(preferences?.defaultView) || validLayout(preferences?.layout) || "list";
 }
 
@@ -795,32 +1102,34 @@ function viewOption(value = state.layout) {
   return VIEW_OPTIONS.find((option) => option.value === value) || VIEW_OPTIONS[0];
 }
 
-function viewMenuMarkup() {
+function viewMenuMarkup(sectionId = state.workspaceMenuSectionId) {
   if (!state.viewMenuOpen) return "";
+  const layout = layoutForScope(state.preferences, sectionId);
   const settings = viewSettings();
-  const isCardView = state.layout === "grid";
-  const isTitleView = state.layout === "simple";
-  const isMasonryView = state.layout === "masonry";
-  const option = (item) => `<label class="view-option" role="menuitemradio" aria-checked="${state.layout === item.value}"><input type="radio" tabindex="0" data-view-option="${item.value}" ${state.layout === item.value ? "checked" : ""}><span class="view-option-icon">${treeIcon(item.icon)}</span>${t(item.label)}</label>`;
+  const isCardView = layout === "grid";
+  const isTitleView = layout === "simple";
+  const isMasonryView = layout === "masonry";
+  const option = (item) => `<label class="view-option" role="menuitemradio" aria-checked="${layout === item.value}"><input type="radio" tabindex="0" data-view-option="${item.value}" ${layout === item.value ? "checked" : ""}><span class="view-option-icon">${treeIcon(item.icon)}</span>${t(item.label)}</label>`;
   const field = (value, label) => `<label class="view-check-option"><input type="checkbox" tabindex="0" data-view-field="${value}" ${settings[value] ? "checked" : ""}>${t(label)}</label>`;
   const coverControl = isCardView || isMasonryView
     ? settings.cover ? `<div class="sort-menu-label view-menu-label" data-is-label="true">${t("封面")}</div><div><label class="view-range-option"><input type="range" tabindex="0" min="1" max="10" value="${coverSizeValue(settings)}" data-view-cover-size aria-label="${t("封面")}"></label></div>` : ""
     : isTitleView ? "" : `<div class="sort-menu-label view-menu-label" data-is-label="true">${t("封面")} ${languageIsEnglish() ? "position" : "位置"}</div><div><label class="view-option"><input type="radio" tabindex="0" name="view-cover-position" data-view-position="left" ${settings.coverPosition === "left" ? "checked" : ""}>${t("左")}</label><label class="view-option"><input type="radio" tabindex="0" name="view-cover-position" data-view-position="right" ${settings.coverPosition === "right" ? "checked" : ""}>${t("右")}</label></div>`;
   const fieldLabel = isTitleView ? "图标" : "封面";
   const displayLabel = isCardView ? "在卡片中显示" : isTitleView ? "在标题中显示" : isMasonryView ? "在心情看板中显示" : "在列表中显示";
-  return `<div id="view-menu" class="sort-popover view-popover" role="menu" data-view-menu><div class="sort-menu-layout view-menu-layout" data-type="default"><div class="sort-menu-label view-menu-label" data-is-label="true">${t("视图")}</div><div>${VIEW_OPTIONS.map(option).join("")}</div><button type="button" class="view-apply" role="button" title="${t("应用到全部")}" aria-label="${t("应用到全部")}" data-view-apply>${t("应用到全部")}</button><div class="view-separator" data-variant="default"></div><div class="sort-menu-label view-menu-label" data-is-label="true">${t(displayLabel)}</div><div>${field("cover", fieldLabel)}${field("title", "标题")}${field("note", "备注")}${field("description", "描述")}${field("highlights", "高亮")}${field("tags", "标签")}${field("metadata", "书签信息")}</div>${coverControl}</div></div>`;
+  return `<div id="view-menu" class="sort-popover view-popover" role="menu" data-view-menu data-section-id="${escapeHtml(sectionId || "all")}"><div class="sort-menu-layout view-menu-layout" data-type="default"><div class="sort-menu-label view-menu-label" data-is-label="true">${t("视图")}</div><div>${VIEW_OPTIONS.map(option).join("")}</div><button type="button" class="view-apply" role="button" title="${t("应用到全部")}" aria-label="${t("应用到全部")}" data-view-apply>${t("应用到全部")}</button><div class="view-separator" data-variant="default"></div><div class="sort-menu-label view-menu-label" data-is-label="true">${t(displayLabel)}</div><div>${field("cover", fieldLabel)}${field("title", "标题")}${field("note", "备注")}${field("description", "描述")}${field("highlights", "高亮")}${field("tags", "标签")}${field("metadata", "书签信息")}</div>${coverControl}</div></div>`;
 }
 
-function renderViewMenu() {
-  const trigger = root.querySelector("[data-view-trigger]");
-  const existing = root.querySelector("#view-menu");
-  trigger?.setAttribute("aria-expanded", String(state.viewMenuOpen));
+function renderViewMenu(sectionId = state.workspaceMenuSectionId) {
+  const targetSectionId = sectionId || "all";
+  const trigger = workspaceElement(targetSectionId)?.querySelector("[data-view-trigger]");
+  const existing = root.querySelector("[data-view-menu]");
+  trigger?.setAttribute("aria-expanded", String(state.viewMenuOpen && state.workspaceMenuSectionId === targetSectionId));
   if (!state.viewMenuOpen) {
     existing?.remove();
     return;
   }
-  if (existing) existing.outerHTML = viewMenuMarkup();
-  else root.querySelector(".workspace-head")?.insertAdjacentHTML("afterend", viewMenuMarkup());
+  if (existing) existing.outerHTML = viewMenuMarkup(targetSectionId);
+  else workspaceElement(targetSectionId)?.querySelector(".workspace-head")?.insertAdjacentHTML("afterend", viewMenuMarkup(targetSectionId));
   bindViewMenu();
   positionViewMenu();
 }
@@ -873,8 +1182,9 @@ function bindThemeMenu() {
 
 function bindViewMenu() {
   root.querySelectorAll("[data-view-option]").forEach((input) => input.onchange = () => {
+    const sectionId = input.closest("[data-view-menu]")?.dataset.sectionId || state.workspaceMenuSectionId;
     state.layout = input.dataset.viewOption;
-    const scope = viewScopeKey();
+    const scope = viewScopeKey(sectionId);
     const nextLayoutByScope = { ...layoutByScope(), [scope]: state.layout };
     state.preferences = { ...state.preferences, layoutByScope: nextLayoutByScope };
     state.viewMenuOpen = false;
@@ -897,14 +1207,16 @@ function bindViewMenu() {
     const coverSize = coverSizeValue({ coverSize: event.currentTarget.value });
     const viewFields = { ...viewSettings(), coverSize };
     state.preferences = { ...state.preferences, viewFields };
-    root.querySelector(".cards")?.style.setProperty("--card-cover-size", String(coverSize));
+    root.querySelectorAll(".cards").forEach((cards) => cards.style.setProperty("--card-cover-size", String(coverSize)));
     applyMasonryCoverSize();
     persistViewPreferences({ viewFields });
   });
   root.querySelector("[data-view-apply]")?.addEventListener("click", (event) => {
     event.stopPropagation();
-    const layout = state.layout;
+    const sectionId = event.currentTarget.closest("[data-view-menu]")?.dataset.sectionId || state.workspaceMenuSectionId;
+    const layout = layoutForScope(state.preferences, sectionId);
     const nextLayoutByScope = allLayoutScopes(layout);
+    state.layout = layout;
     state.preferences = { ...state.preferences, layout, defaultView: layout, layoutByScope: nextLayoutByScope };
     state.viewMenuOpen = false;
     renderViewMenu();
@@ -912,44 +1224,107 @@ function bindViewMenu() {
   });
 }
 
-function selectionHeaderMarkup(selection) {
-  const allSelected = selection.length === sortedItems().length;
-  const title = state.collectionId ? viewName() : state.view === "all" ? "全部" : viewName();
+function backupExportMenuMarkup(sectionId) {
+  const description = languageIsEnglish()
+    ? 'Click "Get backup" to download all collections, bookmarks, tags, and highlights. Or click "Download uploaded files" to download only your uploaded files, if available.'
+    : '点击“获取备份”下载所有收藏集、书签、标签和高亮。或者点击“下载上传文件”仅下载上传的文件（如果有）。';
+  const item = (action, label) => `<button type="button" role="menuitem" data-export-backup-action="${action}">${label}</button>`;
+  return `<div class="workspace-export-menu workspace-backup-export-menu" role="menu" data-export-menu data-export-menu-section-id="${escapeHtml(sectionId)}"><p class="workspace-backup-export-description">${description}</p>${item("backup", "获取备份")}${item("uploads", "下载上传文件")}</div>`;
+}
+
+function exportMenuMarkup(sectionId) {
+  if (state.exportMenuSectionId !== sectionId) return "";
+  const fullLibrary = sectionId === "all" && state.view === "all" && !state.collectionId && !state.query.trim() && !state.tag && !state.selectionSectionId;
+  if (fullLibrary) return backupExportMenuMarkup(sectionId);
+  const item = (format) => `<button type="button" role="menuitem" data-export-format="${format}">${format.toUpperCase()}</button>`;
+  return `<div class="workspace-export-menu" role="menu" data-export-menu data-export-menu-section-id="${escapeHtml(sectionId)}">${item("html")}${item("csv")}${item("txt")}${item("zip")}<p class="workspace-export-tip">如需下载上传的文件，请选择ZIP格式。</p></div>`;
+}
+
+function exportMenuTriggerMarkup(sectionId, selection = false, iconMarkup = treeIcon("download")) {
+  const wrapper = selection ? "selection-export-wrap" : "workspace-export-menu-wrap";
+  const button = selection ? "selection-action selection-export" : "export";
+  const label = `<span${selection ? "" : " class=\"workspace-tool-label\""}>导出书签</span>`;
+  return `<div class="${wrapper}"><button type="button" class="${button}" title="导出书签" aria-label="导出书签" aria-haspopup="menu" aria-expanded="${state.exportMenuSectionId === sectionId}" data-export-menu-trigger data-export-menu-section-id="${escapeHtml(sectionId)}"${selection ? " data-export-selection" : ""}>${iconMarkup}${label}</button>${exportMenuMarkup(sectionId)}</div>`;
+}
+
+function selectionHeaderMarkup(selection, sectionId, title, items) {
+  const allSelected = Boolean(items.length && selection.length === items.length);
+  const selectedLabel = languageIsEnglish() ? `${selection.length} selected` : `${selection.length} 个已选`;
   const trashSelection = state.view === "trash";
-  const moreMenu = state.selectionMoreOpen ? `<div class="selection-more-menu" role="menu" data-selection-more-menu><button type="button" role="menuitem" data-selection-more-action="screenshot" ${state.selectionScreenshotWorking ? "disabled" : ""}>${treeIcon("web")}<span>${state.selectionScreenshotWorking ? "正在创建页面截图…" : "创建页面截图"}</span></button><button type="button" role="menuitem" data-selection-more-action="refresh">${treeIcon("refresh")}<span>刷新预览</span></button><span class="menu-separator"></span><button type="button" role="menuitem" data-selection-more-action="favorite">${treeIcon("likeActive")}<span>添加到收藏夹</span></button><button type="button" role="menuitem" data-selection-more-action="unfavorite">${treeIcon("like")}<span>从收藏夹移除</span></button><span class="menu-separator"></span><button type="button" role="menuitem" data-selection-more-action="remove-tags">${treeIcon("tagAction")}<span>移除标签</span></button></div>` : "";
+  const moreOpen = state.selectionMoreOpen && state.selectionMoreSectionId === sectionId;
+  const moreMenu = moreOpen ? `<div class="selection-more-menu" role="menu" data-selection-more-menu data-section-id="${escapeHtml(sectionId)}"><button type="button" role="menuitem" data-selection-more-action="screenshot" ${state.selectionScreenshotWorking ? "disabled" : ""}>${treeIcon("web")}<span>${state.selectionScreenshotWorking ? "正在创建页面截图…" : "创建页面截图"}</span></button><button type="button" role="menuitem" data-selection-more-action="refresh">${treeIcon("refresh")}<span>刷新预览</span></button><span class="menu-separator"></span><button type="button" role="menuitem" data-selection-more-action="favorite">${treeIcon("likeActive")}<span>添加到收藏夹</span></button><button type="button" role="menuitem" data-selection-more-action="unfavorite">${treeIcon("like")}<span>从收藏夹移除</span></button><span class="menu-separator"></span><button type="button" role="menuitem" data-selection-more-action="remove-tags">${treeIcon("tagAction")}<span>移除标签</span></button></div>` : "";
   const destructiveAction = trashSelection
     ? `<button class="selection-action" title="恢复" aria-label="恢复" data-batch="restore">${treeIcon("add")}<span>恢复</span></button>`
     : `<button class="selection-action selection-danger" title="删除" aria-label="删除" data-batch="trash">${treeIcon("trash")}<span>删除</span></button>`;
-  return `<header class="workspace-head workspace-selection-head" data-is-header="true"><div class="workspace-first-action"><div id="select-all" class="select-all selection-toggle button-dQdc" role="button" tabindex="0" title="选择所有" aria-label="选择所有" data-variant="active"><label class="selection-checkbox"><input tabindex="-1" type="checkbox" title="选择所有" ${allSelected ? "checked" : ""}></label></div></div><div class="workspace-name selection-name">${escapeHtml(title)}&nbsp;</div><div class="workspace-space"></div><button type="button" class="selection-action selection-move" title="移动" aria-label="移动" data-selection-move aria-haspopup="dialog">${treeIcon("moveTo")}<span>移动</span></button><button class="selection-action" title="添加标签" aria-label="添加标签" data-batch="tags">${treeIcon("tagAction")}<span>添加标签</span></button>${destructiveAction}<button id="export" class="selection-action" title="更多" aria-label="更多">${treeIcon("download")}<span>导出书签</span></button><button class="selection-action" title="直接在浏览器打开" aria-label="直接在浏览器打开" data-selection-open>${treeIcon("open")}<span>直接在浏览器打开</span></button><div class="selection-more-wrap"><button class="selection-action selection-more" title="更多" aria-label="更多" aria-expanded="${state.selectionMoreOpen}" data-selection-more>${treeIcon("moreHorizontal")}</button>${moreMenu}</div><div class="workspace-space"></div><button class="selection-action selection-cancel" title="取消" aria-label="取消" data-selection-clear>${treeIcon("selectionClose")}<span>取消</span></button></header>`;
+  return `<header class="workspace-head workspace-selection-head" data-is-header="true" data-section-id="${escapeHtml(sectionId)}"><div class="workspace-first-action"><div class="select-all selection-toggle button-dQdc" role="button" tabindex="0" title="选择所有" aria-label="选择所有" data-select-all data-variant="active"><label class="selection-checkbox"><input tabindex="-1" type="checkbox" title="选择所有" ${allSelected ? "checked" : ""}></label></div></div><div class="workspace-name selection-name"><span class="selection-count" aria-live="polite">${escapeHtml(selectedLabel)}</span><span class="selection-context">${escapeHtml(title)}</span></div><div class="workspace-space"></div><button type="button" class="selection-action selection-move" title="移动" aria-label="移动" data-selection-move aria-haspopup="dialog">${treeIcon("moveTo")}<span>移动</span></button><button class="selection-action" title="添加标签" aria-label="添加标签" data-batch="tags">${treeIcon("tagAction")}<span>添加标签</span></button>${destructiveAction}${exportMenuTriggerMarkup(sectionId, true, treeIcon("download"))}<button class="selection-action" title="直接在浏览器打开" aria-label="直接在浏览器打开" data-selection-open>${treeIcon("open")}<span>直接在浏览器打开</span></button><div class="selection-more-wrap"><button class="selection-action selection-more" title="更多" aria-label="更多" aria-expanded="${moreOpen}" data-selection-more>${treeIcon("moreHorizontal")}</button>${moreMenu}</div><div class="workspace-space"></div><div class="workspace-last-action"><button class="selection-action selection-cancel" title="取消" aria-label="取消" data-selection-clear>${treeIcon("selectionClose")}<span>取消</span></button></div></header>`;
 }
 
-function workspaceHeaderMarkup(items, selection) {
-  if (selection.length) return selectionHeaderMarkup(selection);
-  const sort = sortOption();
-  const allSelected = Boolean(items.length && selection.length === items.length);
-  const view = viewOption();
-  const firstAction = selection.length
-    ? `<div class="workspace-first-action"><div id="select-all" class="select-all selection-toggle button-dQdc" role="button" tabindex="0" title="选择所有" aria-label="选择所有" data-variant="active"><label class="selection-checkbox"><input tabindex="-1" type="checkbox" title="选择所有" ${allSelected ? "checked" : ""}></label></div></div><span class="selection-count" aria-live="polite">${selection.length}</span>`
-    : `<div class="workspace-first-action"><div id="select-all" class="select-all button-dQdc button-JeZa" role="button" tabindex="0" title="选择所有" aria-label="选择所有" data-variant="default" data-accent="default" data-size="default" data-selectable="true"><div class="workspace-cloud icon-vkJU icon-yhAy"><span class="workspace-icon icon-VKRw">${treeIcon(state.view === "all" && !state.collectionId ? "cloudActive" : "cloud")}</span></div><label class="select-checkbox select-U4Ec" title="选择所有"><input tabindex="-1" type="checkbox" ${allSelected ? "checked" : ""}></label></div></div><div class="workspace-name">${escapeHtml(viewName())}</div><a class="workspace-open" href="${escapeHtml(workspaceHref())}" target="_blank" rel="noopener" title="在新标签页中打开" aria-label="在新标签页中打开">${microIcon("microOpen")}</a>`;
-  const selectionActions = selection.length
-    ? `<div class="selection-actions"><button title="添加星标" data-batch="favorite">★</button><button title="取消星标" data-batch="unfavorite">☆</button><button title="编辑标签" data-batch="tags">#</button><select id="move-to" aria-label="移动到"><option value="">移动到…</option>${state.collections.map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("")}</select>${state.view === "trash" ? `<button data-batch="restore">恢复</button>` : `<button class="danger" data-batch="trash">删除</button>`}<button id="export" class="export" title="导出书签" aria-label="导出书签">${treeIcon("download")}<span>导出书签</span></button><button data-selection-clear title="取消选择" aria-label="取消选择">×</button></div>`
-    : `<div class="workspace-tools"><div class="workspace-sort" role="button" tabindex="0" title="排序" aria-label="排序" aria-haspopup="menu" aria-expanded="${state.sortMenuOpen}" data-sort-trigger><span class="workspace-sort-icon">${treeIcon(sort?.icon || "sortCreated")}</span><span class="workspace-tool-label workspace-sort-label">${sort?.label || "排序"}</span></div><div class="view-switcher" role="group" aria-label="视图"><button class="view-trigger active" data-view-trigger title="视图" aria-label="视图" aria-haspopup="menu" aria-expanded="${state.viewMenuOpen}">${treeIcon(view.icon)}<span class="workspace-tool-label">${view.label}</span></button></div><button id="export" class="export" title="更多" aria-label="导出书签">${treeIcon("download")}<span class="workspace-tool-label">导出书签</span></button></div>`;
-  return `<header class="workspace-head${selection.length ? " workspace-selection-head" : ""}" data-is-header="true">${firstAction}<div class="workspace-space"></div>${selectionActions}</header>${selection.length ? "" : `${sortMenuMarkup()}${viewMenuMarkup()}`}`;
+function workspaceCollectionMenuMarkup(collectionId) {
+  if (!collectionId || state.workspaceCollectionMenuId !== collectionId) return "";
+  const menuItem = (action, label) => `<button type="button" role="menuitem" data-workspace-collection-action="${action}" data-collection-id="${escapeHtml(collectionId)}">${label}</button>`;
+  return `<div class="workspace-collection-menu" role="menu" data-workspace-collection-menu-panel data-collection-id="${escapeHtml(collectionId)}">${menuItem("rename", "改名")}${menuItem("icon", "更改图标")}${menuItem("delete", "删除收藏集")}</div>`;
 }
 
-function visibleItems() {
+function bindWorkspaceCollectionMenu() {
+  root.querySelectorAll("[data-workspace-collection-menu]").forEach((button) => button.onclick = (event) => {
+    event.stopPropagation();
+    state.workspaceCollectionMenuId = state.workspaceCollectionMenuId === button.dataset.workspaceCollectionMenu ? null : button.dataset.workspaceCollectionMenu;
+    closeExportMenu();
+    state.sortMenuOpen = false;
+    state.viewMenuOpen = false;
+    renderSortMenu();
+    renderViewMenu();
+    renderWorkspaceCollectionMenu();
+  });
+  root.querySelectorAll("[data-workspace-collection-action]").forEach((button) => button.onclick = (event) => {
+    event.stopPropagation();
+    state.workspaceCollectionMenuId = null;
+    renderWorkspaceCollectionMenu();
+    collectionAction(button.dataset.workspaceCollectionAction, button.dataset.collectionId).catch(showError);
+  });
+}
+
+function renderWorkspaceCollectionMenu() {
+  root.querySelectorAll("[data-workspace-collection-menu-panel]").forEach((menu) => menu.remove());
+  root.querySelectorAll("[data-workspace-collection-menu]").forEach((button) => {
+    const open = state.workspaceCollectionMenuId === button.dataset.workspaceCollectionMenu;
+    button.setAttribute("aria-expanded", String(open));
+    if (open) button.parentElement?.insertAdjacentHTML("beforeend", workspaceCollectionMenuMarkup(button.dataset.workspaceCollectionMenu));
+  });
+  bindWorkspaceCollectionMenu();
+  positionWorkspaceCollectionMenu();
+}
+
+function workspaceHeaderMarkup(items, selection, sectionId = "all", title = viewName(items), section = null) {
+  if (selection.length) return selectionHeaderMarkup(selection, sectionId, title, items);
+  const hasItems = section?.hasItems ?? items.length > 0;
+  const collectionId = section?.id || (state.collections.some((item) => item.id === sectionId) ? sectionId : null);
+  const sort = sortOption(currentSort(sectionId));
+  const view = viewOption(section?.layout || layoutForScope(state.preferences, sectionId));
+  const sortOpen = state.sortMenuOpen && state.workspaceMenuSectionId === sectionId;
+  const viewOpen = state.viewMenuOpen && state.workspaceMenuSectionId === sectionId;
+  const selectAll = hasItems ? `<div class="workspace-first-action"><div class="select-all button-dQdc button-JeZa" role="button" tabindex="0" title="选择所有" aria-label="选择所有" data-select-all data-variant="default" data-accent="default" data-size="default" data-selectable="true">${workspaceIconMarkup(sectionId === "all" ? null : sectionId)}<label class="select-checkbox select-U4Ec" title="选择所有"><input tabindex="-1" type="checkbox"></label></div></div>` : "";
+  const titleMarkup = collectionId
+    ? `<a class="workspace-name workspace-title-link" href="${escapeHtml(workspaceHref(collectionId))}" title="${escapeHtml(title)}">${escapeHtml(title)}</a>`
+    : `<div class="workspace-name">${escapeHtml(title)}</div>`;
+  const headerExportMarkup = !hasItems ? "" : exportMenuTriggerMarkup(sectionId);
+  const managementMarkup = collectionId ? `<div class="workspace-collection-menu-wrap"><button type="button" class="workspace-collection-more" title="更多" aria-label="${escapeHtml(title)}更多" aria-haspopup="menu" aria-expanded="${state.workspaceCollectionMenuId === collectionId}" data-workspace-collection-menu="${escapeHtml(collectionId)}">${treeIcon("moreHorizontal")}</button>${workspaceCollectionMenuMarkup(collectionId)}</div>` : "";
+  return `<header class="workspace-head" data-is-header="true" data-section-id="${escapeHtml(sectionId)}">${selectAll}${titleMarkup}<a class="workspace-open" href="${escapeHtml(workspaceHref(sectionId === "all" ? null : sectionId))}" target="_blank" rel="noopener" title="在新标签页中打开" aria-label="在新标签页中打开">${microIcon("microOpen")}</a><div class="workspace-space"></div><div class="workspace-tools"><div class="workspace-sort" role="button" tabindex="0" title="排序" aria-label="排序" aria-haspopup="menu" aria-expanded="${sortOpen}" data-sort-trigger data-section-id="${escapeHtml(sectionId)}"><span class="workspace-sort-icon">${treeIcon(sort?.icon || "sortCreated")}</span><span class="workspace-tool-label workspace-sort-label">${sort?.label || "排序"}</span></div><div class="view-switcher" role="group" aria-label="视图"><button class="view-trigger active" data-view-trigger title="视图" aria-label="视图" aria-haspopup="menu" aria-expanded="${viewOpen}" data-section-id="${escapeHtml(sectionId)}">${treeIcon(view.icon)}<span class="workspace-tool-label">${view.label}</span></button></div>${headerExportMarkup}${managementMarkup}</div></header>`;
+}
+
+function visibleItems(source = state.items) {
   const filters = parseSearchQuery(state.query).filters;
   const duplicates = duplicateLinks(sidebarItems());
-  return state.items.filter((item) => {
+  return source.filter((item) => {
     if (!matchesSearchFilters(item, filters, duplicates)) return false;
     if (state.tag && !item.tags.some((tag) => tag.toLocaleLowerCase() === state.tag.toLocaleLowerCase())) return false;
     return true;
   });
 }
 
-function sortedItems() {
-  const items = visibleItems();
-  const sort = state.preferences?.sort;
+function sortedItems(source = state.items, sectionId = null) {
+  const items = visibleItems(source);
+  const sort = currentSort(sectionId);
   if (sort === "title" || sort === "-title") {
     const ordered = [...items].sort((a, b) => (a.title || a.link).localeCompare(b.title || b.link, "zh-CN"));
     return sort === "-title" ? ordered.reverse() : ordered;
@@ -963,6 +1338,40 @@ function sortedItems() {
     return sort === "-created" ? ordered.reverse() : ordered;
   }
   return items;
+}
+
+function collectionDescendantIds(collectionId) {
+  const ids = [collectionId];
+  for (let index = 0; index < ids.length; index += 1) {
+    for (const item of state.collections) if (item.parentId === ids[index]) ids.push(item.id);
+  }
+  return ids;
+}
+
+function collectionSections() {
+  const collectionId = state.collectionId && state.view === "all" ? state.collectionId : null;
+  const ids = collectionId ? collectionDescendantIds(collectionId) : [];
+  const nestedViewLegacy = state.preferences?.nestedViewLegacy === true;
+  if (ids.length > 1 && !nestedViewLegacy && (!state.query.trim() || state.searchInCollection)) {
+    const source = state.query.trim() ? state.items : state.allItems.length ? state.allItems : state.items;
+    return ids.map((id) => {
+      const items = sortedItems(source.filter((item) => item.collectionId === id), id);
+      return { id, key: id, title: collectionName(id), items, layout: layoutForScope(state.preferences, id), hasItems: items.length > 0 };
+    });
+  }
+  const id = state.collectionId || null;
+  const items = sortedItems(state.items, id);
+  return [{ id, key: id || "all", title: viewName(items), items, layout: layoutForScope(state.preferences, id || "all"), hasItems: items.length > 0 }];
+}
+
+function workspaceItems(sectionId) {
+  return collectionSections().find((section) => section.key === sectionId)?.items || sortedItems();
+}
+
+function selectionItems(sectionId) {
+  return state.collectionId && sectionId === state.collectionId && collectionSections().length > 1
+    ? sortedItems()
+    : workspaceItems(sectionId);
 }
 
 function tagList(items) {
@@ -1246,8 +1655,8 @@ function collectionPickerRowsSource(query, selectedId) {
       ? `<span class="collection-picker-arrow ${collapsed ? "collapsed" : ""}" data-picker-toggle-collection="${item.id}" title="${arrowTitle}${escapeHtml(collectionName(item.id))}" aria-label="${arrowTitle}${escapeHtml(collectionName(item.id))}">${treeIcon("arrow")}</span>`
       : `<span class="collection-picker-arrow placeholder"></span>`;
     const active = item.id === selectedId;
-    const iconName = item.id === "unsorted" ? (active ? "inboxActive" : "inbox") : active ? "defaultCollectionActive" : "defaultCollection";
-    return `<div class="collection-picker-row" style="--depth:${depth}"><button type="button" role="option" class="collection-picker-item ${active ? "active" : ""}" aria-selected="${active}" data-pick-collection="${item.id}">${arrow}<span class="collection-picker-icon">${treeIcon(iconName)}</span><span class="collection-picker-item-name">${escapeHtml(collectionName(item.id))}</span>${count > 0 ? `<small class="collection-picker-count">${count}</small>` : ""}</button><button type="button" class="collection-picker-more" data-picker-collection-menu="${item.id}" title="更多" aria-label="${escapeHtml(collectionName(item.id))}更多" aria-expanded="${state.pickerCollectionMenuId === item.id}">${treeIcon("moreHorizontal")}</button>${menu(item)}</div>`;
+    const iconValue = collectionIconValue(item.id);
+    return `<div class="collection-picker-row" style="--depth:${depth}"><button type="button" role="option" class="collection-picker-item ${active ? "active" : ""}" aria-selected="${active}" data-pick-collection="${item.id}">${arrow}<span class="collection-picker-icon">${collectionIconMarkup(iconValue, active, item.id === "unsorted")}</span><span class="collection-picker-item-name">${escapeHtml(collectionName(item.id))}</span>${count > 0 ? `<small class="collection-picker-count">${count}</small>` : ""}</button><button type="button" class="collection-picker-more" data-picker-collection-menu="${item.id}" title="更多" aria-label="${escapeHtml(collectionName(item.id))}更多" aria-expanded="${state.pickerCollectionMenuId === item.id}">${treeIcon("moreHorizontal")}</button>${menu(item)}</div>`;
   };
   if (value) {
     const matches = state.collections.filter((item) => collectionName(item.id).toLocaleLowerCase().includes(value));
@@ -1263,6 +1672,146 @@ function collectionPickerRowsSource(query, selectedId) {
 function collectionPickerRows(query, selectedId) {
   return localizeHtml(collectionPickerRowsSource(query, selectedId));
 }
+
+function collectionIconPickerRows(query) {
+  const value = String(query || "").trim().toLocaleLowerCase();
+  const groups = collectionIconCatalog.map((group) => {
+    const icons = group.icons.filter((icon) => !value || `${group.category} ${icon.name}`.toLocaleLowerCase().includes(value));
+    if (!icons.length) return "";
+    return `<section class="collection-icon-picker-section"><h3>${escapeHtml(group.category)}</h3><div class="collection-icon-picker-grid">${icons.map((icon) => `<button type="button" class="collection-icon-picker-item" role="option" data-collection-icon-value="${escapeHtml(icon.url)}" aria-label="${escapeHtml(`${group.category} ${icon.name}`)}" title="${escapeHtml(icon.name)}"><img data-collection-icon-image src="${escapeHtml(icon.url)}" alt="" loading="lazy"></button>`).join("")}</div></section>`;
+  }).join("");
+  return groups || `<p class="collection-icon-picker-empty">${t("没有找到图标")}</p>`;
+}
+
+function renderCollectionIconPicker(query = "") {
+  const content = collectionIconPickerDialog?.querySelector("#collection-icon-picker-content");
+  if (!content) return;
+  content.innerHTML = collectionIconPickerRows(query);
+}
+
+async function refreshCollectionIconCatalog() {
+  if (collectionIconCatalogRequest) return collectionIconCatalogRequest;
+  collectionIconCatalogRequest = (async () => {
+    if (!await connection()) throw new TypeError("手动更新图标目录需要连接私有实例");
+    const catalog = normalizeCollectionIconCatalog(await api("/v1/icon-catalog"));
+    if (!catalog.length) throw new TypeError("图标目录无效");
+    if (!writeCollectionIconCache(globalThis.localStorage, catalog)) throw new TypeError("无法保存图标目录");
+    collectionIconCatalog = catalog;
+    const query = collectionIconPickerDialog?.querySelector("#collection-icon-picker-search")?.value || "";
+    renderCollectionIconPicker(query);
+  })();
+  try {
+    return await collectionIconCatalogRequest;
+  } finally {
+    collectionIconCatalogRequest = null;
+  }
+}
+
+const COLLECTION_ICON_UPLOAD_MAX_BYTES = 5 * 1024 * 1024;
+const COLLECTION_ICON_UPLOAD_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp", "image/avif"]);
+
+function readCollectionIconFile(file) {
+  if (!file || !COLLECTION_ICON_UPLOAD_TYPES.has(file.type)) throw new TypeError("请选择 JPG、PNG、GIF、WebP 或 AVIF 图片");
+  if (file.size > COLLECTION_ICON_UPLOAD_MAX_BYTES) throw new TypeError("图片不能超过 5 MB");
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new TypeError("图片读取失败"));
+    reader.onload = () => {
+      const value = String(reader.result || "");
+      if (!COLLECTION_ICON_DATA_URL.test(value)) return reject(new TypeError("请选择有效的图片文件"));
+      resolve(value);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function refreshCollectionIconSurfaces(collectionId) {
+  renderSidebar();
+  const iconValue = collectionIconValue(collectionId);
+  const active = state.collectionId === collectionId;
+  const workspaceIcon = root.querySelector(".workspace-icon");
+  if (workspaceIcon && state.collectionId === collectionId) {
+    workspaceIcon.classList.toggle("collection-emoji", Boolean(iconValue && !isCollectionIconImage(iconValue)));
+    workspaceIcon.innerHTML = collectionIconMarkup(iconValue, active);
+  }
+  root.querySelectorAll("[data-card-collection]").forEach((link) => {
+    if (link.dataset.cardCollection !== collectionId) return;
+    const pathIcon = link.querySelector(".card-path-icon");
+    if (pathIcon) pathIcon.innerHTML = collectionIconMarkup(iconValue, false, collectionId === "unsorted");
+  });
+  const editForm = editBookmarkDialog?.querySelector("form");
+  if (editForm?.elements.collectionId?.value === collectionId) {
+    const editIcon = editForm.querySelector(".edit-collection-icon");
+    if (editIcon) editIcon.innerHTML = collectionIconMarkup(iconValue, false, collectionId === "unsorted");
+  }
+}
+
+async function saveCollectionIconValue(collectionId, value) {
+  const icons = { ...(state.preferences?.collectionIconByCollectionId || {}) };
+  const icon = String(value || "").trim();
+  if (icon) {
+    if (!isCollectionIconImage(icon)) throw new TypeError("请选择有效的图片图标");
+    icons[collectionId] = icon;
+  } else {
+    delete icons[collectionId];
+  }
+  await savePreferences({ collectionIconByCollectionId: icons });
+  refreshCollectionIconSurfaces(collectionId);
+}
+
+function openCollectionIconPicker(item) {
+  if (!item || !collectionIconPickerDialog) return;
+  const search = collectionIconPickerDialog.querySelector("#collection-icon-picker-search");
+  const back = collectionIconPickerDialog.querySelector("#collection-icon-picker-back");
+  const close = collectionIconPickerDialog.querySelector("#collection-icon-picker-close");
+  const refresh = collectionIconPickerDialog.querySelector("[data-collection-icon-refresh]");
+  const upload = collectionIconPickerDialog.querySelector("#collection-icon-picker-upload");
+  const remove = collectionIconPickerDialog.querySelector("[data-collection-icon-delete]");
+  back.innerHTML = treeIcon("back");
+  close.innerHTML = treeIcon("close");
+  collectionIconPickerDialog.querySelector(".collection-icon-picker-search-icon").innerHTML = treeIcon("search");
+  collectionIconPickerDialog.querySelector("[data-collection-icon-upload-icon]").innerHTML = treeIcon("add");
+  back.onclick = () => collectionIconPickerDialog.close();
+  close.onclick = () => collectionIconPickerDialog.close();
+  const hasConnection = Boolean(state.connectionInfo);
+  refresh.disabled = !hasConnection;
+  refresh.title = hasConnection ? "手动更新图标目录" : "连接私有实例后可用";
+  refresh.setAttribute("aria-label", refresh.title);
+  refresh.onclick = hasConnection ? async () => {
+    refresh.disabled = true;
+    try { await refreshCollectionIconCatalog(); } catch (error) { showError(error); }
+    finally { refresh.disabled = false; }
+  } : null;
+  search.value = "";
+  search.oninput = () => renderCollectionIconPicker(search.value);
+  remove.onclick = () => saveCollectionIconValue(item.id, "").then(() => collectionIconPickerDialog.close()).catch(showError);
+  upload.onchange = (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    readCollectionIconFile(file).then((value) => saveCollectionIconValue(item.id, value)).then(() => collectionIconPickerDialog.close()).catch(showError);
+  };
+  collectionIconPickerDialog.querySelector("#collection-icon-picker-content").onclick = (event) => {
+    const button = event.target.closest("[data-collection-icon-value]");
+    if (!button) return;
+    saveCollectionIconValue(item.id, button.dataset.collectionIconValue).then(() => collectionIconPickerDialog.close()).catch(showError);
+  };
+  collectionIconPickerDialog.onclose = () => {
+    search.oninput = null;
+    refresh.onclick = null;
+    collectionIconPickerDialog.querySelector("#collection-icon-picker-content").onclick = null;
+  };
+  collectionIconCatalog = readCollectionIconCache(globalThis.localStorage) || COLLECTION_ICON_DEFAULT_CATALOG;
+  renderCollectionIconPicker();
+  collectionIconPickerDialog.showModal();
+  queueMicrotask(() => search.focus());
+}
+
+document.addEventListener("error", (event) => {
+  const image = event.target?.closest?.("img[data-collection-icon-image]");
+  if (!image) return;
+  image.hidden = true;
+  image.parentElement?.classList.add("is-failed");
+}, true);
 
 function openMovePicker() {
   const search = collectionPickerDialog.querySelector("#collection-picker-search");
@@ -1420,6 +1969,10 @@ function dateTimeLabel(value) {
   try { return new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(value)); } catch { return ""; }
 }
 
+function compactDateTimeLabel(value) {
+  try { return new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(value)); } catch { return ""; }
+}
+
 function dateTimeInputValue(value) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "" : new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
@@ -1439,7 +1992,9 @@ function coverDpr() {
 }
 
 function gridCoverUrl(item, width = masonryGridWidth()) {
-  const source = item.cover === "<screenshot>" ? item.link : item.cover || item.link;
+  if (!item.cover) return "icons/bookmark.svg";
+  if (item.cover.startsWith("data:")) return item.cover;
+  const source = item.cover === "<screenshot>" ? item.link : item.cover;
   if (!source) return "icons/bookmark.svg";
   return `https://rdl.ink/render/${encodeURIComponent(source)}?mode=fillmax&fill=solid&format=webp&width=${width}&ar=16:9&dpr=${coverDpr()}`;
 }
@@ -1506,6 +2061,7 @@ function editFormSnapshot() {
     reminder: fields.get("reminder") || "",
     cover: fields.get("cover") || "",
     media: fields.get("media") || "[]",
+    type: fields.get("type") || "link",
     collectionId: fields.get("collectionId") || "",
     tags: fields.get("tags") || "[]",
     favorite: fields.has("favorite"),
@@ -1514,11 +2070,11 @@ function editFormSnapshot() {
 }
 
 function editFormIsDirty() {
-  return Boolean(state.editingId && state.editSnapshot && state.editSnapshot !== editFormSnapshot());
+  return Boolean((state.editingId || editBookmarkDialog.dataset.newBookmark === "1") && state.editSnapshot && state.editSnapshot !== editFormSnapshot());
 }
 
 function syncEditPanelLayout(open = editBookmarkDialog.open) {
-  root.querySelector(".library")?.classList.toggle("editing", Boolean(open && state.editingId));
+  root.querySelector(".library")?.classList.toggle("editing", Boolean(open && (state.editingId || editBookmarkDialog.dataset.newBookmark === "1")));
 }
 
 function mountEditPanel(wasOpen = editBookmarkDialog.open) {
@@ -1531,7 +2087,10 @@ function mountEditPanel(wasOpen = editBookmarkDialog.open) {
 
 function activeEditItem() {
   const id = state.editingId || (editBookmarkDialog.open ? editBookmarkDialog.dataset.bookmarkId : "");
-  return state.items.find((item) => item.id === id) || state.allItems.find((item) => item.id === id) || null;
+  const item = state.items.find((entry) => entry.id === id) || state.allItems.find((entry) => entry.id === id);
+  if (item || editBookmarkDialog.dataset.newBookmark !== "1") return item || null;
+  const form = editBookmarkDialog.querySelector("form");
+  return { id: "", link: form?.elements.link?.value || "", cover: form?.elements.cover?.value || "", media: editMediaDraft() };
 }
 
 function editMediaDraft() {
@@ -1550,7 +2109,7 @@ function editCoverDraft() {
 
 function syncEditCoverPreview(item = activeEditItem()) {
   const image = editBookmarkDialog.querySelector("#edit-cover");
-  if (!image || !item) return;
+  if (!image) return;
   image.onerror = () => {
     image.onerror = null;
     image.src = "icons/bookmark.svg";
@@ -1684,31 +2243,49 @@ async function mutate(path, init) {
   }
 }
 
-function card(item, index, duplicates = new Set()) {
+function card(item, index, duplicates = new Set(), layout = state.layout) {
   const selected = state.selected.has(item.id) ? "checked" : "";
-  const titleView = state.layout === "simple";
-  const gridView = state.layout === "grid";
-  const masonryView = state.layout === "masonry";
+  const titleView = layout === "simple";
+  const gridView = layout === "grid";
+  const masonryView = layout === "masonry";
+  const bookmarkLabel = item.title || item.link;
   const coverSrc = titleView ? faviconUrl(item.link) : masonryView ? masonryCoverUrl(item) : gridView ? gridCoverUrl(item) : listCoverUrl(item);
   const coverSize = titleView ? 20 : 56;
   const cardLinkTarget = settingsPreference("bookmarkClick", "new_tab") === "current_tab" ? "" : "target=\"_blank\" rel=\"noopener\"";
+  const cardTitleAttributes = gridView ? ` title="${escapeHtml(bookmarkLabel)}" aria-label="${escapeHtml(bookmarkLabel)}"` : "";
   const note = item.note ? renderMarkdown(item.note) : "";
   const description = item.description ? escapeHtml(item.description) : "";
   const tags = item.tags.map((tag) => `<span class="card-tag"><span class="card-tag-icon">${microIcon("microTag")}</span>${escapeHtml(tag)}</span>`).join("");
   const type = bookmarkType(item);
-  const status = item.health.status === "broken" ? `<section data-inline="true" class="card-status card-broken" title="失效链接">${microIcon("microBroken")}</section>` : "";
-  const duplicate = duplicates.has(item.link) ? `<section data-inline="true" class="card-status card-duplicate" title="重复书签">${microIcon("microDuplicate")}</section>` : "";
-  const typeIcon = bookmarkTypeIcon(type) ? `<section data-inline="true" class="card-type card-type-${type}" title="${escapeHtml(type)}">${bookmarkTypeIcon(type)}</section>` : "";
-  const important = item.favorite ? `<section data-inline="true" class="card-important">${microIcon("microImportantActive")}</section>` : "";
-  const reminder = item.reminder ? `<section data-inline="true" class="card-reminder">${microIcon("microReminder")} ${escapeHtml(dateTimeLabel(item.reminder))}</section>` : "";
-  const highlights = item.highlights.length ? `<section data-inline="true" class="card-highlights">${microIcon("microComment")} ${item.highlights.length} 条高亮</section>` : "";
-  const source = `<section><a class="card-path" href="#" data-card-collection="${escapeHtml(item.collectionId)}"><span class="card-path-icon">${treeIcon(item.collectionId === "unsorted" ? "inbox" : "defaultCollection")}</span>${escapeHtml(masonryView ? collectionName(item.collectionId) : collectionPath(item.collectionId))}</a></section>${important}${status}${duplicate}${typeIcon}<section>${escapeHtml(host(item.link))}</section>${item.createdAt ? `<section>${dateLabel(item.createdAt)}</section>` : ""}${reminder}${highlights}`;
+  const status = item.health.status === "broken" ? `<section data-inline="true" class="card-status card-broken" title="失效链接"${gridView ? " aria-label=\"失效链接\"" : ""}>${microIcon("microBroken")}</section>` : "";
+  const duplicate = duplicates.has(item.link) ? `<section data-inline="true" class="card-status card-duplicate" title="重复书签"${gridView ? " aria-label=\"重复书签\"" : ""}>${microIcon("microDuplicate")}</section>` : "";
+  const typeIcon = bookmarkTypeIcon(type) ? `<section data-inline="true" class="card-type card-type-${type}" title="${escapeHtml(type)}"${gridView ? ` aria-label="${escapeHtml(type)}"` : ""}>${bookmarkTypeIcon(type)}</section>` : "";
+  const important = item.favorite ? `<section data-inline="true" class="card-important"${gridView ? " title=\"已收藏\" aria-label=\"已收藏\"" : ""}>${microIcon("microImportantActive")}</section>` : "";
+  const reminderFullLabel = item.reminder ? dateTimeLabel(item.reminder) : "";
+  const reminderLabel = item.reminder ? (gridView ? compactDateTimeLabel(item.reminder) || reminderFullLabel : reminderFullLabel) : "";
+  const reminder = item.reminder ? `<section data-inline="true" class="card-reminder"${gridView ? ` title="提醒：${escapeHtml(reminderFullLabel)}" aria-label="提醒：${escapeHtml(reminderFullLabel)}"` : ""}>${microIcon("microReminder")}<span class="card-reminder-label">${escapeHtml(reminderLabel)}</span></section>` : "";
+  const highlightsLabel = `${item.highlights.length} 条高亮`;
+  const highlights = item.highlights.length ? `<section data-inline="true" class="card-highlights"${gridView ? ` title="${escapeHtml(highlightsLabel)}" aria-label="${escapeHtml(highlightsLabel)}"` : ""}>${microIcon("microComment")} ${highlightsLabel}</section>` : "";
+  const collectionPathLabel = collectionPath(item.collectionId);
+  const collectionLabel = gridView || masonryView ? collectionName(item.collectionId) : collectionPathLabel;
+  const collectionText = gridView ? `<span class="card-path-label">${escapeHtml(collectionLabel)}</span>` : escapeHtml(collectionLabel);
+  const collectionAttributes = gridView ? ` title="${escapeHtml(collectionPathLabel)}" aria-label="${escapeHtml(collectionPathLabel)}"` : "";
+  const path = `<section${gridView ? ' class="card-source-collection"' : ''}><a class="card-path" href="#" data-card-collection="${escapeHtml(item.collectionId)}"${collectionAttributes}><span class="card-path-icon">${collectionIconMarkup(collectionIconValue(item.collectionId), false, item.collectionId === "unsorted")}</span>${collectionText}</a></section>`;
+  const hostLabel = host(item.link);
+  const hostMarkup = `<section${gridView ? ` class="card-host" title="${escapeHtml(hostLabel)}" aria-label="${escapeHtml(hostLabel)}"` : ""}>${escapeHtml(hostLabel)}</section>`;
+  const createdLabel = item.createdAt ? dateLabel(item.createdAt) : "";
+  const createdFullLabel = item.createdAt ? dateTimeLabel(item.createdAt) || createdLabel : "";
+  const createdMarkup = item.createdAt ? `<section${gridView ? ` class="card-date" title="${escapeHtml(createdFullLabel)}" aria-label="${escapeHtml(createdFullLabel)}"` : ""}>${escapeHtml(createdLabel)}</section>` : "";
+  const source = `${path}${important}${status}${duplicate}${typeIcon}${hostMarkup}${createdMarkup}${reminder}${highlights}`;
+  const gridBadges = `${important}${status}${duplicate}${typeIcon}${highlights}`;
+  const gridSource = `<div class="card-source-row" data-card-source-row="primary">${path}<span class="card-source-separator" aria-hidden="true">·</span>${hostMarkup}</div><div class="card-source-row" data-card-source-row="secondary">${createdMarkup}${gridBadges ? `<div class="card-source-badges">${gridBadges}</div>` : ""}${reminder}</div>`;
   const actionMarkup = bookmarkActionMarkup(item);
-  const selectControl = buttonGroupEnabled("select") ? `<label class="card-select" title="选择"><input aria-label="选择${escapeHtml(item.title || item.link)}" type="checkbox" data-select="${item.id}" ${selected}></label>` : "";
+  const selectControl = buttonGroupEnabled("select") ? `<label class="card-select" title="选择"><input aria-label="选择${escapeHtml(bookmarkLabel)}" type="checkbox" data-select="${item.id}" ${selected}></label>` : "";
   const menuOpen = state.cardMenuId === item.id ? " card-menu-open" : "";
   const coverAttrs = masonryView || gridView ? `width="${masonryGridWidth()}"` : `width="${coverSize}" height="${titleView ? 20 : 48}"`;
-  const sourceMarkup = masonryView || gridView ? `<source srcset="${escapeHtml(coverSrc)}" type="image/webp">` : "";
-  return `<article role="listitem" draggable="true" data-drag-bookmark="${item.id}" class="bookmark-card${selected ? " selected" : ""}${state.selected.size ? " selection-mode" : ""}${masonryView ? " masonry-card" : ""}${menuOpen}" style="--stagger:${Math.min(index, 12)}"><picture role="img" class="card-cover">${sourceMarkup}<img src="${escapeHtml(coverSrc)}" alt="" ${coverAttrs} referrerpolicy="no-referrer"></picture><div class="card-copy"><div class="card-title">${escapeHtml(item.title || item.link)}</div><div class="card-details">${note ? `<div class="card-note">${note}</div>` : ""}${description ? `<div class="card-description">${description}</div>` : ""}${tags ? `<div class="card-tags">${tags}</div>` : ""}</div><div class="card-source">${source}</div></div><div class="card-actions">${actionMarkup}</div>${selectControl}<a class="card-permalink" href="${escapeHtml(item.link)}" ${cardLinkTarget} tabindex="0">${escapeHtml(item.title || item.link)}</a></article>`;
+  const pictureSourceMarkup = masonryView || gridView ? `<source srcset="${escapeHtml(coverSrc)}" type="image/webp">` : "";
+  const metadataMarkup = `<div class="card-source">${gridView ? gridSource : source}</div>`;
+  return `<article role="listitem" draggable="true" data-drag-bookmark="${item.id}" class="bookmark-card${selected ? " selected" : ""}${state.selected.size ? " selection-mode" : ""}${masonryView ? " masonry-card" : ""}${menuOpen}" style="--stagger:${Math.min(index, 12)}"><picture role="img" class="card-cover">${pictureSourceMarkup}<img src="${escapeHtml(coverSrc)}" alt="" ${coverAttrs} referrerpolicy="no-referrer"></picture><div class="card-copy"><div class="card-title"${cardTitleAttributes}>${escapeHtml(bookmarkLabel)}</div><div class="card-details">${note ? `<div class="card-note">${note}</div>` : ""}${description ? `<div class="card-description">${description}</div>` : ""}${tags ? `<div class="card-tags">${tags}</div>` : ""}</div>${metadataMarkup}</div><div class="card-actions">${actionMarkup}</div>${selectControl}<a class="card-permalink" href="${escapeHtml(item.link)}" ${cardLinkTarget}${cardTitleAttributes} tabindex="0">${escapeHtml(bookmarkLabel)}</a></article>`;
 }
 
 function bookmarkActionMarkup(item) {
@@ -1783,8 +2360,9 @@ function bindCardMenuActions(menu) {
 function renderCardMenu() {
   const panel = root.querySelector("[data-card-menu-panel]");
   if (!state.cardMenuId) return closeCardMenu();
-  const item = sortedItems().find((entry) => entry.id === state.cardMenuId);
-  const cards = root.querySelector(".cards");
+  const section = collectionSections().find((entry) => entry.items.some((item) => item.id === state.cardMenuId));
+  const item = section?.items.find((entry) => entry.id === state.cardMenuId);
+  const cards = [...root.querySelectorAll(".cards")].find((element) => element.dataset.sectionId === section?.key);
   if (!item || !cards) return closeCardMenu();
   panel?.remove();
   cards.insertAdjacentHTML("beforeend", cardActionMenu(item));
@@ -1797,10 +2375,12 @@ function renderCardMenu() {
 
 function applyViewFields() {
   const settings = viewSettings();
-  const titleView = state.layout === "simple";
-  const supportsCoverPosition = state.layout === "list";
-  root.querySelector(".cards")?.style.setProperty("--card-cover-size", String(coverSizeValue(settings)));
-  root.querySelectorAll(".bookmark-card:not(.collection-trash-card)").forEach((card) => {
+  root.querySelectorAll(".cards").forEach((cards) => {
+    const layout = cards.dataset.layout || state.layout;
+    const titleView = layout === "simple";
+    const supportsCoverPosition = layout === "list";
+    cards.style.setProperty("--card-cover-size", String(coverSizeValue(settings)));
+    cards.querySelectorAll(":scope > .bookmark-card:not(.collection-trash-card)").forEach((card) => {
     const toggle = (selector, visible) => card.querySelector(selector)?.classList.toggle("view-hidden", !visible);
     toggle(".card-cover", settings.cover);
     toggle(".card-title", settings.title);
@@ -1823,49 +2403,56 @@ function applyViewFields() {
     if (detailsVisible) rows.push("auto");
     if (settings.metadata) rows.push("21.2891px");
     card.style.setProperty("--card-copy-rows", rows.join(" ") || "1fr");
+    });
   });
   applyMasonryCoverSize();
 }
 
 function applyMasonryCoverSize() {
-  const cards = root.querySelector(".cards.layout-masonry, .cards.layout-grid");
-  if (!cards) return;
-  const masonry = cards.classList.contains("layout-masonry");
+  const cardsList = [...root.querySelectorAll(".cards.layout-masonry, .cards.layout-grid")];
+  if (!cardsList.length) return;
   const width = masonryGridWidth();
-  const items = new Map(state.items.map((item) => [item.id, item]));
-  cards.style.setProperty("--grid-item-width", `${width}px`);
-  cards.querySelectorAll(":scope > .bookmark-card:not(.collection-trash-card)").forEach((card) => {
-    card.style.removeProperty("--masonry-cover-ratio");
-    const item = items.get(card.dataset.dragBookmark);
-    if (!item) return;
-    const source = card.querySelector(".card-cover source");
-    const image = card.querySelector(".card-cover img");
-    const src = masonry ? masonryCoverUrl(item, width) : gridCoverUrl(item, width);
-    if (source?.getAttribute("srcset") !== src) source?.setAttribute("srcset", src);
-    image?.setAttribute("width", String(width));
-    if (image?.getAttribute("src") !== src) {
-      image?.addEventListener("load", layoutMasonry, { once: true });
-      image?.setAttribute("src", src);
-    }
+  const items = new Map((state.allItems.length ? state.allItems : state.items).map((item) => [item.id, item]));
+  cardsList.forEach((cards) => {
+    const masonry = cards.classList.contains("layout-masonry");
+    cards.style.setProperty("--grid-item-width", `${width}px`);
+    cards.querySelectorAll(":scope > .bookmark-card:not(.collection-trash-card)").forEach((card) => {
+      card.style.removeProperty("--masonry-cover-ratio");
+      const item = items.get(card.dataset.dragBookmark);
+      if (!item) return;
+      const source = card.querySelector(".card-cover source");
+      const image = card.querySelector(".card-cover img");
+      const src = masonry ? masonryCoverUrl(item, width) : gridCoverUrl(item, width);
+      if (source?.getAttribute("srcset") !== src) source?.setAttribute("srcset", src);
+      image?.setAttribute("width", String(width));
+      if (image?.getAttribute("src") !== src) {
+        image?.addEventListener("load", layoutMasonry, { once: true });
+        image?.setAttribute("src", src);
+      }
+    });
   });
-  if (masonry) layoutMasonry();
+  if (cardsList.some((cards) => cards.classList.contains("layout-masonry"))) {
+    layoutMasonry();
+  }
 }
 
 let masonryResizeBound = false;
 
 function layoutMasonry() {
-  const cards = root.querySelector(".cards.layout-masonry");
-  if (!cards) return;
+  const cardsList = [...root.querySelectorAll(".cards.layout-masonry")];
+  if (!cardsList.length) return;
   const rowHeight = 15;
   const rowGap = 16;
-  const items = [...cards.querySelectorAll(":scope > .bookmark-card:not(.collection-trash-card)")];
-  items.forEach((item) => item.style.removeProperty("grid-row-end"));
-  requestAnimationFrame(() => {
-    if (!cards.isConnected || !cards.classList.contains("layout-masonry")) return;
-    items.forEach((item) => {
-      const height = item.getBoundingClientRect().height;
-      const span = Math.max(1, Math.ceil((height + rowGap) / (rowHeight + rowGap)));
-      item.style.gridRowEnd = `span ${span}`;
+  cardsList.forEach((cards) => {
+    const items = [...cards.querySelectorAll(":scope > .bookmark-card:not(.collection-trash-card)")];
+    items.forEach((item) => item.style.removeProperty("grid-row-end"));
+    requestAnimationFrame(() => {
+      if (!cards.isConnected || !cards.classList.contains("layout-masonry")) return;
+      items.forEach((item) => {
+        const height = item.getBoundingClientRect().height;
+        const span = Math.max(1, Math.ceil((height + rowGap) / (rowHeight + rowGap)));
+        item.style.gridRowEnd = `span ${span}`;
+      });
     });
   });
   if (!masonryResizeBound) {
@@ -1881,7 +2468,7 @@ function sidebarMarkup() {
   const duplicates = duplicateLinks(items);
   const typeCounts = items.reduce((counts, item) => counts.set(bookmarkType(item), (counts.get(bookmarkType(item)) || 0) + 1), new Map());
   const quick = (id, icon, label, count, query) => count > 0
-    ? `<button class="quick-filter tree-item ${state.query.trim() === query ? "active" : ""}" data-search-query="${escapeHtml(query)}"><span class="tree-expand"></span><span class="tree-icon">${icon === "?" ? "?" : treeIcon(icon, icon === "tag")}</span><span class="tree-title">${label}</span>${sidebarCount(count)}</button>`
+    ? `<button class="quick-filter tree-item ${state.query.trim() === query ? "active" : ""}" data-search-query="${escapeHtml(query)}"><span class="tree-expand"></span><span class="tree-icon">${icon === "?" ? "?" : treeIcon(icon)}</span><span class="tree-title">${label}</span>${sidebarCount(count)}</button>`
     : "";
   const nav = (active, icon, label, count, attribute) => `<button class="nav-item tree-item ${active ? "active" : ""}" ${attribute}><span class="tree-expand"></span><span class="tree-icon">${treeIcon(label === "星标" ? "star" : icon)}</span><span class="tree-title">${label}</span>${sidebarCount(count)}</button>`;
   const types = SEARCH_TYPE_OPTIONS.map(([type, label]) => quick(type, type, label, typeCounts.get(type) || 0, `type:${type}`)).join("");
@@ -1889,7 +2476,7 @@ function sidebarMarkup() {
   const unsortedActive = state.collectionId === "unsorted";
   const trashActive = state.view === "trash";
   const primaryNav = `<button class="nav-item tree-item ${allActive ? "active" : ""}" data-view="all"><span class="tree-expand"></span><span class="tree-icon">${treeIcon(allActive ? "cloudActive" : "cloud")}</span><span class="tree-title">所有书签</span>${sidebarCount(total)}</button><button class="nav-item tree-item ${unsortedActive ? "active" : ""}" data-collection="unsorted"><span class="tree-expand"></span><span class="tree-icon">${treeIcon(unsortedActive ? "inboxActive" : "inbox")}</span><span class="tree-title">未分类</span>${sidebarCount(state.collectionCounts.unsorted || 0)}</button>${state.trashCount ? `<button class="nav-item tree-item ${trashActive ? "active" : ""}" data-view="trash"><span class="tree-expand"></span><span class="tree-icon">${treeIcon(trashActive ? "trashActive" : "trash")}</span><span class="tree-title">废纸篓</span>${sidebarCount(state.trashCount)}</button>` : ""}`;
-  return `<aside class="sidebar"><div class="sidebar-head"><div class="account-wrap"><button type="button" class="account-trigger" data-account-trigger aria-haspopup="menu" aria-expanded="${state.accountMenuOpen}" title="私有书签"><span class="account-mark"><img src="icons/bookmark.svg" width="20" height="20" alt=""></span><span class="account-name">私有书签</span><span class="sidebar-caret">${treeIcon("microArrow")}</span></button>${accountMenuMarkup()}</div><button id="new-collection" class="icon-button" title="新建收藏夹" aria-label="新建收藏夹">${treeIcon("add")}</button></div><nav class="nav"><section class="sidebar-section primary-nav">${primaryNav}</section><section class="sidebar-section collections-section"><div class="sidebar-label"><span>收藏</span><button id="new-collection-secondary" title="新建收藏夹" aria-label="新建收藏夹">${treeIcon("add")}</button></div>${collectionTree()}</section><section class="sidebar-section filters-section"><div class="sidebar-label"><span>快速过滤…</span></div>${quick("favorite", "like", "星标", state.favoriteCount, "important:true")}${quick("notes", "note", "备注", items.filter((item) => item.note).length, "note:true")}${quick("highlights", "highlights", "高亮", items.filter((item) => item.highlights.length).length, "highlights:true")}${quick("reminder", "reminder", "提醒", items.filter((item) => item.reminder).length, "reminder:true")}${types}${quick("duplicates", "duplicates", "重复书签", items.filter((item) => duplicates.has(item.link)).length, "duplicate:true")}${quick("untagged", "tag", "没有标签", items.filter((item) => !item.tags.length).length, "notag:true")}${quick("broken", "broken", "失效链接", items.filter((item) => item.health.status === "broken").length, "broken:true")}${items.some((item) => item.health.status === "unknown") ? nav(state.view === "unknown", "link", "待检查", items.filter((item) => item.health.status === "unknown").length, 'data-view="unknown"') : ""}</section>${tags.length ? `<section class="sidebar-section tag-section"><div class="sidebar-label">标签 (${tags.length})</div>${tags.map(([tag, count]) => `<div class="tag-row"><button class="tag-filter tree-item ${state.tag === tag ? "active" : ""}" data-tag="${escapeHtml(tag)}"><span class="tree-expand"></span><span class="tree-icon">${microIcon("microTag")}</span><span class="tree-title">${escapeHtml(tag)}</span>${sidebarCount(count)}</button><button class="tag-item-menu-trigger" data-tag-item-menu="${escapeHtml(tag)}" title="${escapeHtml(tag)}选项" aria-label="${escapeHtml(tag)}选项" aria-expanded="${state.tagItemMenu === tag}">${treeIcon("moreHorizontal")}</button>${state.tagItemMenu === tag ? `<div class="tag-item-menu" role="menu" data-tag-item-menu-panel><button type="button" role="menuitem" data-tag-item-action="rename" data-tag-value="${escapeHtml(tag)}">重命名标签</button><button type="button" role="menuitem" data-tag-item-action="delete" data-tag-value="${escapeHtml(tag)}">删除标签</button></div>` : ""}</div>`).join("")}</section>` : ""}</nav></aside>`;
+  return `<aside class="sidebar"><div class="sidebar-head"><div class="account-wrap"><button type="button" class="account-trigger" data-account-trigger aria-haspopup="menu" aria-expanded="${state.accountMenuOpen}" title="私有书签"><span class="account-mark"><img src="icons/bookmark.svg" width="20" height="20" alt=""></span><span class="account-name">私有书签</span><span class="sidebar-caret">${treeIcon("microArrow")}</span></button>${accountMenuMarkup()}</div><button type="button" class="icon-button sidebar-width-reset" data-sidebar-width-reset${state.sidebarWidth == null ? " hidden" : ""} title="${t("恢复默认宽度")}" aria-label="${t("恢复默认宽度")}">${treeIcon("refresh")}</button><button id="new-collection" class="icon-button" title="新建收藏夹" aria-label="新建收藏夹">${treeIcon("add")}</button></div><nav class="nav"><section class="sidebar-section primary-nav">${primaryNav}</section><section class="sidebar-section collections-section"><div class="sidebar-label"><span>收藏</span><button id="new-collection-secondary" title="新建收藏夹" aria-label="新建收藏夹">${treeIcon("add")}</button></div>${collectionTree()}</section><section class="sidebar-section filters-section"><div class="sidebar-label"><span>快速过滤…</span></div>${quick("favorite", "like", "星标", state.favoriteCount, "important:true")}${quick("notes", "note", "备注", items.filter((item) => item.note).length, "note:true")}${quick("highlights", "highlights", "高亮", items.filter((item) => item.highlights.length).length, "highlights:true")}${quick("reminder", "reminder", "提醒", items.filter((item) => item.reminder).length, "reminder:true")}${types}${quick("duplicates", "duplicates", "重复书签", items.filter((item) => duplicates.has(item.link)).length, "duplicate:true")}${quick("untagged", "tag", "没有标签", items.filter((item) => !item.tags.length).length, "notag:true")}${quick("broken", "broken", "失效链接", items.filter((item) => item.health.status === "broken").length, "broken:true")}${items.some((item) => item.health.status === "unknown") ? nav(state.view === "unknown", "link", "待检查", items.filter((item) => item.health.status === "unknown").length, 'data-view="unknown"') : ""}</section>${tags.length ? `<section class="sidebar-section tag-section"><div class="sidebar-label">标签 (${tags.length})</div>${tags.map(([tag, count]) => `<div class="tag-row"><button class="tag-filter tree-item ${state.tag === tag ? "active" : ""}" data-tag="${escapeHtml(tag)}"><span class="tree-expand"></span><span class="tree-icon">${microIcon("microTag")}</span><span class="tree-title">${escapeHtml(tag)}</span>${sidebarCount(count)}</button><button class="tag-item-menu-trigger" data-tag-item-menu="${escapeHtml(tag)}" title="${escapeHtml(tag)}选项" aria-label="${escapeHtml(tag)}选项" aria-expanded="${state.tagItemMenu === tag}">${treeIcon("moreHorizontal")}</button>${state.tagItemMenu === tag ? `<div class="tag-item-menu" role="menu" data-tag-item-menu-panel><button type="button" role="menuitem" data-tag-item-action="rename" data-tag-value="${escapeHtml(tag)}">重命名标签</button><button type="button" role="menuitem" data-tag-item-action="delete" data-tag-value="${escapeHtml(tag)}">删除标签</button></div>` : ""}</div>`).join("")}</section>` : ""}</nav></aside>`;
 }
 
 function accountMenuMarkup() {
@@ -1973,18 +2560,30 @@ function accountEndpoint() {
 }
 
 function accountSettingsMarkup() {
+  const currentConnection = state.connectionInfo;
   const bookmarks = Array.isArray(state.allItems) ? state.allItems.length : state.items.length;
   const collections = Math.max(0, state.collections.filter((item) => item.id !== "unsorted").length);
   const trash = Number(state.trashCount) || 0;
   const mediaLabel = state.mediaUploadEnabled ? "已启用" : "未配置";
   const instanceName = settingsPreference("instanceName", "私有书签");
+  const disconnectAction = currentConnection ? `<div class="settings-account-action-list"><button type="button" class="settings-account-action" data-account-settings-action="disconnect">${treeIcon("exit")}<span>断开当前设备</span></button></div>` : "";
   return `<div class="settings-content"><div class="settings-grid settings-account-grid">
+    <div class="settings-label">Cloudflare Worker</div>
+    <div class="settings-account-connection">
+      <form data-account-connection-form>
+        <label>实例地址<input name="endpoint" type="url" value="${escapeHtml(currentConnection?.endpoint || "")}" placeholder="https://bookmarks.example.workers.dev" required></label>
+        <label>访问密钥<input name="key" type="password" value="" placeholder="${currentConnection ? "重新输入访问密钥" : "访问密钥"}" autocomplete="off" required></label>
+        <div class="settings-account-connection-actions"><button type="submit" class="primary" data-account-connect>${currentConnection ? "重新连接" : "连接私有实例"}</button></div>
+        <p class="error hidden" role="alert"></p>
+      </form>
+      <p class="settings-sub-label" data-account-connection-status>${currentConnection ? `已连接：${escapeHtml(accountEndpoint())}` : "未连接 Worker；书签只保存在此设备。"}</p>
+    </div>
     <div class="settings-label">实例名称</div>
     <label class="settings-account-input-wrap"><input type="text" maxlength="200" value="${escapeHtml(instanceName)}" data-account-instance-name autocomplete="off"></label>
     <div class="settings-label">实例地址</div>
     <label class="settings-account-input-wrap"><input type="text" value="${escapeHtml(accountEndpoint())}" readonly aria-readonly="true"></label>
     <div class="settings-label">访问密钥</div>
-    <div class="settings-account-value settings-account-muted">已配置（仅存储在此设备）</div>
+    <div class="settings-account-value settings-account-muted">${currentConnection ? "已配置（仅存储在此设备）" : "未连接 Worker"}</div>
     <div class="settings-label">头像</div>
     <div class="settings-account-avatar-row"><span class="settings-account-avatar">${treeIcon("user")}</span><span class="settings-account-muted">固定实例图标</span></div>
     <div class="settings-separator"></div>
@@ -1998,7 +2597,7 @@ function accountSettingsMarkup() {
     <div class="settings-account-value settings-account-muted">${mediaLabel}</div>
     <div class="settings-separator"></div>
     <span></span>
-    <div class="settings-account-action-list"><button type="button" class="settings-account-action" data-account-settings-action="disconnect">${treeIcon("exit")}<span>断开当前设备</span></button></div>
+    ${disconnectAction}
   </div></div>`;
 }
 
@@ -2029,8 +2628,22 @@ function importPreviewMarkup(preview) {
   return `<section class="settings-import-preview">${preview.error ? `<p class="settings-import-error">${escapeHtml(preview.error)}</p>` : ""}<div class="settings-import-preview-head"><strong>导入预览</strong><span>${escapeHtml(preview.name || "")}</span></div><div class="settings-import-stats"><span><strong>${valid}</strong> 有效书签</span><span><strong>${duplicates}</strong> 重复书签</span><span><strong>${invalid}</strong> 无效项目</span></div>${progress?.completed ? `<p class="settings-import-progress">已导入 ${progress.completed} / ${progress.total}，剩余 ${valid}</p>` : ""}${invalid ? `<details class="settings-import-invalid"><summary>查看无效项目</summary><ul>${preview.invalid.slice(0, 20).map((item) => `<li>${escapeHtml(importInvalidLabel(item, preview.format))}</li>`).join("")}</ul></details>` : ""}<label class="settings-import-check"><input type="checkbox" data-import-skip-duplicates ${preview.skipDuplicates !== false ? "checked" : ""} ${resumed || state.importBusy ? "disabled" : ""}>跳过重复项目</label><div class="settings-import-actions"><button type="button" class="primary settings-import-action" data-import-submit ${disabled ? "disabled" : ""}>${state.importBusy ? "正在导入…" : `导入这些书签 (${valid})`}</button><button type="button" class="settings-import-clear" data-import-clear ${state.importBusy ? "disabled" : ""}>清除</button></div></section>`;
 }
 
+async function downloadMigrationPackage() {
+  const value = await exportMigrationPackage();
+  const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: "application/json" }));
+  const link = Object.assign(document.createElement("a"), { href: url, download: "private-bookmarks-migration.json" });
+  document.body.append(link); link.click();
+  window.setTimeout(() => { URL.revokeObjectURL(url); link.remove(); }, 1000);
+}
+
+async function uploadMigrationPackage(file) {
+  if (!confirm("导入迁移包会替换当前本地资料库。继续吗？")) return;
+  await importMigrationPackage(await file.text());
+  location.reload();
+}
+
 function importSettingsMarkup() {
-  return `<div class="settings-content settings-import-content"><div class="settings-grid settings-import-grid"><div class="settings-label">档案</div><div><div class="settings-import-alert"><strong>上传书签文件 (html、csv、txt 或 enex)</strong>.<br>你可以从浏览器或服务的“导出书签”部分得到这个文件<br><br><a href="https://help.raindrop.io/import#supported-formats" target="_blank" rel="noopener">帮助 ${microIcon("microOpen")}</a></div><label class="settings-import-upload button primary" data-import-upload role="button" tabindex="0" aria-label="上传文件…">${treeIcon("upload")}<span>上传文件…</span><input type="file" class="hidden" data-import-file accept="application/json,text/html,text/csv,text/plain,application/enex+xml,application/xml,text/xml,.json,.html,.htm,.csv,.txt,.enex"></label>${importPreviewMarkup(state.importPreview)}</div></div></div>`;
+  return `<div class="settings-content settings-import-content"><div class="settings-grid settings-import-grid"><div class="settings-label">迁移到 React/WXT</div><div><div class="settings-import-alert"><strong>迁移包</strong><br>迁移包包含本地资料库和持久设置，不包含会话解锁状态或明文密钥。<br><button type="button" class="primary" data-migration-export>导出迁移包</button> <label class="settings-import-upload button primary">导入迁移包<input type="file" class="hidden" data-migration-import accept="application/json,.json"></label></div></div><div class="settings-label">档案</div><div><div class="settings-import-alert"><strong>上传书签文件 (html、csv、txt 或 enex)</strong>.<br>你可以从浏览器或服务的“导出书签”部分得到这个文件<br><br><a href="https://help.raindrop.io/import#supported-formats" target="_blank" rel="noopener">帮助 ${microIcon("microOpen")}</a></div><label class="settings-import-upload button primary" data-import-upload role="button" tabindex="0" aria-label="上传文件…">${treeIcon("upload")}<span>上传文件…</span><input type="file" class="hidden" data-import-file accept="application/json,text/html,text/csv,text/plain,application/enex+xml,application/xml,text/xml,.json,.html,.htm,.csv,.txt,.enex"></label>${importPreviewMarkup(state.importPreview)}</div></div></div>`;
 }
 
 function backupFileName(item, format) {
@@ -2709,8 +3322,9 @@ function renderSettings() {
     legacyInput.checked = settingsPreference("nestedViewLegacy", false);
     legacyInput.dataset.settingsToggle = "nestedViewLegacy";
     legacyInput.parentElement.classList.remove("settings-disabled");
+    legacyInput.parentElement.insertAdjacentHTML("beforeend", `<button type="button" class="settings-inline-help" aria-label="旧视图说明" aria-describedby="nested-view-legacy-help" title="查看旧视图说明">说明<span id="nested-view-legacy-help" class="settings-inline-help-popover" role="tooltip"><strong>旧视图说明</strong><span>勾选：父收藏集页面只显示当前收藏集中的书签，子收藏集不会展开。</span><span>取消勾选：父收藏集页面按区块显示当前收藏集及所有子收藏集的书签。</span></span></button>`);
   }
-  const aiNote = root.querySelector(".settings-sub-label");
+  const aiNote = state.settingsSection === "app" ? root.querySelector(".settings-sub-label") : null;
   if (aiNote) {
     const settings = state.aiSettings;
     aiNote.textContent = settings?.provider === "openai"
@@ -2823,7 +3437,7 @@ function showLockScreen() {
     const url = new URL(location.href);
     url.searchParams.delete("settings");
     history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
-    connectionView(root, () => load().catch(showError));
+    load().catch(showError);
   });
 }
 
@@ -2834,8 +3448,30 @@ function formError(form, message) {
   error.classList.remove("hidden");
 }
 
+async function submitAccountConnection(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector("[data-account-connect]");
+  form.querySelector(".error")?.classList.add("hidden");
+  if (button) button.disabled = true;
+  try {
+    const data = new FormData(form);
+    const value = await connect(data.get("endpoint"), data.get("key"));
+    state.connectionInfo = value;
+    await load();
+  } catch (error) {
+    formError(form, error.message);
+    if (button) button.disabled = false;
+  }
+}
+
 function bindSettings() {
   root.querySelector(".settings-mobile-menu")?.addEventListener("click", () => root.querySelector(".settings-shell")?.classList.toggle("settings-sidebar-open"));
+  root.querySelector("[data-migration-export]")?.addEventListener("click", () => downloadMigrationPackage().catch(showError));
+  root.querySelector("[data-migration-import]")?.addEventListener("change", (event) => {
+    const file = event.currentTarget.files?.[0];
+    if (file) uploadMigrationPackage(file).catch(showError);
+  });
   root.querySelectorAll("[data-settings-back], [data-settings-close]").forEach((button) => button.onclick = () => {
     state.accountMenuOpen = false;
     setSettingsRoute(false);
@@ -2882,6 +3518,7 @@ function bindSettings() {
   root.querySelectorAll("[data-cloud-backup-delete]").forEach((button) => button.addEventListener("click", () => deleteCloudBackup(button.dataset.cloudBackupProvider, button.dataset.cloudBackupDelete).catch(showError)));
   root.querySelectorAll("[data-cloud-action]").forEach((button) => button.addEventListener("click", () => cloudAction(button.dataset.cloudAction).catch(showError)));
   root.querySelectorAll("[data-cloud-disconnect]").forEach((button) => button.addEventListener("click", () => disconnectCloud(button.dataset.cloudDisconnect).catch(showError)));
+  root.querySelector("[data-account-connection-form]")?.addEventListener("submit", submitAccountConnection);
   root.querySelector("[data-account-instance-name]")?.addEventListener("change", (event) => {
     const value = event.currentTarget.value.trim() || "私有书签";
     setSettingsPreference("instanceName", value.slice(0, 200));
@@ -2974,13 +3611,21 @@ async function load({ viewOnly = false } = {}) {
       state.items = items;
       state.tags = Array.isArray(tags) ? tags : [];
       state.trashedCollections = state.view === "trash" ? trashedCollections : [];
+      if (state.collectionId && path === collectionItemsPath()) {
+        state.collectionItems = items;
+        state.collectionItemsCollectionId = state.collectionId;
+      } else if (!state.collectionId) {
+        state.collectionItems = null;
+        state.collectionItemsCollectionId = null;
+      }
       if (!state.allItems.length && state.view === "all" && !state.collectionId) state.allItems = items;
-      render();
+      renderViewOnly();
       return;
     }
-    const requests = [api("/v1/bootstrap"), api(path), path === "/v1/bookmarks?" ? null : api("/v1/bookmarks?"), api(tagQueryPath()).catch(() => [])];
+    const rawCollectionPath = collectionItemsPath();
+    const requests = [api("/v1/bootstrap"), api(path), path === "/v1/bookmarks?" ? null : api("/v1/bookmarks?"), api(tagQueryPath()).catch(() => []), rawCollectionPath && rawCollectionPath !== path ? api(rawCollectionPath).catch(() => null) : null];
     if (state.view === "trash") requests.push(api("/v1/collections?trash=1"));
-    const [connectionInfo, boot, items, allItems, tags, trashedCollections = []] = await Promise.all([connection(), ...requests]);
+    const [connectionInfo, boot, items, allItems, tags, collectionItems, trashedCollections = []] = await Promise.all([connection(), ...requests]);
     if (!isCurrentRequest(generation, loadGeneration)) return;
     state.connectionInfo = connectionInfo;
     state.lock = await lockState();
@@ -2995,6 +3640,16 @@ async function load({ viewOnly = false } = {}) {
     state.collapsedCollections = new Set(Array.isArray(boot.preferences.collapsedCollectionIds) ? boot.preferences.collapsedCollectionIds : []);
     state.items = items;
     state.allItems = allItems || items;
+    if (state.collectionId && path === rawCollectionPath) {
+      state.collectionItems = items;
+      state.collectionItemsCollectionId = state.collectionId;
+    } else if (state.collectionId && Array.isArray(collectionItems)) {
+      state.collectionItems = collectionItems;
+      state.collectionItemsCollectionId = state.collectionId;
+    } else if (!state.collectionId) {
+      state.collectionItems = null;
+      state.collectionItemsCollectionId = null;
+    }
     state.tags = Array.isArray(tags) ? tags : [];
     state.favoriteCount = (allItems || items).filter((item) => item.favorite).length;
     state.trashedCollections = trashedCollections;
@@ -3006,42 +3661,85 @@ async function load({ viewOnly = false } = {}) {
   }
 }
 
-function emptyStateMarkup() {
+function emptyStateMarkup(collectionId = state.collectionId) {
   const searching = Boolean(state.query.trim());
-  const message = searching ? "没有匹配的书签。" : state.view === "trash" ? "废纸篓为空。" : state.collectionId ? "此收藏夹还没有书签。" : "此视图中还没有书签。";
+  const message = searching ? "没有匹配的书签。" : state.view === "trash" ? "废纸篓为空。" : collectionId ? "此收藏夹还没有书签。" : "此视图中还没有书签。";
   const action = searching
     ? `<button type="button" class="empty-action" data-empty-action="clear-search">清除搜索</button>`
     : state.view === "trash"
       ? `<button type="button" class="empty-action" data-empty-action="all">返回所有书签</button>`
-      : `<button type="button" class="primary empty-action" data-empty-action="add-bookmark">添加书签</button>`;
+      : `<button type="button" class="primary empty-action" data-empty-action="add-bookmark"${collectionId ? ` data-empty-collection="${escapeHtml(collectionId)}"` : ""}>添加书签</button>`;
   return `<div class="empty" role="status"><p>${t(message) === message ? message : t(message)}</p>${action}</div>`;
 }
 
-function render() {
+function collectionSectionMarkup(section, duplicates, viewSwitching) {
+  const selection = state.selectionSectionId === section.key
+    ? selectionItems(section.key).filter((item) => state.selected.has(item.id))
+    : [];
+  const collectionTrash = state.view === "trash" && !section.id ? state.trashedCollections.map((item) => `<article class="bookmark-card collection-trash-card"><span class="collection-trash-icon">${collectionIconMarkup(collectionIconValue(item.id))}</span><span><strong>${escapeHtml(item.name)}</strong><span class="card-meta">收藏夹及其下级项目</span></span><button data-restore-collection="${item.id}" title="恢复收藏夹" aria-label="恢复收藏夹">${treeIcon("add")}</button></article>`).join("") : "";
+  const cardMenuItem = section.items.find((item) => item.id === state.cardMenuId);
+  const cardMenu = cardMenuItem ? cardActionMenu(cardMenuItem) : "";
+  const cards = section.items.length
+    ? section.items.map((item, index) => card(item, index, duplicates, section.layout)).join("")
+    : collectionTrash || emptyStateMarkup(section.id);
+  const menus = selection.length || state.workspaceMenuSectionId !== section.key ? "" : `${sortMenuMarkup(section.key)}${viewMenuMarkup(section.key)}`;
+  const emptyCollection = !section.items.length && !collectionTrash && section.id;
+  const content = emptyCollection
+    ? `<div class="workspace-scroll workspace-scroll-empty"><div class="empty" role="status"></div></div>`
+    : `<div class="workspace-scroll"><section class="cards layout-${section.layout}${viewSwitching ? " no-card-animation" : ""}" data-section-id="${escapeHtml(section.key)}" data-layout="${escapeHtml(section.layout)}" role="list">${cards}${cardMenu}</section></div>`;
+  const footer = section.items.length ? `<div class="bookmark-count-footer" data-compact="true">${section.items.length} 个书签</div>` : "";
+  return `<section class="workspace workspace-section${emptyCollection ? " workspace-empty" : ""}" data-section-id="${escapeHtml(section.key)}"${section.id ? ` data-collection-id="${escapeHtml(section.id)}"` : ""}>${workspaceHeaderMarkup(section.items, selection, section.key, section.title, section)}${menus}${content}${footer}</section>`;
+}
+
+function renderViewOnly() {
   if (state.settingsOpen) return renderSettings();
+  const workspaceSections = root.querySelector(".workspace-sections");
+  if (!workspaceSections) return render();
+  const viewSwitching = state.viewSwitching;
+  state.viewSwitching = false;
+  const sections = collectionSections();
+  const duplicates = duplicateLinks(sidebarItems());
+  const workspaces = sections.map((section) => collectionSectionMarkup(section, duplicates, viewSwitching)).join("");
+  workspaceSections.innerHTML = localizeHtml(workspaces);
+  const search = root.querySelector("#search");
+  if (search) search.value = state.query;
+  renderSearchMenu();
+  applyViewFields();
+  bind();
+  layoutMasonry();
+  positionCardMenu();
+}
+
+function render() {
+  searchMenuElement()?.remove();
+  if (state.settingsOpen) return renderSettings();
+  const navScrollTop = root.querySelector(".nav")?.scrollTop;
   document.title = languageIsEnglish() ? "Private Bookmarks" : "私有书签";
   const viewSwitching = state.viewSwitching;
   state.viewSwitching = false;
   const editWasOpen = editBookmarkDialog.open;
-  const items = sortedItems();
-  const selection = items.filter((item) => state.selected.has(item.id));
+  const sections = collectionSections();
   const duplicates = duplicateLinks(sidebarItems());
-  if (!selection.length) state.selectionMoreOpen = false;
-  const collectionTrash = state.view === "trash" ? state.trashedCollections.map((item) => `<article class="bookmark-card collection-trash-card"><span class="collection-trash-icon">${treeIcon("defaultCollection")}</span><span><strong>${escapeHtml(item.name)}</strong><span class="card-meta">收藏夹及其下级项目</span></span><button data-restore-collection="${item.id}" title="恢复收藏夹" aria-label="恢复收藏夹">${treeIcon("add")}</button></article>`).join("") : "";
-  const cardMenuItem = items.find((item) => item.id === state.cardMenuId);
-  if (!cardMenuItem) state.cardMenuId = null;
-  const cardMenu = cardMenuItem ? cardActionMenu(cardMenuItem) : "";
-  root.innerHTML = localizeHtml(`<main class="library">${sidebarMarkup()}<section class="content"><header class="topbar"><label class="quick-search"><span>⌕</span><input id="search" value="${escapeHtml(state.query)}" placeholder="搜索" autocomplete="off"><kbd>⌘ K</kbd></label><div class="top-actions"><button id="check-links" class="top-action-icon" title="检查链接" aria-label="检查链接">${treeIcon("refresh")}</button><div class="theme-menu-wrap"><button id="theme" class="top-action-icon theme-trigger" title="主题：${themeOption().label}" aria-label="主题：${themeOption().label}" aria-haspopup="menu" aria-expanded="${state.themeMenuOpen}" data-theme-trigger>${treeIcon(themeOption().icon)}</button>${themeMenuMarkup()}</div><button id="import" class="top-action-icon" title="导入书签" aria-label="导入书签">${treeIcon("upload")}</button><button id="add-bookmark" class="primary add-bookmark">${treeIcon("add")}<span>添加</span></button></div></header><section class="workspace"><header class="workspace-head"><div class="workspace-title"><button id="select-all" class="select-all" title="选择全部" aria-label="选择全部" aria-pressed="${Boolean(items.length && selection.length === items.length)}"><span class="select-checkbox">${items.length && selection.length === items.length ? "✓" : ""}</span></button><h1>☁ ${escapeHtml(viewName())}</h1><span class="count">${items.length}</span></div><div class="workspace-tools"><select id="sort" aria-label="排序"><option value="manual" ${state.preferences?.sort === "manual" ? "selected" : ""}>手动排序</option><option value="title" ${state.preferences?.sort === "title" ? "selected" : ""}>标题 (A-Z)</option><option value="host" ${state.preferences?.sort === "host" ? "selected" : ""}>网站 (A-Z)</option><option value="created" ${state.preferences?.sort === "created" ? "selected" : ""}>最近添加</option></select><div class="view-switcher" role="group" aria-label="视图"><button data-layout="list" class="${state.layout === "list" ? "active" : ""}" title="列表视图" aria-pressed="${state.layout === "list"}">☷ 列表</button><button data-layout="grid" class="${state.layout === "grid" ? "active" : ""}" title="网格视图" aria-pressed="${state.layout === "grid"}">▦ 网格</button></div><button id="export" class="export" title="导出书签">⇩ 导出书签</button></div></header><section class="cards layout-${state.layout}${viewSwitching ? " no-card-animation" : ""}" role="list">${collectionTrash}${items.length ? items.map((item, index) => card(item, index, duplicates)).join("") : collectionTrash || emptyStateMarkup()}${cardMenu}</section><div class="bookmark-count-footer" data-compact="false">${items.length} 个书签</div></section></section></main>`);
+  if (!sections.some((section) => section.items.some((item) => item.id === state.cardMenuId))) state.cardMenuId = null;
+  if (!state.selected.size) {
+    state.selectionMoreOpen = false;
+    state.selectionMoreSectionId = null;
+  }
+  const workspaces = sections.map((section) => collectionSectionMarkup(section, duplicates, viewSwitching)).join("");
+  state.sidebarDefaultWidth = null;
+  root.innerHTML = localizeHtml(`<main class="library">${sidebarMarkup()}<section class="content"><header class="topbar"><label class="quick-search"><span>⌕</span><span id="search-filter-label" class="search-filter-label">搜索</span><input id="search" aria-controls="search-filter-menu" aria-labelledby="search-filter-label" value="${escapeHtml(state.query)}" placeholder="搜索" autocomplete="off"><kbd>⌘ K</kbd></label><div class="top-actions"><button id="check-links" class="top-action-icon"${state.connectionInfo ? "" : " disabled"} title="${state.connectionInfo ? t("检查链接") : t("连接私有实例后可用")}" aria-label="${state.connectionInfo ? t("检查链接") : t("连接私有实例后可用")}">${treeIcon("refresh")}</button><div class="theme-menu-wrap"><button id="theme" class="top-action-icon theme-trigger" title="主题：${themeOption().label}" aria-label="主题：${themeOption().label}" aria-haspopup="menu" aria-expanded="${state.themeMenuOpen}" data-theme-trigger>${treeIcon(themeOption().icon)}</button>${themeMenuMarkup()}</div><button id="import" class="top-action-icon" title="导入书签" aria-label="导入书签">${treeIcon("upload")}</button><button id="add-bookmark" class="primary add-bookmark" data-added="${state.addButtonSaved}">${treeIcon(state.addButtonSaved ? "check" : "add")}<span>${state.addButtonSaved ? "已添加" : "添加"}</span></button></div></header><div class="workspace-sections">${workspaces}</div></section></main>`);
+  const nav = root.querySelector(".nav");
+  if (nav && navScrollTop != null) nav.scrollTop = navScrollTop;
   const sidebar = root.querySelector(".sidebar");
   mountEditPanel(editWasOpen);
   const resizer = document.createElement("div");
   resizer.className = "sidebar-resizer";
+  resizer.innerHTML = `<span class="sidebar-default-hint" aria-hidden="true">${t("默认")}</span>`;
   resizer.setAttribute("role", "separator");
   resizer.setAttribute("aria-orientation", "vertical");
   resizer.setAttribute("aria-label", t("调整侧边栏宽度"));
   resizer.setAttribute("tabindex", "0");
   sidebar?.after(resizer);
-  root.querySelector(".workspace-head").outerHTML = localizeHtml(workspaceHeaderMarkup(items, selection));
   localizeDialogs();
   applyViewFields();
   enhanceSearch();
@@ -3115,10 +3813,12 @@ async function accountAction(action) {
   setAccountMenuOpen(false);
   if (action === "settings") {
     state.selected.clear();
+    state.selectionSectionId = null;
     state.searchMenuOpen = false;
     state.sortMenuOpen = false;
     state.viewMenuOpen = false;
     state.themeMenuOpen = false;
+    if (isPopupSurface()) return openFullPage("library.html?settings=app");
     setSettingsRoute(true);
     return;
   }
@@ -3130,6 +3830,7 @@ async function disconnectCurrentDevice(confirmFirst = false) {
   if (confirmFirst && !window.confirm(t("确认断开当前设备吗？"))) return;
   await disconnect();
   state.selected.clear();
+  state.selectionSectionId = null;
   state.accountMenuOpen = false;
   state.connectionInfo = null;
   state.settingsOpen = false;
@@ -3138,7 +3839,7 @@ async function disconnectCurrentDevice(confirmFirst = false) {
   const url = new URL(location.href);
   url.searchParams.delete("settings");
   history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
-  connectionView(root, () => load().catch(showError));
+  load().catch(showError);
 }
 
 function positionSidebarMenus() {
@@ -3219,6 +3920,17 @@ function sidebarWidthBounds() {
   return { min, max: Math.max(min, window.innerWidth - 320) };
 }
 
+function sidebarDefaultWidth(library, fallback) {
+  if (state.sidebarDefaultWidth != null) return state.sidebarDefaultWidth;
+  const sidebar = library.querySelector(".sidebar");
+  const inlineWidth = library.style.getPropertyValue("--sidebar-width");
+  if (inlineWidth) library.style.removeProperty("--sidebar-width");
+  const width = sidebar?.getBoundingClientRect().width || fallback;
+  if (inlineWidth) library.style.setProperty("--sidebar-width", inlineWidth);
+  state.sidebarDefaultWidth = width;
+  return width;
+}
+
 function setSidebarOpen(open) {
   state.sidebarOpen = Boolean(open);
   root.querySelector(".library")?.classList.toggle("sidebar-open", state.sidebarOpen);
@@ -3256,19 +3968,38 @@ function applySidebarWidth() {
   const resizer = root.querySelector(".sidebar-resizer");
   if (!library || !resizer) return;
   const { min, max } = sidebarWidthBounds();
-  const actualWidth = library.querySelector(".sidebar")?.getBoundingClientRect().width || min;
+  const sidebar = library.querySelector(".sidebar");
   resizer.setAttribute("aria-valuemin", String(min));
   resizer.setAttribute("aria-valuemax", String(max));
   if (state.sidebarWidth == null) {
     library.style.removeProperty("--sidebar-width");
-    resizer.setAttribute("aria-valuenow", String(Math.round(actualWidth)));
-    return;
+  } else {
+    state.sidebarWidth = Math.min(max, Math.max(min, state.sidebarWidth));
+    library.style.setProperty("--sidebar-width", `${state.sidebarWidth}px`);
   }
-  state.sidebarWidth = Math.min(max, Math.max(min, state.sidebarWidth));
-  library.style.setProperty("--sidebar-width", `${state.sidebarWidth}px`);
-  resizer.setAttribute("aria-valuemin", String(min));
-  resizer.setAttribute("aria-valuemax", String(max));
-  resizer.setAttribute("aria-valuenow", String(Math.round(state.sidebarWidth)));
+  const width = state.sidebarWidth ?? sidebar?.getBoundingClientRect().width ?? min;
+  const isDefault = Math.abs(width - sidebarDefaultWidth(library, width)) <= 2;
+  resizer.setAttribute("aria-valuenow", String(Math.round(width)));
+  resizer.classList.toggle("is-default", isDefault);
+  root.querySelector("[data-sidebar-width-reset]")?.toggleAttribute("hidden", isDefault);
+}
+
+function commitSidebarWidth(width) {
+  const library = root.querySelector(".library");
+  if (!library) return;
+  const value = Number(width);
+  if (!Number.isFinite(value)) return;
+  const { min, max } = sidebarWidthBounds();
+  const next = Math.min(max, Math.max(min, value));
+  state.sidebarWidth = Math.abs(next - sidebarDefaultWidth(library, next)) <= 2 ? null : next;
+  persistSidebarWidth(state.sidebarWidth);
+  applySidebarWidth();
+}
+
+function resetSidebarWidth() {
+  state.sidebarWidth = null;
+  persistSidebarWidth(null);
+  applySidebarWidth();
 }
 
 function bindSidebarResizer() {
@@ -3276,6 +4007,11 @@ function bindSidebarResizer() {
   const library = root.querySelector(".library");
   if (!resizer || !library) return;
   applySidebarWidth();
+  const reset = root.querySelector("[data-sidebar-width-reset]");
+  if (reset) reset.onclick = (event) => {
+    event.preventDefault();
+    resetSidebarWidth();
+  };
   resizer.onpointerdown = (event) => {
     if (event.button !== 0) return;
     event.preventDefault();
@@ -3290,6 +4026,7 @@ function bindSidebarResizer() {
       applySidebarWidth();
     };
     const stop = () => {
+      commitSidebarWidth(state.sidebarWidth);
       resizer.classList.remove("is-dragging");
       document.body.classList.remove("sidebar-resizing");
       resizer.onpointermove = null;
@@ -3305,8 +4042,7 @@ function bindSidebarResizer() {
     const next = event.key === "ArrowLeft" ? current - 10 : event.key === "ArrowRight" ? current + 10 : event.key === "Home" ? min : event.key === "End" ? max : null;
     if (next == null) return;
     event.preventDefault();
-    state.sidebarWidth = next;
-    applySidebarWidth();
+    commitSidebarWidth(next);
   };
 }
 
@@ -3319,18 +4055,27 @@ function updateViewChrome() {
     button.closest(".collection-row, .nav-item")?.classList.toggle("active", button.dataset.collection === state.collectionId);
   });
   root.querySelectorAll("[data-search-query], [data-tag]").forEach((button) => button.classList.remove("active"));
-  const name = root.querySelector(".workspace-head .workspace-name");
-  if (name) name.textContent = viewName();
-  const open = root.querySelector(".workspace-open");
-  if (open) open.href = workspaceHref();
+  const sections = collectionSections();
+  root.querySelectorAll(".workspace").forEach((workspace) => {
+    const section = sections.find((item) => item.key === workspace.dataset.sectionId);
+    if (!section) return;
+    const name = workspace.querySelector(".workspace-head .workspace-name");
+    if (name) name.textContent = section.title;
+    const open = workspace.querySelector(".workspace-open");
+    if (open) open.href = workspaceHref(section.id);
+  });
   refreshSelectionUi({ refreshHeader: true });
 }
 
 function switchView(view, collectionId = null) {
   state.sidebarOpen = false;
   state.searchMenuOpen = false;
+  state.searchActiveIndex = -1;
   state.sortMenuOpen = false;
   state.viewMenuOpen = false;
+  state.workspaceMenuSectionId = null;
+  state.workspaceCollectionMenuId = null;
+  state.exportMenuSectionId = null;
   state.themeMenuOpen = false;
   state.accountMenuOpen = false;
   state.cardMenuId = null;
@@ -3339,6 +4084,7 @@ function switchView(view, collectionId = null) {
   state.query = "";
   state.tag = "";
   state.selected.clear();
+  state.selectionSectionId = null;
   state.selectionMoreOpen = false;
   state.viewSwitching = true;
   updateLibraryRoute("push");
@@ -3561,16 +4307,8 @@ async function collectionAction(action, collectionId) {
     return collectionValueDialog.showModal();
   }
   if (action === "icon") {
-    const form = collectionValueDialog.querySelector("form");
-    collectionValueDialog.querySelector("h2").textContent = t("更改收藏夹图标");
-    form.elements.value.value = state.preferences?.collectionIconByCollectionId?.[item.id] || "";
-    form.elements.value.placeholder = t("输入图标或 Emoji，留空恢复默认");
-    form.elements.value.required = false;
-    state.collectionValueAction = "icon";
-    state.collectionValueId = item.id;
-    collectionValueDialog.returnValue = "";
     renderSidebar();
-    return collectionValueDialog.showModal();
+    return openCollectionIconPicker(item);
   }
   if (action === "share") {
     const bookmarks = await api(`/v1/bookmarks?collection=${encodeURIComponent(item.id)}`);
@@ -3645,94 +4383,152 @@ function releaseCardActionProxies() {
   Object.values(state.cardActionProxies || {}).forEach((button) => button.remove());
 }
 
-function updateSelectAllControl() {
-  const input = root.querySelector("#select-all input");
+function updateSelectAllControl(workspace) {
+  const input = workspace?.querySelector("[data-select-all] input");
   if (!input) return;
-  const items = sortedItems();
+  const items = selectionItems(workspace.dataset.sectionId);
   const selected = items.filter((item) => state.selected.has(item.id));
   const allSelected = Boolean(items.length && selected.length === items.length);
   input.checked = allSelected;
   input.indeterminate = Boolean(selected.length && !allSelected);
 }
 
+function selectAll(sectionId) {
+  const items = selectionItems(sectionId);
+  state.selectionSectionId = sectionId;
+  const allSelected = Boolean(items.length && items.every((item) => state.selected.has(item.id)));
+  if (allSelected) items.forEach((item) => state.selected.delete(item.id));
+  else items.forEach((item) => state.selected.add(item.id));
+  if (!state.selected.size) state.selectionSectionId = null;
+  refreshSelectionUi({ refreshHeader: true });
+}
+
 function bindWorkspaceHeader() {
-  const selectAll = root.querySelector("#select-all");
-  const toggleSelectAll = () => {
-    const items = sortedItems();
-    const allSelected = items.length && items.every((item) => state.selected.has(item.id));
-    if (allSelected) items.forEach((item) => state.selected.delete(item.id));
-    else items.forEach((item) => state.selected.add(item.id));
-    refreshSelectionUi();
-  };
-  if (selectAll) {
-    selectAll.onclick = toggleSelectAll;
-    selectAll.onkeydown = (event) => {
-      if (event.key !== "Enter" && event.key !== " ") return;
-      event.preventDefault();
-      toggleSelectAll();
-    };
-  }
-  const selectionClear = root.querySelector("[data-selection-clear]");
-  if (selectionClear) selectionClear.onclick = () => {
-    state.selected.clear();
-    state.selectionMoreOpen = false;
-    refreshSelectionUi();
-  };
-
-  const viewTrigger = root.querySelector("[data-view-trigger]");
-  if (viewTrigger) {
-    const toggleViewMenu = () => {
-      state.viewMenuOpen = !state.viewMenuOpen;
-      if (state.viewMenuOpen) {
-        state.sortMenuOpen = false;
-        renderSortMenu();
-      }
-      renderViewMenu();
-    };
-    viewTrigger.onclick = (event) => {
-      event.stopPropagation();
-      toggleViewMenu();
-    };
-    viewTrigger.onkeydown = (event) => {
-      if (event.key !== "Enter" && event.key !== " ") return;
-      event.preventDefault();
-      toggleViewMenu();
-    };
-  }
+  root.querySelectorAll(".workspace-title-link").forEach((link) => link.onclick = (event) => {
+    event.preventDefault();
+    const collectionId = link.closest(".workspace")?.dataset.sectionId;
+    if (!collectionId || collectionId === state.collectionId) return;
+    switchView("all", collectionId);
+  });
+  root.querySelectorAll(".workspace").forEach((workspace) => {
+    const sectionId = workspace.dataset.sectionId;
+    const selectAllControl = workspace.querySelector("[data-select-all]");
+    if (selectAllControl) {
+      const toggleSelectAll = () => selectAll(sectionId);
+      selectAllControl.onclick = toggleSelectAll;
+      selectAllControl.onkeydown = (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        toggleSelectAll();
+      };
+    }
+    const viewTrigger = workspace.querySelector("[data-view-trigger]");
+    if (viewTrigger) {
+      const toggleViewMenu = () => {
+        state.workspaceMenuSectionId = sectionId;
+        closeExportMenu();
+        state.viewMenuOpen = !state.viewMenuOpen;
+        if (state.viewMenuOpen) {
+          state.sortMenuOpen = false;
+          renderSortMenu(sectionId);
+        }
+        renderViewMenu(sectionId);
+      };
+      viewTrigger.onclick = (event) => {
+        event.stopPropagation();
+        toggleViewMenu();
+      };
+      viewTrigger.onkeydown = (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        toggleViewMenu();
+      };
+    }
+    const sortTrigger = workspace.querySelector("[data-sort-trigger]");
+    if (sortTrigger) {
+      const toggleSortMenu = () => {
+        state.workspaceMenuSectionId = sectionId;
+        closeExportMenu();
+        state.sortMenuOpen = !state.sortMenuOpen;
+        if (state.sortMenuOpen) {
+          state.viewMenuOpen = false;
+          renderViewMenu(sectionId);
+        }
+        renderSortMenu(sectionId);
+      };
+      sortTrigger.onclick = (event) => {
+        event.stopPropagation();
+        toggleSortMenu();
+      };
+      sortTrigger.onkeydown = (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        toggleSortMenu();
+      };
+    }
+    updateSelectAllControl(workspace);
+  });
   bindViewMenu();
-
-  const sortTrigger = root.querySelector("[data-sort-trigger]");
-  if (sortTrigger) {
-    const toggleSortMenu = () => {
-      state.sortMenuOpen = !state.sortMenuOpen;
-      if (state.sortMenuOpen) {
-        state.viewMenuOpen = false;
-        renderViewMenu();
-      }
-      renderSortMenu();
-    };
-    sortTrigger.onclick = (event) => {
-      event.stopPropagation();
-      toggleSortMenu();
-    };
-    sortTrigger.onkeydown = (event) => {
-      if (event.key !== "Enter" && event.key !== " ") return;
-      event.preventDefault();
-      toggleSortMenu();
-    };
-  }
   bindSortMenu();
-
-  root.querySelectorAll("[data-batch]").forEach((button) => button.onclick = () => batch(button.dataset.batch));
-  const selectionMore = root.querySelector("[data-selection-more]");
-  if (selectionMore) selectionMore.onclick = (event) => {
+  positionSelectionMoreMenu();
+  bindWorkspaceCollectionMenu();
+  positionWorkspaceCollectionMenu();
+  root.querySelectorAll("[data-export-menu-trigger]").forEach((button) => button.onclick = (event) => {
     event.stopPropagation();
-    state.selectionMoreOpen = !state.selectionMoreOpen;
+    const sectionId = button.dataset.exportMenuSectionId;
+    const open = state.exportMenuSectionId === sectionId;
+    state.exportMenuSectionId = open ? null : sectionId;
+    state.workspaceCollectionMenuId = null;
+    state.sortMenuOpen = false;
+    state.viewMenuOpen = false;
+    if (button.hasAttribute("data-export-selection")) refreshSelectionUi({ refreshHeader: true });
+    else render();
+  });
+  root.querySelectorAll("[data-export-format]").forEach((button) => button.onclick = (event) => {
+    event.stopPropagation();
+    const menu = button.closest("[data-export-menu]");
+    const sectionId = menu?.dataset.exportMenuSectionId || "all";
+    const selection = menu?.parentElement?.querySelector("[data-export-selection]");
+    state.exportMenuSectionId = null;
+    if (selection) refreshSelectionUi({ refreshHeader: true });
+    else render();
+    exportBookmarks(button.dataset.exportFormat, sectionId).catch(showError);
+  });
+  root.querySelectorAll("[data-export-backup-action]").forEach((button) => button.onclick = (event) => {
+    event.stopPropagation();
+    const action = button.dataset.exportBackupAction;
+    closeExportMenu();
+    if (action === "backup") {
+      return isPopupSurface()
+        ? openFullPage("library.html?settings=backups")
+        : setSettingsRoute(true, "backups");
+    }
+    if (action === "uploads") return api("/v1/export").then((backup) => downloadExport(backup, "zip")).catch(showError);
+  });
+  positionExportMenu();
+
+  root.querySelectorAll("[data-selection-clear]").forEach((button) => button.onclick = () => {
+    state.selected.clear();
+    state.selectionSectionId = null;
+    state.selectionMoreOpen = false;
+    state.selectionMoreSectionId = null;
+    state.exportMenuSectionId = null;
+    refreshSelectionUi();
+  });
+  root.querySelectorAll("[data-batch]").forEach((button) => button.onclick = () => batch(button.dataset.batch));
+  root.querySelectorAll("[data-selection-more]").forEach((button) => button.onclick = (event) => {
+    event.stopPropagation();
+    const sectionId = button.closest(".workspace")?.dataset.sectionId;
+    const open = state.selectionMoreOpen && state.selectionMoreSectionId === sectionId;
+    closeExportMenu();
+    state.selectionMoreOpen = !open;
+    state.selectionMoreSectionId = open ? null : sectionId;
     refreshSelectionUi({ refreshHeader: true });
-  };
+  });
   root.querySelectorAll("[data-selection-more-action]").forEach((button) => button.onclick = () => {
     const action = button.dataset.selectionMoreAction;
     state.selectionMoreOpen = false;
+    state.selectionMoreSectionId = null;
     if (action === "screenshot") {
       state.selectionScreenshotWorking = true;
       refreshSelectionUi({ refreshHeader: true });
@@ -3749,38 +4545,45 @@ function bindWorkspaceHeader() {
     }
     batch(action === "remove-tags" ? "tags-remove" : action).catch(showError);
   });
-  const selectionMove = root.querySelector("[data-selection-move]");
-  if (selectionMove) selectionMove.onclick = openMovePicker;
-  const selectionOpen = root.querySelector("[data-selection-open]");
-  if (selectionOpen) selectionOpen.onclick = () => {
+  root.querySelectorAll("[data-selection-move]").forEach((button) => button.onclick = openMovePicker);
+  root.querySelectorAll("[data-selection-open]").forEach((button) => button.onclick = () => {
     const item = state.items.find((entry) => state.selected.has(entry.id));
     if (item?.link) window.open(item.link, "_blank", "noopener");
-  };
-  root.querySelector("#export").onclick = () => api("/v1/export").then(downloadBackup).catch(showError);
-  updateSelectAllControl();
+  });
 }
 
 function refreshSelectionUi({ refreshHeader = false } = {}) {
-  const items = sortedItems();
-  const selection = items.filter((item) => state.selected.has(item.id));
-  if (!selection.length) state.selectionMoreOpen = false;
-  const selecting = Boolean(selection.length);
-  const cards = root.querySelector(".cards");
-  cards?.classList.toggle("selection-mode", selecting);
-  root.querySelectorAll("[data-drag-bookmark]").forEach((card) => {
-    const selected = state.selected.has(card.dataset.dragBookmark);
-    card.classList.toggle("selected", selected);
-    card.classList.toggle("selection-mode", selecting);
-    const input = card.querySelector("[data-select]");
-    if (input) input.checked = selected;
-  });
-  const header = root.querySelector(".workspace-head");
-  if (header && (refreshHeader || header.classList.contains("workspace-selection-head") !== selecting)) {
-    header.outerHTML = localizeHtml(workspaceHeaderMarkup(items, selection));
-    bindWorkspaceHeader();
-    return;
+  const sections = collectionSections();
+  if (!state.selected.size) {
+    state.selectionMoreOpen = false;
+    state.selectionMoreSectionId = null;
+    state.exportMenuSectionId = null;
   }
-  updateSelectAllControl();
+  let refreshNeeded = false;
+  root.querySelectorAll(".workspace").forEach((workspace) => {
+    const section = sections.find((item) => item.key === workspace.dataset.sectionId);
+    if (!section) return;
+    const selection = state.selectionSectionId === section.key
+      ? selectionItems(section.key).filter((item) => state.selected.has(item.id))
+      : [];
+    const selecting = Boolean(selection.length);
+    const cards = workspace.querySelector(".cards");
+    cards?.classList.toggle("selection-mode", Boolean(state.selected.size));
+    workspace.querySelectorAll("[data-drag-bookmark]").forEach((card) => {
+      const selected = state.selected.has(card.dataset.dragBookmark);
+      card.classList.toggle("selected", selected);
+      card.classList.toggle("selection-mode", Boolean(state.selected.size));
+      const input = card.querySelector("[data-select]");
+      if (input) input.checked = selected;
+    });
+    const header = workspace.querySelector(".workspace-head");
+    if (header && (refreshHeader || header.classList.contains("workspace-selection-head") !== selecting)) {
+      header.outerHTML = localizeHtml(workspaceHeaderMarkup(selectionItems(section.key), selection, section.key, section.title, section));
+      refreshNeeded = true;
+    }
+  });
+  if (refreshNeeded) bindWorkspaceHeader();
+  else root.querySelectorAll(".workspace").forEach(updateSelectAllControl);
 }
 
 function bind() {
@@ -3948,6 +4751,7 @@ function bind() {
     if (button.dataset.emptyAction === "clear-search") {
       state.query = "";
       state.selected.clear();
+      state.selectionSectionId = null;
       updateLibraryRoute();
       return load().catch(showError);
     }
@@ -3955,6 +4759,8 @@ function bind() {
     root.querySelector("#add-bookmark")?.click();
   });
   root.querySelectorAll("[data-search-query]").forEach((button) => button.onclick = () => {
+    state.view = "all";
+    state.collectionId = null;
     state.tag = "";
     state.selected.clear();
     commitSearch(button.dataset.searchQuery === state.query ? "" : button.dataset.searchQuery, false, "push");
@@ -3963,6 +4769,7 @@ function bind() {
     state.tagItemMenu = null;
     state.tag = button.dataset.tag === state.tag ? "" : button.dataset.tag;
     state.selected.clear();
+    state.selectionSectionId = null;
     render();
   });
   bindWorkspaceHeader();
@@ -3983,6 +4790,8 @@ function bind() {
     event.stopPropagation();
     const nextOpen = !state.searchMenuOpen;
     state.searchMenuOpen = nextOpen;
+    if (nextOpen) state.searchActiveIndex = -1;
+    else state.searchFilterGroup = null;
     const search = root.querySelector("#search");
     if (nextOpen) search?.focus();
     else {
@@ -4003,21 +4812,47 @@ function bind() {
     state.searchMenuOpen = true;
     renderSearchMenu();
   };
-  search.addEventListener("focus", openSearchMenu);
-  search.addEventListener("click", openSearchMenu);
-  search.addEventListener("input", () => {
+  search.onfocus = openSearchMenu;
+  search.onclick = openSearchMenu;
+  search.oninput = () => {
     clearTimeout(state.searchTimer);
     state.searchTimer = setTimeout(() => {
       commitSearch(search.value);
     }, 180);
-  });
-  search.addEventListener("keydown", (event) => {
+  };
+  search.onkeydown = (event) => {
+    if ((event.key === "ArrowUp" || event.key === "ArrowDown") && state.searchMenuOpen) {
+      const options = [...(searchMenuElement()?.querySelectorAll('[role="option"]') || [])];
+      if (!options.length) return;
+      event.preventDefault();
+      const delta = event.key === "ArrowDown" ? 1 : -1;
+      const current = state.searchActiveIndex < 0 ? (delta > 0 ? -1 : 0) : state.searchActiveIndex;
+      state.searchActiveIndex = (current + delta + options.length) % options.length;
+      renderSearchMenu();
+      return;
+    }
+    if (event.key === "Escape" && state.searchMenuOpen) {
+      event.preventDefault();
+      event.stopPropagation();
+      closeSearchMenu();
+      return;
+    }
     if (event.key !== "Enter") return;
+    if (state.searchMenuOpen && state.searchActiveIndex >= 0) {
+      const option = searchMenuElement()?.querySelectorAll('[role="option"]')[state.searchActiveIndex];
+      if (option) {
+        event.preventDefault();
+        option.click();
+        return;
+      }
+    }
     commitSearch(search.value, true, "push");
-  });
+  };
   root.querySelectorAll("[data-select]").forEach((input) => input.onchange = () => {
+    state.selectionSectionId = input.closest(".workspace")?.dataset.sectionId || null;
     input.checked ? state.selected.add(input.dataset.select) : state.selected.delete(input.dataset.select);
-    refreshSelectionUi();
+    if (!state.selected.size) state.selectionSectionId = null;
+    refreshSelectionUi({ refreshHeader: true });
   });
   root.querySelectorAll("[data-favorite]").forEach((button) => button.onclick = async () => {
     const item = state.items.find((entry) => entry.id === button.dataset.favorite);
@@ -4037,25 +4872,27 @@ function bind() {
     showError(new TypeError(t("预览功能暂未接入。")));
   });
   prepareCardActionProxies();
-  root.querySelectorAll("[data-edit]").forEach((button) => button.onclick = () => {
-    const item = state.items.find((entry) => entry.id === button.dataset.edit);
+  const openEdit = (item, focus = "") => {
     if (!item) return;
     const form = editBookmarkDialog.querySelector("form");
-    if (editBookmarkDialog.open && state.editingId === item.id) {
-      if (button.dataset.editFocus === "tags") form.querySelector("#edit-tag-input")?.focus();
+    if (editBookmarkDialog.open && state.editingId === item.id && item.id) {
+      if (focus === "tags") form.querySelector("#edit-tag-input")?.focus();
       return;
     }
     if (editBookmarkDialog.open && editFormIsDirty() && !window.confirm("当前编辑尚未保存，切换会放弃修改。确定继续吗？")) return;
-    state.editingId = item.id;
+    const isNew = !item.id;
+    state.editingId = item.id || "";
+    editBookmarkDialog.dataset.newBookmark = isNew ? "1" : "";
     form._recommendationCreatedCollections = [];
-    form.elements.link.value = item.link;
-    form.elements.title.value = item.title;
-    form.elements.description.value = item.description;
-    form.elements.note.value = item.note;
-    form.elements.reminder.value = dateTimeInputValue(item.reminder);
+    form.elements.link.value = item.link || "";
+    form.elements.title.value = item.title || "";
+    form.elements.description.value = item.description || "";
+    form.elements.note.value = item.note || "";
+    form.elements.reminder.value = dateTimeInputValue(item.reminder || "");
+    form.elements.type.value = item.type || bookmarkType(item);
     form.elements.cover.value = item.cover || "";
     form.elements.media.value = JSON.stringify(Array.isArray(item.media) ? item.media : []);
-    form.elements.collectionId.innerHTML = collectionOptions(state.collections, item.collectionId);
+    form.elements.collectionId.innerHTML = collectionOptions(state.collections, item.collectionId || state.collectionId || state.preferences?.defaultCollectionId || "unsorted");
     const coverTrigger = form.querySelector("#edit-cover-trigger");
     coverTrigger.querySelector("#edit-cover-more").innerHTML = treeIcon("caret");
     coverTrigger.onclick = () => openCoverPicker();
@@ -4064,7 +4901,8 @@ function bind() {
     const collectionSearch = collectionPickerDialog.querySelector("#collection-picker-search");
     const collectionList = collectionPickerDialog.querySelector("#collection-picker-list");
     const syncCollection = () => {
-      form.querySelector(".edit-collection-icon").innerHTML = treeIcon(form.elements.collectionId.value === "unsorted" ? "inbox" : "folder");
+      const collectionId = form.elements.collectionId.value;
+      form.querySelector(".edit-collection-icon").innerHTML = collectionIconMarkup(collectionIconValue(collectionId), false, collectionId === "unsorted");
       form.querySelector(".edit-collection-arrow").innerHTML = treeIcon("caret");
       collectionLabel.textContent = collectionPath(form.elements.collectionId.value);
       collectionTrigger.title = collectionLabel.textContent;
@@ -4223,7 +5061,7 @@ function bind() {
     const tagField = form.querySelector(".edit-tags-field");
     const tagMenu = form.querySelector("#edit-tag-menu");
     const availableTags = tagList(state.items);
-    let editTags = [...item.tags];
+    let editTags = [...(item.tags || [])];
     const candidate = () => tagInput.value.trim().replace(/^#/, "").slice(0, 100);
     const syncTags = () => {
       tagValue.value = JSON.stringify(editTags);
@@ -4283,13 +5121,13 @@ function bind() {
       const option = event.target.closest("[data-tag-option], [data-create-tag]");
       if (option) addTag(option.dataset.tagOption || candidate());
     };
-    editBookmarkDialog.dataset.bookmarkId = item.id;
+    editBookmarkDialog.dataset.bookmarkId = item.id || "";
     bindRecommendationForm(form, {
       getTags: () => [...editTags],
       setTags: (tags) => { editTags = [...tags]; syncTags(); updateTagMenu(); },
       syncCollection,
     });
-    form.elements.favorite.checked = item.favorite;
+    form.elements.favorite.checked = Boolean(item.favorite);
     const notePreview = editBookmarkDialog.querySelector("#edit-note-preview");
     const markdownButton = editBookmarkDialog.querySelector("#edit-note-markdown");
     form.elements.note.hidden = false;
@@ -4309,9 +5147,12 @@ function bind() {
       if (!previewing) notePreview.innerHTML = renderMarkdown(form.elements.note.value);
     };
     syncEditCoverPreview(item);
-    editBookmarkDialog.querySelector("#edit-open-link").href = item.link;
-    editBookmarkDialog.querySelector("#edit-saved-at").textContent = `${t("已保存 ")}${dateTimeLabel(item.updatedAt || item.createdAt)}`;
+    const openLink = editBookmarkDialog.querySelector("#edit-open-link");
+    openLink.href = item.link || "#";
+    openLink.hidden = !item.link;
+    editBookmarkDialog.querySelector("#edit-saved-at").textContent = isNew ? "" : `${t("已保存 ")}${dateTimeLabel(item.updatedAt || item.createdAt)}`;
     const deleteButton = editBookmarkDialog.querySelector("#edit-delete");
+    deleteButton.hidden = isNew;
     deleteButton.textContent = t(state.view === "trash" ? "恢复" : "删除");
     deleteButton.onclick = async () => {
       if (state.view === "trash") await mutate(`/v1/bookmarks/${item.id}/restore`, { method: "POST", body: JSON.stringify({ revision: item.revision }) });
@@ -4322,7 +5163,7 @@ function bind() {
       editBookmarkDialog.close("cancel");
       load().catch(showError);
     };
-    editBookmarkDialog.dataset.highlights = JSON.stringify(item.highlights);
+    editBookmarkDialog.dataset.highlights = JSON.stringify(item.highlights || []);
     const highlightsButton = form.querySelector("#edit-highlights");
     if (highlightsButton) highlightsButton.onclick = () => {
       editBookmarkDialog.dataset.highlights = JSON.stringify(editHighlights({ ...item, highlights: JSON.parse(editBookmarkDialog.dataset.highlights) }));
@@ -4330,8 +5171,9 @@ function bind() {
     if (!editBookmarkDialog.open) editBookmarkDialog.show();
     state.editSnapshot = editFormSnapshot();
     syncEditPanelLayout();
-    if (button.dataset.editFocus === "tags") queueMicrotask(() => form.querySelector("#edit-tag-input")?.focus());
-  });
+    if (focus === "tags") queueMicrotask(() => form.querySelector("#edit-tag-input")?.focus());
+  };
+  root.querySelectorAll("[data-edit]").forEach((button) => button.onclick = () => openEdit(state.items.find((entry) => entry.id === button.dataset.edit), button.dataset.editFocus));
   root.querySelectorAll("[data-delete]").forEach((button) => button.onclick = async () => {
     const item = state.items.find((entry) => entry.id === button.dataset.delete);
     if (state.view === "trash") await mutate(`/v1/bookmarks/${item.id}/restore`, { method: "POST", body: JSON.stringify({ revision: item.revision }) });
@@ -4358,27 +5200,34 @@ function bind() {
     renderSidebar();
     focusInlineCollection("sidebar");
   });
-  root.querySelector("#add-bookmark").onclick = () => {
-    const form = bookmarkDialog.querySelector("form");
-    form.reset();
-    form.elements.tags.value = "[]";
-    form._recommendationCreatedCollections = [];
-    form.elements.collectionId.innerHTML = collectionOptions(state.collections, state.collectionId || state.preferences.defaultCollectionId);
-    bindRecommendationForm(form, {
-      getTags: () => {
-        try { return JSON.parse(form.elements.tags.value || "[]"); } catch { return []; }
-      },
-      setTags: (tags) => { form.elements.tags.value = JSON.stringify(tags); },
-    });
-    bookmarkDialog.showModal();
+  root.querySelector("#add-bookmark").onclick = async () => {
+    const button = root.querySelector("#add-bookmark");
+    button.disabled = true;
+    try {
+      const page = await currentPageDraft();
+      openEdit({
+        ...page,
+        type: page.type || "link",
+        tags: [],
+        collectionId: state.collectionId || state.preferences?.defaultCollectionId || "unsorted",
+      });
+    } finally {
+      button.disabled = false;
+    }
   };
-  root.querySelector("#import").onclick = () => setSettingsRoute(true, "import");
-  root.querySelector("#check-links").onclick = async () => { await api("/v1/health-checks", { method: "POST", body: JSON.stringify({ collectionId: state.collectionId }) }); load().catch(showError); };
-  root.querySelector("[data-theme-trigger]")?.addEventListener("click", (event) => {
+  root.querySelector("#import").onclick = () => isPopupSurface()
+    ? openFullPage("library.html?settings=import")
+    : setSettingsRoute(true, "import");
+  root.querySelector("#check-links").onclick = () => {
+    if (!state.connectionInfo) return;
+    return api("/v1/health-checks", { method: "POST", body: JSON.stringify({ collectionId: state.collectionId }) }).then(() => load()).catch(showError);
+  };
+  const themeTrigger = root.querySelector("[data-theme-trigger]");
+  if (themeTrigger) themeTrigger.onclick = (event) => {
     event.stopPropagation();
     state.themeMenuOpen = !state.themeMenuOpen;
     renderThemeMenu();
-  });
+  };
   bindThemeMenu();
   bindDragDrop();
 }
@@ -4411,11 +5260,11 @@ function bindDragDrop() {
       if (!item || !target || item.id === target.id || item.collectionId !== target.collectionId) return;
       event.preventDefault();
       event.dataTransfer.dropEffect = "move";
-      markDropTarget(element, beforeTarget(element, event, state.layout === "grid"));
+      markDropTarget(element, beforeTarget(element, event, element.closest(".cards")?.dataset.layout === "grid"));
     };
     element.ondrop = (event) => {
       event.preventDefault();
-      const before = beforeTarget(element, event, state.layout === "grid");
+      const before = beforeTarget(element, event, element.closest(".cards")?.dataset.layout === "grid");
       reorderBookmark(element.dataset.dragBookmark, before).catch(showError);
     };
     element.ondragend = () => { state.dragBookmark = null; clearDropTargets(); };
@@ -4460,6 +5309,150 @@ function editHighlights(item) {
   const note = window.prompt("备注", current.note || "");
   if (note == null) return item.highlights;
   return item.highlights.map((highlight, currentIndex) => currentIndex === index ? { ...highlight, color: color.toLocaleLowerCase(), note: note.trim() } : highlight);
+}
+
+function scopedBackup(backup, collectionId, selectedIds = null) {
+  if (!Array.isArray(backup?.bookmarks)) return backup;
+  const selected = selectedIds ? new Set(selectedIds) : null;
+  const bookmarks = backup.bookmarks.filter((item) => selected
+    ? selected.has(item.id)
+    : !collectionId || collectionId === "all" || item.collectionId === collectionId);
+  if ((!collectionId || collectionId === "all") && !selected) return backup;
+  const collectionIds = new Set(bookmarks.map((item) => item.collectionId).filter(Boolean));
+  if (collectionId && collectionId !== "all") collectionIds.add(collectionId);
+  return {
+    ...backup,
+    bookmarks,
+    collections: Array.isArray(backup.collections) ? backup.collections.filter((item) => collectionIds.has(item.id)) : backup.collections,
+  };
+}
+
+function exportTimestamp(value) {
+  const time = Date.parse(String(value || ""));
+  return Number.isFinite(time) ? Math.floor(time / 1000) : 0;
+}
+
+function exportCsvCell(value) {
+  const text = String(value ?? "");
+  return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function exportCsv(backup) {
+  const rows = [["id", "title", "note", "excerpt", "url", "tags", "created", "cover", "highlights", "favorite"]];
+  for (const item of backup.bookmarks || []) rows.push([
+    item.id || "",
+    item.title || "",
+    item.note || "",
+    item.description || "",
+    item.link || "",
+    (item.tags || []).join(","),
+    item.createdAt || "",
+    item.cover || item.coverRef?.url || "",
+    Array.isArray(item.highlights) && item.highlights.length ? JSON.stringify(item.highlights) : "",
+    item.favorite ? "true" : "false",
+  ]);
+  return `${rows.map((row) => row.map(exportCsvCell).join(",")).join("\r\n")}\r\n`;
+}
+
+function exportTxt(backup) {
+  const links = (backup.bookmarks || []).map((item) => String(item.link || "")).filter(Boolean);
+  return links.length ? `${links.join("\n")}\n` : "";
+}
+
+function exportHtml(backup) {
+  const items = backup.bookmarks || [];
+  const links = items.map((item) => {
+    const created = exportTimestamp(item.createdAt);
+    const modified = exportTimestamp(item.updatedAt || item.createdAt);
+    const tags = (item.tags || []).join(",");
+    const cover = item.cover || item.coverRef?.url || "";
+    const attributes = [
+      `HREF="${escapeHtml(item.link || "")}"`,
+      `ADD_DATE="${created}"`,
+      `LAST_MODIFIED="${modified}"`,
+      `TAGS="${escapeHtml(tags)}"`,
+      `DATA-COVER="${escapeHtml(cover)}"`,
+      `DATA-IMPORTANT="${item.favorite ? "true" : "false"}"`,
+    ].join(" ");
+    return `<DT><A ${attributes}>${escapeHtml(item.title || item.link || "")}</A>${item.note ? `\n<DD>${escapeHtml(item.note)}` : ""}`;
+  }).join("\n");
+  return `<!DOCTYPE NETSCAPE-Bookmark-file-1>\n<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">\n<TITLE>Raindrop.io Bookmarks</TITLE>\n<H1>Raindrop.io Bookmarks</H1>\n<DL><p>\n<DT><H3>Export</H3>\n<DL><p>\n${links}\n</DL><p>\n</DL><p>\n`;
+}
+
+const EXPORT_CRC32_TABLE = Array.from({ length: 256 }, (_, index) => {
+  let value = index;
+  for (let bit = 0; bit < 8; bit += 1) value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+  return value >>> 0;
+});
+
+function exportZipArchive(entries) {
+  const encoder = new TextEncoder();
+  const local = [];
+  const central = [];
+  let offset = 0;
+  const concat = (chunks) => {
+    const output = new Uint8Array(chunks.reduce((size, chunk) => size + chunk.byteLength, 0));
+    let index = 0;
+    for (const chunk of chunks) { output.set(chunk, index); index += chunk.byteLength; }
+    return output;
+  };
+  const crc32 = (bytes) => {
+    let value = 0xffffffff;
+    for (const byte of bytes) value = EXPORT_CRC32_TABLE[(value ^ byte) & 0xff] ^ (value >>> 8);
+    return (value ^ 0xffffffff) >>> 0;
+  };
+  for (const entry of entries) {
+    const name = encoder.encode(entry.name);
+    const bytes = entry.bytes instanceof Uint8Array ? entry.bytes : new Uint8Array(entry.bytes);
+    const crc = crc32(bytes);
+    const localHeader = new ArrayBuffer(30);
+    const localView = new DataView(localHeader);
+    localView.setUint32(0, 0x04034b50, true); localView.setUint16(4, 20, true); localView.setUint16(6, 0x800, true);
+    localView.setUint32(14, crc, true); localView.setUint32(18, bytes.byteLength, true); localView.setUint32(22, bytes.byteLength, true);
+    localView.setUint16(26, name.byteLength, true);
+    local.push(new Uint8Array(localHeader), name, bytes);
+    const centralHeader = new ArrayBuffer(46);
+    const centralView = new DataView(centralHeader);
+    centralView.setUint32(0, 0x02014b50, true); centralView.setUint16(4, 20, true); centralView.setUint16(6, 20, true); centralView.setUint16(8, 0x800, true);
+    centralView.setUint32(16, crc, true); centralView.setUint32(20, bytes.byteLength, true); centralView.setUint32(24, bytes.byteLength, true);
+    centralView.setUint16(28, name.byteLength, true); centralView.setUint32(42, offset, true);
+    central.push(new Uint8Array(centralHeader), name);
+    offset += 30 + name.byteLength + bytes.byteLength;
+  }
+  const localBytes = concat(local);
+  const centralBytes = concat(central);
+  const end = new ArrayBuffer(22);
+  const endView = new DataView(end);
+  endView.setUint32(0, 0x06054b50, true); endView.setUint16(8, entries.length, true); endView.setUint16(10, entries.length, true);
+  endView.setUint32(12, centralBytes.byteLength, true); endView.setUint32(16, localBytes.byteLength, true);
+  return concat([localBytes, centralBytes, new Uint8Array(end)]);
+}
+
+async function exportZip(backup) {
+  const encoder = new TextEncoder();
+  const media = await mediaArchiveEntries(backup);
+  return exportZipArchive([
+    { name: "export.csv", bytes: encoder.encode(exportCsv(backup)) },
+    { name: "export.html", bytes: encoder.encode(exportHtml(backup)) },
+    { name: "export.txt", bytes: encoder.encode(exportTxt(backup)) },
+    ...media,
+  ]);
+}
+
+async function downloadExport(backup, format) {
+  const content = format === "csv" ? exportCsv(backup) : format === "html" ? exportHtml(backup) : format === "txt" ? exportTxt(backup) : await exportZip(backup);
+  const type = format === "csv" ? "text/csv;charset=utf-8" : format === "html" ? "text/html;charset=utf-8" : format === "txt" ? "text/plain;charset=utf-8" : "application/zip";
+  const url = URL.createObjectURL(new Blob([content], { type }));
+  const link = Object.assign(document.createElement("a"), { href: url, download: `export.${format}` });
+  document.body.append(link);
+  link.click();
+  window.setTimeout(() => { URL.revokeObjectURL(url); link.remove(); }, 1000);
+}
+
+async function exportBookmarks(format, sectionId) {
+  const backup = await api("/v1/export");
+  const selectedIds = state.selectionSectionId === sectionId && state.selected.size ? [...state.selected] : null;
+  await downloadExport(scopedBackup(backup, sectionId, selectedIds), format);
 }
 
 function downloadBackup(backup) {
@@ -4602,6 +5595,8 @@ async function batch(kind, collectionId) {
   const items = state.items.filter((item) => state.selected.has(item.id)).map(({ id, revision }) => ({ id, revision }));
   await mutate("/v1/bookmarks/batch", { method: "POST", body: JSON.stringify({ items, action }) });
   state.selected.clear();
+  state.selectionSectionId = null;
+  state.exportMenuSectionId = null;
   load().catch(showError);
 }
 
@@ -4652,13 +5647,6 @@ collectionValueDialog.addEventListener("close", async () => {
     await mutate(`/v1/collections/${item.id}`, { method: "PATCH", body: JSON.stringify({ revision: item.revision, name: value }) });
     return load();
   }
-  if (action === "icon") {
-    const icons = { ...(state.preferences?.collectionIconByCollectionId || {}) };
-    if (value) icons[item.id] = value.slice(0, 8);
-    else delete icons[item.id];
-    await savePreferences({ collectionIconByCollectionId: icons });
-    renderSidebar();
-  }
 });
 
 collectionShareDialog.querySelector("#copy-collection-share").onclick = () => {
@@ -4693,44 +5681,47 @@ bookmarkDialog.addEventListener("close", async () => {
 
 editBookmarkDialog.addEventListener("close", async () => {
   const form = editBookmarkDialog.querySelector("form");
+  const isNew = editBookmarkDialog.dataset.newBookmark === "1";
   const bookmarkId = state.editingId || editBookmarkDialog.dataset.bookmarkId;
   state.editingId = "";
   state.editSnapshot = "";
   editBookmarkDialog.dataset.bookmarkId = "";
+  editBookmarkDialog.dataset.newBookmark = "";
   syncEditPanelLayout(false);
   if (editBookmarkDialog.returnValue !== "save") {
     if (await cleanupRecommendationCollections(form)) load().catch(showError);
     return;
   }
   const item = state.items.find((entry) => entry.id === bookmarkId);
-  if (!item) {
+  if (!isNew && !item) {
     if (await cleanupRecommendationCollections(form)) load().catch(showError);
     return;
   }
   try {
     const fields = new FormData(form);
-    const saved = await mutate(`/v1/bookmarks/${item.id}`, {
-      method: "PATCH",
-      body: JSON.stringify({
-        revision: item.revision,
-        link: fields.get("link"),
-        title: fields.get("title"),
-        description: fields.get("description"),
-        note: fields.get("note"),
-        reminder: fields.get("reminder"),
-        cover: fields.get("cover") || "",
-        media: JSON.parse(fields.get("media") || "[]"),
-        collectionId: fields.get("collectionId"),
-        tags: JSON.parse(fields.get("tags") || "[]"),
-        favorite: fields.has("favorite"),
-        highlights: JSON.parse(editBookmarkDialog.dataset.highlights),
-      }),
-    });
+    const body = {
+      link: fields.get("link"),
+      type: fields.get("type") || "link",
+      title: fields.get("title"),
+      description: fields.get("description"),
+      note: fields.get("note"),
+      reminder: fields.get("reminder"),
+      cover: fields.get("cover") || "",
+      media: JSON.parse(fields.get("media") || "[]"),
+      collectionId: fields.get("collectionId"),
+      tags: JSON.parse(fields.get("tags") || "[]"),
+      favorite: fields.has("favorite"),
+      highlights: JSON.parse(editBookmarkDialog.dataset.highlights || "[]"),
+    };
+    const saved = isNew
+      ? await api("/v1/bookmarks", { method: "POST", body: JSON.stringify(body) })
+      : await mutate(`/v1/bookmarks/${item.id}`, { method: "PATCH", body: JSON.stringify({ revision: item.revision, ...body }) });
     if (!saved) {
       if (await cleanupRecommendationCollections(form)) load().catch(showError);
       return;
     }
     form._recommendationCreatedCollections = [];
+    if (isNew && isExtensionSurface()) state.addButtonSaved = true;
   } catch (error) {
     if (await cleanupRecommendationCollections(form)) load().catch(showError);
     showError(error);
@@ -4835,6 +5826,18 @@ document.addEventListener("keydown", (event) => {
     setAccountMenuOpen(false);
     return;
   }
+  if (event.key === "Escape" && state.exportMenuSectionId) {
+    const selecting = Boolean(state.selectionSectionId && state.selected.size);
+    state.exportMenuSectionId = null;
+    if (selecting) refreshSelectionUi({ refreshHeader: true });
+    else render();
+    return;
+  }
+  if (event.key === "Escape" && state.workspaceCollectionMenuId) {
+    state.workspaceCollectionMenuId = null;
+    renderWorkspaceCollectionMenu();
+    return;
+  }
   if (event.key === "Escape" && state.cardMenuId) {
     closeCardMenu();
     return;
@@ -4874,6 +5877,7 @@ document.addEventListener("keydown", (event) => {
     search.value = "";
     state.query = "";
     state.selected.clear();
+    state.selectionSectionId = null;
     updateLibraryRoute();
     load().catch(showError);
   }
@@ -4900,6 +5904,20 @@ document.addEventListener("click", (event) => {
   if (state.themeMenuOpen && !insideTheme) closeThemeMenu();
   const insideAccount = event.target.closest("[data-account-trigger], [data-account-menu]");
   if (state.accountMenuOpen && !insideAccount) setAccountMenuOpen(false);
+  const insideExportMenu = event.target.closest("[data-export-menu-trigger], [data-export-menu]");
+  if (state.exportMenuSectionId && !insideExportMenu) {
+    const selecting = Boolean(state.selectionSectionId && state.selected.size);
+    state.exportMenuSectionId = null;
+    if (selecting) refreshSelectionUi({ refreshHeader: true });
+    else render();
+    return;
+  }
+  const insideWorkspaceCollectionMenu = event.target.closest("[data-workspace-collection-menu], [data-workspace-collection-menu-panel]");
+  if (state.workspaceCollectionMenuId && !insideWorkspaceCollectionMenu) {
+    state.workspaceCollectionMenuId = null;
+    renderWorkspaceCollectionMenu();
+    return;
+  }
   const insideSelectionMore = event.target.closest("[data-selection-more], [data-selection-more-menu]");
   if (state.selectionMoreOpen && !insideSelectionMore) {
     state.selectionMoreOpen = false;
@@ -4914,6 +5932,7 @@ document.addEventListener("click", (event) => {
 });
 
 function showError(error) {
+  if (/Extension context invalidated/i.test(String(error?.message || error))) return;
   console.error(error);
   if (error?.code === "locked") return showLockScreen();
   if (error?.code === "editing_conflict") {
@@ -4964,7 +5983,7 @@ window.addEventListener("popstate", () => {
 await prepareLock();
 const initialLock = await lockState();
 if (initialLock.enabled && initialLock.locked) showLockScreen();
-else if (await connection()) {
+else {
   startLockMonitor(showLockScreen);
   load().catch(showError);
-} else connectionView(root, () => load().catch(showError));
+}

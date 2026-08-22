@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      confirm:
+        description: Type deploy-production to deploy the main branch only
+        required: true
+        default: deploy-production
+        type: string
 
 permissions:
   contents: read
@@ -14,6 +20,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || inputs.confirm == 'deploy-production')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

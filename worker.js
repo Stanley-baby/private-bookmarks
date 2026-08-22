@@ -33,7 +33,7 @@ export async function runScheduledTasks({ store, bucket, now = new Date() } = {}
   }
   const [health, purge] = await Promise.all([
     runHealthChecks(store),
-    store.purgeTrash(new Date(now.getTime() - 30 * 24 * 60 * 60 * 1_000).toISOString()),
+    store.purgeTrash(new Date(now.getTime() - 90 * 24 * 60 * 60 * 1_000).toISOString()),
   ]);
   return { health, purge };
 }

@@ -1,0 +1,12 @@
+[     925ms] Error: This script should only be loaded in a browser extension.
+    at Object.n (http://127.0.0.1:4871/assets/app.js:1:1124358)
+    at 83131 (http://127.0.0.1:4871/assets/app.js:1:1124508)
+    at i (http://127.0.0.1:4871/assets/app.js:1:1162231)
+    at 61245 (http://127.0.0.1:4871/assets/app.js:1:516557)
+    at i (http://127.0.0.1:4871/assets/app.js:1:1162231)
+    at 94536 (http://127.0.0.1:4871/assets/app.js:1:516977)
+    at i (http://127.0.0.1:4871/assets/app.js:1:1162231)
+    at 87659 (http://127.0.0.1:4871/assets/app.js:1:521257)
+    at i (http://127.0.0.1:4871/assets/app.js:1:1162231)
+    at http://127.0.0.1:4871/assets/app.js:1:1165691
+[     948ms] [ERROR] Failed to load resource: the server responded with a status of 404 (File not found) @ http://127.0.0.1:4871/favicon.ico:0

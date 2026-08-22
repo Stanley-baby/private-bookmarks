@@ -1,0 +1,5 @@
+{
+  "appDesc": { "message": "A local-first private bookmark manager." },
+  "savePageOrHighlight": { "message": "Save page or highlight" },
+  "openSidePanel": { "message": "Open side panel" }
+}
