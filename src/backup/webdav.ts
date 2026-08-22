@@ -1,5 +1,5 @@
 import { decodeBackup, encodeBackup, retainedBackupNames } from "./format.js";
-import { exportLibrary, replaceLibrary, mergeLibrary, webdavSettings, setWebdavSettings } from "../local/db";
+import { exportLibrary, replaceLibrary, mergeLibrary, webdavSettings, setWebdavSettings } from "../../extension/shared/local-db.js";
 
 export type WebdavSettings = { enabled: boolean; endpoint: string; username: string; password: string; encryptionPassword: string; retention: number; lastBackupAt?: string; lastError?: string };
 

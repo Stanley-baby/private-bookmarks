@@ -1,4 +1,4 @@
-import { getActionMode, listBookmarks, saveBookmark, setActionMode, setSyncSettings, syncSettings } from "../local/db";
+import { getActionMode, listBookmarks, saveBookmark, setActionMode, setSyncSettings, syncSettings } from "../../extension/shared/local-db.js";
 import { scheduleSync, syncOnce } from "../local/sync";
 import { createWebdavBackup, configureWebdav, listBackups, restoreWebdavBackup } from "../backup/webdav";
 import { extractPageMetadata } from "../../extension/page-metadata.js";

@@ -3,9 +3,9 @@ import { createRoot } from "react-dom/client";
 import { api, connect, connection, disconnect } from "../../extension/api.js";
 import { changePin, disablePin, enablePin, forgetPin, lockNow, lockState, prepareLock, setAutoLock, startLockMonitor, unlock } from "../../extension/lock.js";
 import { configureWebdav, createWebdavBackup, listBackups, restoreWebdavBackup } from "../backup/webdav";
-import { applyMigrationPackage, batchBookmarks, exportLibrary, exportMigrationPackage, getActionMode, importLibrary, importMigrationPackage, initialize, initialized, listBookmarks, listCollections, listConflicts, previewMigrationPackage, resolveConflict, restoreBookmark, saveBookmark, saveBookmarkWithCollection, saveCollection, setSyncSettings, syncSettings, trashBookmark, webdavSettings, type ActionMode, type Bookmark, type BookmarkBatchAction, type BookmarkConflictChoices, type Collection } from "../local/db";
+import { applyMigrationPackage, batchBookmarks, exportLibrary, exportMigrationPackage, getActionMode, importLibrary, importMigrationPackage, initialize, initialized, listBookmarks, listCollections, listConflicts, previewMigrationPackage, resolveConflict, restoreBookmark, saveBookmark, saveBookmarkWithCollection, saveCollection, setSyncSettings, syncSettings, trashBookmark, webdavSettings, type ActionMode, type Bookmark, type BookmarkBatchAction, type BookmarkConflictChoices, type Collection } from "../../extension/shared/local-db.js";
 import { syncOnce } from "../local/sync";
-import { BOOKMARK_CONFLICT_FIELDS, fileToCover, mergeBookmarkConflict } from "../local/model.js";
+import { BOOKMARK_CONFLICT_FIELDS, fileToCover, mergeBookmarkConflict } from "../../extension/shared/local-model.js";
 import { recommendBookmark } from "../../extension/recommendations.js";
 import "./styles.css";
 

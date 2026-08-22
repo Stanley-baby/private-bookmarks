@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const library = readFileSync(new URL("../extension/library.js", import.meta.url), "utf8");
-const api = readFileSync(new URL("../extension/api.js", import.meta.url), "utf8");
+const localApi = readFileSync(new URL("../extension/shared/local-api.js", import.meta.url), "utf8");
 const css = readFileSync(new URL("../extension/style.css", import.meta.url), "utf8");
 
 test("parent collection pages render one independent workspace per nested collection", () => {
@@ -28,7 +28,7 @@ test("parent collection pages render one independent workspace per nested collec
 });
 
 test("local collection queries include descendants like the Worker API", () => {
-  assert.match(api, /nestedViewLegacy/);
-  assert.match(api, /parentId/);
-  assert.match(api, /scope\.has\(item\.collectionId\)/);
+  assert.match(localApi, /nestedViewLegacy/);
+  assert.match(localApi, /parentId/);
+  assert.match(localApi, /scope\.has\(item\.collectionId\)/);
 });

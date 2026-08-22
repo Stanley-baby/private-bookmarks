@@ -20,6 +20,8 @@ globalThis.fetch = async () => ({
 });
 
 const api = await import(`../extension/api.js?connection-test=${Date.now()}`);
+const lock = await import(`../extension/lock.js?api-connection-test=${Date.now()}`);
+
 
 test("failed Worker health checks do not leave a new local connection", async () => {
   localStorage.removeItem("instanceConnection");
@@ -42,4 +44,33 @@ test("successful health checks persist the new connection", async () => {
   const value = await api.connect("https://worker.example/path", "secret");
   assert.deepEqual(value, { endpoint: "https://worker.example", key: "secret" });
   assert.deepEqual(JSON.parse(localStorage.getItem("instanceConnection")), value);
+});
+
+test("legacy API forwards requests through the shared Worker client", async () => {
+  healthStatus = 200;
+  assert.deepEqual(await api.api("/v1/health"), { ok: true });
+});
+
+test("legacy disconnect refuses to bypass a PIN-protected connection", async () => {
+  const value = { endpoint: "https://background.example", key: "secret" };
+  await lock.enablePin("123456", "never", value);
+  await lock.lockNow();
+  const beforeLock = localStorage.getItem("privateBookmarksLock");
+  const beforeBackground = localStorage.getItem("instanceConnectionBackground");
+  const beforeSession = sessionStorage.getItem("privateBookmarksUnlocked");
+
+  await assert.rejects(() => api.disconnect(), (error) => error.status === 423 && error.code === "connection_locked");
+  assert.equal(localStorage.getItem("privateBookmarksLock"), beforeLock);
+  assert.equal(localStorage.getItem("instanceConnectionBackground"), beforeBackground);
+  assert.equal(localStorage.getItem("instanceConnection"), null);
+  assert.equal(sessionStorage.getItem("privateBookmarksUnlocked"), beforeSession);
+
+  await lock.forgetPin();
+  localStorage.removeItem("instanceConnection");
+});
+
+test("legacy disconnect removes an ordinary primary connection", async () => {
+  localStorage.setItem("instanceConnection", JSON.stringify({ endpoint: "https://worker.example", key: "secret" }));
+  assert.equal(await api.disconnect(), undefined);
+  assert.equal(localStorage.getItem("instanceConnection"), null);
 });
