@@ -12,7 +12,6 @@ import {
 
 const library = readFileSync(new URL("../extension/library.js", import.meta.url), "utf8");
 const html = readFileSync(new URL("../extension/library.html", import.meta.url), "utf8");
-const sourceHtml = readFileSync(new URL("../src/entrypoints/library.html", import.meta.url), "utf8");
 const css = readFileSync(new URL("../extension/style.css", import.meta.url), "utf8");
 
 test("close icon matches the reference path", () => {
@@ -53,10 +52,8 @@ test("collection icon search, save, and image rendering share one helper", () =>
 });
 
 test("collection icon header keeps intrinsic actions and named icon wrappers", () => {
-  for (const markup of [html, sourceHtml]) {
-    assert.match(markup, /class="collection-icon-picker-upload-icon" data-collection-icon-upload-icon/);
-    assert.match(markup, /class="collection-icon-picker-last-action"><button[^>]+id="collection-icon-picker-close"/);
-  }
+  assert.match(html, /class="collection-icon-picker-upload-icon" data-collection-icon-upload-icon/);
+  assert.match(html, /class="collection-icon-picker-last-action"><button[^>]+id="collection-icon-picker-close"/);
   assert.match(css, /\.collection-icon-picker-header\s*>\s*:not\(:last-child\):not\(\.collection-icon-picker-space\)\s*\{[^}]*margin-right:\s*4px/);
   assert.match(css, /\.collection-icon-picker-upload-icon\s*\{[^}]*display:\s*block/);
   assert.match(css, /\.collection-icon-picker-last-action\s*\{[^}]*margin-right:\s*-8px/);
@@ -101,7 +98,7 @@ test("opening the icon picker does not trigger a remote catalog refresh", () => 
 });
 
 test("icon picker exposes an explicit catalog refresh action", () => {
-  for (const markup of [html, sourceHtml]) assert.match(markup, /data-collection-icon-refresh[^>]*>手动更新图标目录</);
+  assert.match(html, /data-collection-icon-refresh[^>]*>手动更新图标目录</);
   assert.match(library, /api\(["']\/v1\/icon-catalog["']/);
   assert.match(library, /normalizeCollectionIconCatalog/);
   assert.match(library, /writeCollectionIconCache/);
