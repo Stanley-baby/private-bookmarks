@@ -29,19 +29,14 @@ export type Bookmark = {
 export type Collection = { id: string; name: string; parentId: string | null; position?: number; createdAt: string; updatedAt?: string; deletedAt?: string; deletedByCollectionId?: string; revision?: number };
 export type ActionMode = "popup" | "sidepanel";
 import { applyBookmarkBatch, mergeBookmarkConflict, normalizeBookmark } from "./model.js";
+import { LOCAL_DATABASE, LOCAL_DATABASE_VERSION, openLocalDatabase } from "../../extension/local-storage.js";
 
 export {
   exportMigrationPackage,
   importMigrationPackage,
-  previewMigrationPackage,
-  readMigrationSnapshot,
-  writeMigrationSnapshot,
-} from "../migration/package.js";
+} from "../../extension/migration-package.js";
 
 declare const chrome: any;
-
-const DATABASE = "private-bookmarks-local";
-const VERSION = 2;
 
 export const DEFAULT_PREFERENCES = {
   language: "zh-Hans",
@@ -75,19 +70,7 @@ function request<T>(value: IDBRequest<T>) {
 }
 
 function database() {
-  return new Promise<IDBDatabase>((resolve, reject) => {
-    const opening = indexedDB.open(DATABASE, VERSION);
-    opening.onupgradeneeded = () => {
-      const db = opening.result;
-      if (!db.objectStoreNames.contains("bookmarks")) db.createObjectStore("bookmarks", { keyPath: "id" });
-      if (!db.objectStoreNames.contains("collections")) db.createObjectStore("collections", { keyPath: "id" });
-      if (!db.objectStoreNames.contains("settings")) db.createObjectStore("settings");
-      if (!db.objectStoreNames.contains("outbox")) db.createObjectStore("outbox", { keyPath: "id", autoIncrement: true });
-      if (!db.objectStoreNames.contains("conflicts")) db.createObjectStore("conflicts", { keyPath: "key" });
-    };
-    opening.onsuccess = () => resolve(opening.result);
-    opening.onerror = () => reject(opening.error);
-  });
+  return openLocalDatabase({ databaseName: LOCAL_DATABASE, version: LOCAL_DATABASE_VERSION });
 }
 
 async function store(name: "bookmarks" | "collections" | "settings" | "outbox" | "conflicts", mode: IDBTransactionMode = "readonly") {

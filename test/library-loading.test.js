@@ -5,6 +5,7 @@ import { isCurrentRequest, shouldShowGlobalLoading } from "../extension/ui.js?v=
 
 const library = readFileSync(new URL("../extension/library.js", import.meta.url), "utf8");
 const background = readFileSync(new URL("../extension/background.js", import.meta.url), "utf8");
+const react = readFileSync(new URL("../src/react/main.tsx", import.meta.url), "utf8");
 
 test("global loading is reserved for the first render", () => {
   assert.equal(shouldShowGlobalLoading(false), true);
@@ -46,6 +47,17 @@ test("account settings exposes a Worker connection form without disabling local 
   assert.match(submit, /state\.connectionInfo = value;/);
   assert.match(submit, /await load\(\)/);
   assert.match(library, /root\.querySelector\("\[data-account-connection-form\]"\)\?\.addEventListener\("submit", submitAccountConnection\)/);
+});
+
+test("legacy export and React migration file transfer share the package seam", () => {
+  assert.match(library, /exportMigrationPackage/);
+  assert.match(library, /importMigrationPackage/);
+  assert.match(library, /data-migration-export/);
+  assert.match(library, /data-migration-import/);
+  assert.match(library, /private-bookmarks-migration\.json/);
+  assert.match(react, /importMigrationPackage/);
+  assert.match(react, /exportMigrationPackage/);
+  assert.match(react, /导入迁移包/);
 });
 
 test("add action uses the full editor and keeps the popup page passive until clicked", () => {

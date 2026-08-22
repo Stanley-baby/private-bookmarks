@@ -7,6 +7,7 @@ import { renderMarkdown } from "./markdown.js";
 import { mediaArchiveEntries } from "./media-archive.js";
 import { recommendBookmark } from "./recommendations.js";
 import { collectionOptions, connectionView, escapeHtml, isCurrentRequest, lockView, shouldShowGlobalLoading } from "./ui.js?v=20260811-navigation3";
+import { exportMigrationPackage, importMigrationPackage } from "./migration-package.js";
 
 const root = document.querySelector("#app");
 const collectionValueDialog = document.querySelector("#collection-value-dialog");
@@ -2627,8 +2628,22 @@ function importPreviewMarkup(preview) {
   return `<section class="settings-import-preview">${preview.error ? `<p class="settings-import-error">${escapeHtml(preview.error)}</p>` : ""}<div class="settings-import-preview-head"><strong>导入预览</strong><span>${escapeHtml(preview.name || "")}</span></div><div class="settings-import-stats"><span><strong>${valid}</strong> 有效书签</span><span><strong>${duplicates}</strong> 重复书签</span><span><strong>${invalid}</strong> 无效项目</span></div>${progress?.completed ? `<p class="settings-import-progress">已导入 ${progress.completed} / ${progress.total}，剩余 ${valid}</p>` : ""}${invalid ? `<details class="settings-import-invalid"><summary>查看无效项目</summary><ul>${preview.invalid.slice(0, 20).map((item) => `<li>${escapeHtml(importInvalidLabel(item, preview.format))}</li>`).join("")}</ul></details>` : ""}<label class="settings-import-check"><input type="checkbox" data-import-skip-duplicates ${preview.skipDuplicates !== false ? "checked" : ""} ${resumed || state.importBusy ? "disabled" : ""}>跳过重复项目</label><div class="settings-import-actions"><button type="button" class="primary settings-import-action" data-import-submit ${disabled ? "disabled" : ""}>${state.importBusy ? "正在导入…" : `导入这些书签 (${valid})`}</button><button type="button" class="settings-import-clear" data-import-clear ${state.importBusy ? "disabled" : ""}>清除</button></div></section>`;
 }
 
+async function downloadMigrationPackage() {
+  const value = await exportMigrationPackage();
+  const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: "application/json" }));
+  const link = Object.assign(document.createElement("a"), { href: url, download: "private-bookmarks-migration.json" });
+  document.body.append(link); link.click();
+  window.setTimeout(() => { URL.revokeObjectURL(url); link.remove(); }, 1000);
+}
+
+async function uploadMigrationPackage(file) {
+  if (!confirm("导入迁移包会替换当前本地资料库。继续吗？")) return;
+  await importMigrationPackage(await file.text());
+  location.reload();
+}
+
 function importSettingsMarkup() {
-  return `<div class="settings-content settings-import-content"><div class="settings-grid settings-import-grid"><div class="settings-label">档案</div><div><div class="settings-import-alert"><strong>上传书签文件 (html、csv、txt 或 enex)</strong>.<br>你可以从浏览器或服务的“导出书签”部分得到这个文件<br><br><a href="https://help.raindrop.io/import#supported-formats" target="_blank" rel="noopener">帮助 ${microIcon("microOpen")}</a></div><label class="settings-import-upload button primary" data-import-upload role="button" tabindex="0" aria-label="上传文件…">${treeIcon("upload")}<span>上传文件…</span><input type="file" class="hidden" data-import-file accept="application/json,text/html,text/csv,text/plain,application/enex+xml,application/xml,text/xml,.json,.html,.htm,.csv,.txt,.enex"></label>${importPreviewMarkup(state.importPreview)}</div></div></div>`;
+  return `<div class="settings-content settings-import-content"><div class="settings-grid settings-import-grid"><div class="settings-label">迁移到 React/WXT</div><div><div class="settings-import-alert"><strong>迁移包</strong><br>迁移包包含本地资料库和持久设置，不包含会话解锁状态或明文密钥。<br><button type="button" class="primary" data-migration-export>导出迁移包</button> <label class="settings-import-upload button primary">导入迁移包<input type="file" class="hidden" data-migration-import accept="application/json,.json"></label></div></div><div class="settings-label">档案</div><div><div class="settings-import-alert"><strong>上传书签文件 (html、csv、txt 或 enex)</strong>.<br>你可以从浏览器或服务的“导出书签”部分得到这个文件<br><br><a href="https://help.raindrop.io/import#supported-formats" target="_blank" rel="noopener">帮助 ${microIcon("microOpen")}</a></div><label class="settings-import-upload button primary" data-import-upload role="button" tabindex="0" aria-label="上传文件…">${treeIcon("upload")}<span>上传文件…</span><input type="file" class="hidden" data-import-file accept="application/json,text/html,text/csv,text/plain,application/enex+xml,application/xml,text/xml,.json,.html,.htm,.csv,.txt,.enex"></label>${importPreviewMarkup(state.importPreview)}</div></div></div>`;
 }
 
 function backupFileName(item, format) {
@@ -3452,6 +3467,11 @@ async function submitAccountConnection(event) {
 
 function bindSettings() {
   root.querySelector(".settings-mobile-menu")?.addEventListener("click", () => root.querySelector(".settings-shell")?.classList.toggle("settings-sidebar-open"));
+  root.querySelector("[data-migration-export]")?.addEventListener("click", () => downloadMigrationPackage().catch(showError));
+  root.querySelector("[data-migration-import]")?.addEventListener("change", (event) => {
+    const file = event.currentTarget.files?.[0];
+    if (file) uploadMigrationPackage(file).catch(showError);
+  });
   root.querySelectorAll("[data-settings-back], [data-settings-close]").forEach((button) => button.onclick = () => {
     state.accountMenuOpen = false;
     setSettingsRoute(false);
