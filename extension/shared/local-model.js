@@ -137,3 +137,4 @@ export function filterSyncableOutbox(items = [], conflicts = []) {
   const paused = new Set(conflicts.map((item) => `${item.entity}:${item.id}`));
   return items.filter((item) => !paused.has(`${item.entity}:${item.id}`));
 }
+

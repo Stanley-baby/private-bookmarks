@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyBookmarkBatch, normalizeBookmark, bytesToCover, fileToCover, filterSyncableOutbox, mergeBookmarkConflict } from "../src/local/model.js";
+import { applyBookmarkBatch, normalizeBookmark, bytesToCover, fileToCover, filterSyncableOutbox, mergeBookmarkConflict } from "../extension/shared/local-model.js";
 
 test("local bookmarks normalize URLs, tags, defaults, and preserve creation time", () => {
   const item = normalizeBookmark(
