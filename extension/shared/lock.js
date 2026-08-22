@@ -13,7 +13,7 @@ let monitorNotified = false;
 let monitorCallback = null;
 
 function localStorageValue(key) {
-  try { return JSON.parse(localStorage.getItem(key) || "null"); } catch { return null; }
+  try { return JSON.parse(globalThis.localStorage?.getItem(key) || "null"); } catch { return null; }
 }
 
 async function getLocal(key) {
@@ -23,27 +23,27 @@ async function getLocal(key) {
 
 async function setLocal(key, value) {
   if (extensionStorage) return extensionStorage.set({ [key]: value });
-  localStorage.setItem(key, JSON.stringify(value));
+  globalThis.localStorage?.setItem(key, JSON.stringify(value));
 }
 
 async function removeLocal(key) {
   if (extensionStorage) return extensionStorage.remove(key);
-  localStorage.removeItem(key);
+  globalThis.localStorage?.removeItem(key);
 }
 
 async function getSession() {
   if (extensionSession) return (await extensionSession.get(SESSION_KEY))[SESSION_KEY] ?? null;
-  try { return JSON.parse(sessionStorage.getItem(SESSION_KEY) || "null"); } catch { return null; }
+  try { return JSON.parse(globalThis.sessionStorage?.getItem(SESSION_KEY) || "null"); } catch { return null; }
 }
 
 async function setSession(value) {
   if (extensionSession) return extensionSession.set({ [SESSION_KEY]: value });
-  sessionStorage.setItem(SESSION_KEY, JSON.stringify(value));
+  globalThis.sessionStorage?.setItem(SESSION_KEY, JSON.stringify(value));
 }
 
 async function removeSession() {
   if (extensionSession) return extensionSession.remove(SESSION_KEY);
-  sessionStorage.removeItem(SESSION_KEY);
+  globalThis.sessionStorage?.removeItem(SESSION_KEY);
 }
 
 function bytesToBase64(bytes) {

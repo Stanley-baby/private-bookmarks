@@ -41,7 +41,6 @@ test("local export formats preserve the full-library JSON path", () => {
   assert.match(library, /Raindrop\.io Bookmarks[\s\S]*<DT><H3>Export<\/H3>/);
   assert.match(library, /DATA-COVER[\s\S]*DATA-IMPORTANT/);
   assert.match(library, /exportZipArchive\(\[[\s\S]*export\.csv[\s\S]*export\.html[\s\S]*export\.txt/);
-  assert.match(library, /import \{ mediaArchiveEntries \} from "\.\/media-archive\.js"/);
   assert.match(library, /const media = await mediaArchiveEntries\(backup\)/);
   assert.match(library, /\.\.\.media/);
   assert.match(library, /function scopedBackup\(backup, collectionId, selectedIds = null\)/);

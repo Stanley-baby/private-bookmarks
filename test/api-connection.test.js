@@ -19,8 +19,8 @@ globalThis.fetch = async () => ({
   json: async () => healthStatus === 200 ? { ok: true } : { message: "Worker 不可用" },
 });
 
-const api = await import(`../extension/api.js?connection-test=${Date.now()}`);
-const lock = await import(`../extension/lock.js?api-connection-test=${Date.now()}`);
+const api = await import(`../extension/shared/api.js?connection-test=${Date.now()}`);
+const lock = await import(`../extension/shared/lock.js?api-connection-test=${Date.now()}`);
 
 
 test("failed Worker health checks do not leave a new local connection", async () => {
@@ -46,12 +46,22 @@ test("successful health checks persist the new connection", async () => {
   assert.deepEqual(JSON.parse(localStorage.getItem("instanceConnection")), value);
 });
 
-test("legacy API forwards requests through the shared Worker client", async () => {
+test("shared API router forwards requests through the configured connection", async () => {
   healthStatus = 200;
   assert.deepEqual(await api.api("/v1/health"), { ok: true });
 });
 
-test("legacy disconnect refuses to bypass a PIN-protected connection", async () => {
+test("shared API router refuses connection changes while the app is locked", async () => {
+  localStorage.removeItem("privateBookmarksLock");
+  localStorage.removeItem("instanceConnection");
+  localStorage.removeItem("instanceConnectionBackground");
+  await lock.enablePin("123456", "never", { endpoint: "https://worker.example", key: "secret" });
+  await lock.lockNow();
+  await assert.rejects(() => api.connect("https://next.example", "new-secret"), (error) => error.code === "locked");
+  await lock.forgetPin();
+});
+
+test("shared API router refuses to bypass a PIN-protected connection", async () => {
   const value = { endpoint: "https://background.example", key: "secret" };
   await lock.enablePin("123456", "never", value);
   await lock.lockNow();
@@ -69,7 +79,7 @@ test("legacy disconnect refuses to bypass a PIN-protected connection", async () 
   localStorage.removeItem("instanceConnection");
 });
 
-test("legacy disconnect removes an ordinary primary connection", async () => {
+test("shared API router removes an ordinary primary connection", async () => {
   localStorage.setItem("instanceConnection", JSON.stringify({ endpoint: "https://worker.example", key: "secret" }));
   assert.equal(await api.disconnect(), undefined);
   assert.equal(localStorage.getItem("instanceConnection"), null);

@@ -12,7 +12,7 @@ function store() {
 
 globalThis.localStorage = store();
 globalThis.sessionStorage = store();
-const lock = await import(`../extension/lock.js?test=${Date.now()}`);
+const lock = await import(`../extension/shared/lock.js?test=${Date.now()}`);
 
 test("PIN lock encrypts connection, unlocks, and auto-locks idle sessions", async () => {
   const value = { endpoint: "https://example.test", key: "secret" };

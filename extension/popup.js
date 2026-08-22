@@ -1,5 +1,5 @@
-import { api, connection, requestPagePermission } from "./api.js?v=20260808-pin2";
-import { lockState, prepareLock } from "./lock.js?v=20260808-pin2";
+import { api, connection, requestPagePermission } from "./shared/api.js";
+import { lockState, prepareLock } from "./shared/lock.js";
 import { collectionOptions, connectionView, escapeHtml, lockView } from "./ui.js?v=20260808-pin2";
 
 const root = document.querySelector("#app");

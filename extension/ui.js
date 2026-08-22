@@ -1,5 +1,5 @@
-import { connect } from "./api.js?v=20260808-pin2";
-import { forgetPin, lockState, unlock } from "./lock.js?v=20260808-pin2";
+import { connect } from "./shared/api.js";
+import { forgetPin, lockState, unlock } from "./shared/lock.js";
 
 export function lockView(root, onUnlocked, onForgot = () => connectionView(root, onUnlocked)) {
   root.innerHTML = `<section class="lock-screen"><div class="lock-card"><img class="logo" src="icons/bookmark.svg" alt=""><h1>应用已锁定</h1><p class="muted">输入 PIN 码以查看私有书签。</p><form><label>PIN 码<input name="pin" type="password" inputmode="numeric" autocomplete="current-password" minlength="6" maxlength="12" pattern="[0-9]{6,12}" required autofocus></label><button class="primary">解锁</button><p class="error hidden" role="alert"></p></form><button type="button" class="text-button" data-lock-forgot>忘记 PIN？清除本地连接</button></div></section>`;

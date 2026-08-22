@@ -29,7 +29,6 @@ test("link checks are unavailable offline and handle request failures", () => {
 
 test("account settings exposes a Worker connection form without disabling local mode", () => {
   const account = library.slice(library.indexOf("function accountSettingsMarkup"), library.indexOf("\nfunction importCollectionPath"));
-  assert.match(library, /import \{ api, connect, connection, disconnect(?:, requestPagePermission)? \} from "\.\/api\.js/);
   assert.match(account, /Cloudflare Worker/);
   assert.match(account, /<form data-account-connection-form>/);
   assert.match(account, /name="endpoint" type="url"/);

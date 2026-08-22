@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
-import { api, connect, connection, disconnect } from "../../extension/api.js";
-import { changePin, disablePin, enablePin, forgetPin, lockNow, lockState, prepareLock, setAutoLock, startLockMonitor, unlock } from "../../extension/lock.js";
+import { changePin, disablePin, enablePin, forgetPin, lockNow, lockState, prepareLock, setAutoLock, startLockMonitor, unlock } from "../../extension/shared/lock.js";
 import { configureWebdav, createWebdavBackup, listBackups, restoreWebdavBackup } from "../backup/webdav";
 import { applyMigrationPackage, batchBookmarks, exportLibrary, exportMigrationPackage, getActionMode, importLibrary, importMigrationPackage, initialize, initialized, listBookmarks, listCollections, listConflicts, previewMigrationPackage, resolveConflict, restoreBookmark, saveBookmark, saveBookmarkWithCollection, saveCollection, setSyncSettings, syncSettings, trashBookmark, webdavSettings, type ActionMode, type Bookmark, type BookmarkBatchAction, type BookmarkConflictChoices, type Collection } from "../../extension/shared/local-db.js";
 import { syncOnce } from "../local/sync";
 import { BOOKMARK_CONFLICT_FIELDS, fileToCover, mergeBookmarkConflict } from "../../extension/shared/local-model.js";
-import { recommendBookmark } from "../../extension/recommendations.js";
+import { recommendBookmark } from "../../extension/shared/recommendations.js";
+import { workerClient } from "../../extension/shared/worker-client.js";
 import "./styles.css";
 
 declare const chrome: any;
@@ -37,7 +37,7 @@ function download(value: unknown, name = `private-bookmarks-${new Date().toISOSt
 function Setup({ done }: { done: () => void }) {
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const run = async (action: () => Promise<unknown>) => { setBusy(true); setError(""); try { await action(); done(); } catch (reason) { setError(reason instanceof Error ? reason.message : "初始化失败"); } finally { setBusy(false); } };
-  const cloud = () => run(async () => { if (!await connection()) throw new TypeError("尚未配置 Cloudflare 实例"); const [backup, boot] = await Promise.all([api("/v1/export"), api("/v1/bootstrap")]); await importLibrary({ ...backup, collections: backup.collections || boot.collections || [] }); });
+  const cloud = () => run(async () => { if (!await workerClient.connection()) throw new TypeError("尚未配置 Cloudflare 实例"); const [backup, boot] = await Promise.all([workerClient.request("/v1/export"), workerClient.request("/v1/bootstrap")]); await importLibrary({ ...backup, collections: backup.collections || boot.collections || [] }); });
   return <main className="setup"><div className="brand"><span className="brand-mark">◆</span><strong>私有书签</strong></div><h1>建立本地资料库</h1><p className="muted">无需后端也能使用。</p><div className="setup-actions"><button className="primary" disabled={busy} onClick={() => run(initialize)}>创建空资料库</button><label className="file-button">从备份恢复<input type="file" accept="application/json" disabled={busy} onChange={(event) => { const file = event.target.files?.[0]; if (file) run(async () => importLibrary(JSON.parse(await file.text()))); }} /></label><label className="file-button">导入迁移包<input type="file" accept="application/json,.json" disabled={busy} onChange={(event) => { const file = event.target.files?.[0]; if (file) run(async () => importMigrationPackage(await file.text())); }} /></label><button disabled={busy} onClick={cloud}>从 Cloudflare 导入</button></div>{error && <p className="error">{error}</p>}</main>;
 }
 
@@ -122,22 +122,22 @@ function AdvancedSettings({ open, onClose }: { open: boolean; onClose: () => voi
   const load = async () => {
     setBusy(true); setError("");
     try {
-      const current = await connection();
+      const current = await workerClient.connection();
       if (!current) { notify(null, null); return; }
       setEndpoint(current.endpoint); setKey(current.key);
-      const boot = await api("/v1/bootstrap"); syncAiFields(boot); notify(current, boot);
+      const boot = await workerClient.request("/v1/bootstrap"); syncAiFields(boot); notify(current, boot);
     } catch (reason) {
-      notify(await connection().catch(() => null), null, reason instanceof Error ? reason.message : "无法加载 Cloudflare 设置");
+      notify(await workerClient.connection().catch(() => null), null, reason instanceof Error ? reason.message : "无法加载 Cloudflare 设置");
     } finally { setBusy(false); }
   };
   useEffect(() => { if (open) load(); }, [open]);
   if (!open) return null;
   const run = async (action: () => Promise<void>) => { setBusy(true); setError(""); try { await action(); } catch (reason) { setError(reason instanceof Error ? reason.message : "操作失败"); } finally { setBusy(false); } };
-  const saveConnection = () => run(async () => { const value = await connect(endpoint, key); const boot = await api("/v1/bootstrap"); syncAiFields(boot); notify(value, boot); });
-  const removeConnection = () => run(async () => { await disconnect(); setEndpoint(""); setKey(""); notify(null, null); });
+  const saveConnection = () => run(async () => { const value = await workerClient.connect(endpoint, key); const boot = await workerClient.request("/v1/bootstrap"); syncAiFields(boot); notify(value, boot); });
+  const removeConnection = () => run(async () => { await workerClient.disconnect(); setEndpoint(""); setKey(""); notify(null, null); });
   const saveAi = () => run(async () => {
     if (!bootstrap?.preferences || !connected) throw new TypeError("请先连接私有实例");
-    const response = await api("/v1/ai/settings", {
+    const response = await workerClient.request("/v1/ai/settings", {
       method: "PATCH",
       body: JSON.stringify({ revision: bootstrap.preferences.revision, settings: { provider, model, baseUrl, externalModel, thinkingEnabled, maxTokens: Number(maxTokens), prompt }, apiKey: apiKey.trim() || null, clearApiKey: provider === "openai" && clearApiKey }),
     });
@@ -166,7 +166,7 @@ function Editor({ item, collections, contextItems, close }: { item?: Bookmark; c
   const input = () => ({ link, title, description, note, collectionId, tags: tagValues() });
   useEffect(() => {
     let active = true;
-    connection().then(async (value) => { if (!value) return; const boot = await api("/v1/bootstrap"); if (active) setAiAvailable(Boolean(boot.capabilities?.aiRecommendations)); }).catch(() => { if (active) setAiAvailable(false); });
+    workerClient.connection().then(async (value) => { if (!value) return; const boot = await workerClient.request("/v1/bootstrap"); if (active) setAiAvailable(Boolean(boot.capabilities?.aiRecommendations)); }).catch(() => { if (active) setAiAvailable(false); });
     return () => { active = false; };
   }, []);
   const local = () => recommendBookmark(input(), contextItems, collections, item?.id || "");
@@ -176,12 +176,12 @@ function Editor({ item, collections, contextItems, close }: { item?: Bookmark; c
       const localResult = local();
       if (mode === "local") { setSuggestion(localResult); setSuggestionMode("local"); return; }
       if (aiAvailable === false) throw new TypeError("AI 推荐不可用（可选），请在完整页面的 AI / 高级设置中配置");
-      const config = await connection();
+      const config = await workerClient.connection();
       if (!config) throw new TypeError("AI 推荐不可用（可选），请先连接私有实例");
-      const boot = await api("/v1/bootstrap");
+      const boot = await workerClient.request("/v1/bootstrap");
       if (!boot.capabilities?.aiRecommendations) throw new TypeError("AI 推荐不可用（可选），请在完整页面的 AI / 高级设置中配置");
       const context = contextItems.filter((value) => value.id !== item?.id).slice(0, 24).map((value) => ({ title: value.title, link: value.link, description: value.description, note: value.note, tags: value.tags.slice(0, 12), collectionId: value.collectionId || "unsorted" }));
-      const remote = await api("/v1/ai/recommendations", { method: "POST", body: JSON.stringify({ ...input(), collections: collections.map(({ id, name, parentId }) => ({ id, name, parentId })), context }) });
+      const remote = await workerClient.request("/v1/ai/recommendations", { method: "POST", body: JSON.stringify({ ...input(), collections: collections.map(({ id, name, parentId }) => ({ id, name, parentId })), context }) });
       setSuggestion(remote); setSuggestionMode("ai"); setAiAvailable(true);
     } catch (reason) {
       setSuggestionNotice(reason instanceof Error ? reason.message : "AI 推荐不可用（可选）");
