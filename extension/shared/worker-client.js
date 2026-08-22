@@ -1,3 +1,5 @@
+import { lockConfig, lockState } from "./lock.js";
+
 const CONNECTION_KEY = "instanceConnection";
 const BACKGROUND_CONNECTION_KEY = "instanceConnectionBackground";
 const CONNECTION_LOCKED_MESSAGE = "请先解除 PIN 后修改私有实例连接";
@@ -101,6 +103,8 @@ export function createWorkerClient({
 
   const health = () => request("/v1/health");
   const connect = async (endpoint, key) => {
+    const configuredLock = await lockConfig();
+    if (configuredLock && (await lockState()).locked) throw Object.assign(new TypeError("请先解锁应用"), { code: "locked" });
     const previous = await readConnections();
     if (previous.background) fail(CONNECTION_LOCKED_MESSAGE, 423, "connection_locked");
     const normalizedEndpoint = validEndpoint(endpoint);

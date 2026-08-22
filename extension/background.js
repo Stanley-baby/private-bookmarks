@@ -1,5 +1,5 @@
-import { api, requestPagePermission, saveBookmark } from "./api.js?v=20260808-pin2";
-import { extractPageMetadata } from "./page-metadata.js";
+import { api, requestPagePermission, saveBookmark } from "./shared/api.js";
+import { extractPageMetadata } from "./shared/page-metadata.js";
 
 function message(key, fallback) {
   try {

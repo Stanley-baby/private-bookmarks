@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { recommendBookmark } from "../extension/recommendations.js";
+import { recommendBookmark } from "../extension/shared/recommendations.js";
 
 test("recommendations reuse similar bookmarks' collection and tags", () => {
   const result = recommendBookmark(

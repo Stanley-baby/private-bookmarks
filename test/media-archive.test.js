@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { collectUploadReferences, contentDispositionFilename, mediaArchiveEntries, parseDataUrl } from "../extension/media-archive.js";
+import { collectUploadReferences, contentDispositionFilename, mediaArchiveEntries, parseDataUrl } from "../extension/shared/media-archive.js";
 
 const mediaId = "123e4567-e89b-12d3-a456-426614174000";
 

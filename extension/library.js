@@ -1,11 +1,12 @@
-import { api, connect, connection, disconnect, requestPagePermission } from "./api.js?v=20260808-pin2";
+import { api, connect, connection, disconnect, requestPagePermission } from "./shared/api.js";
 import { COLLECTION_ICON_DEFAULT_CATALOG, normalizeCollectionIconCatalog, readCollectionIconCache, writeCollectionIconCache } from "./collection-icon-catalog.js";
 import { bookmarkType, dateFilterSuggestions, duplicateLinks, languageFilterSuggestions, matchesSearchFilters, parseSearchQuery } from "./filters.js";
 import { canonicalImportLink, parseImportText } from "./import.js";
-import { disablePin, enablePin, lockNow, lockState, prepareLock, setAutoLock, startLockMonitor } from "./lock.js?v=20260808-pin2";
+import { disablePin, enablePin, lockNow, lockState, prepareLock, setAutoLock, startLockMonitor } from "./shared/lock.js";
 import { renderMarkdown } from "./markdown.js";
-import { mediaArchiveEntries } from "./media-archive.js";
-import { recommendBookmark } from "./recommendations.js";
+import { mediaArchiveEntries } from "./shared/media-archive.js";
+import { recommendBookmark } from "./shared/recommendations.js";
+import { workerClient } from "./shared/worker-client.js";
 import { collectionOptions, connectionView, escapeHtml, isCurrentRequest, lockView, shouldShowGlobalLoading } from "./ui.js?v=20260811-navigation3";
 import { applyMigrationPackage, exportMigrationPackage, previewMigrationPackage } from "./migration-package.js";
 
@@ -2207,11 +2208,7 @@ async function uploadEditCover(file) {
   button.title = t("正在上传封面…");
   button.setAttribute("aria-label", button.title);
   try {
-    const result = await api("/v1/media", {
-      method: "POST",
-      body: file,
-      headers: { "content-type": file.type },
-    });
+    const result = await workerClient.media.upload(file, file.type);
     const value = httpUrl(result?.url);
     if (!value) throw new TypeError("上传后没有返回有效的封面地址");
     setEditCoverDraft(value, [...editMediaDraft(), value]);
@@ -3134,16 +3131,7 @@ async function uploadImportResource(resource) {
   if (!state.mediaUploadEnabled) throw new TypeError("导入附件需要配置 R2");
   if (!resource.id) resource.id = crypto.randomUUID();
   const bytes = importResourceBytes(resource);
-  const result = await api("/v1/media", {
-    method: "POST",
-    body: bytes,
-    headers: {
-      "content-type": resource.mime,
-      "x-private-bookmarks-kind": "attachment",
-      "x-private-bookmarks-name": encodeURIComponent(resource.name || "attachment"),
-      "x-private-bookmarks-id": resource.id,
-    },
-  });
+  const result = await workerClient.media.upload(bytes, resource.mime, resource.id, { kind: "attachment", name: resource.name || "attachment" });
   const url = httpUrl(result?.url);
   if (!url) throw new TypeError("附件上传后没有返回有效地址");
   resource.url = url;
