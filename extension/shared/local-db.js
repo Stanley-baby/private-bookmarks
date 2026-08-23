@@ -66,7 +66,7 @@ async function setActionMode(mode) {
 }
 async function listBookmarks({ trash = false } = {}) {
   const items = await request((await store("bookmarks")).getAll());
-  return items.filter((item) => trash ? Boolean(item.deletedAt) && !item.purgedAt && !item.permanentDeletedAt : !item.deletedAt && !item.purgedAt && !item.permanentDeletedAt).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  return items.filter((item) => trash ? Boolean(item.deletedAt) && !item.purgedAt && !item.permanentDeletedAt : !item.deletedAt && !item.purgedAt && !item.permanentDeletedAt).sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
 }
 async function listCollections({ trash = false } = {}) {
   const items = await request((await store("collections")).getAll());
@@ -94,7 +94,7 @@ async function saveBookmark(input, { enqueueSync = true } = {}) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
   const existing = input.id ? await request((await store("bookmarks")).get(input.id)) : void 0;
   const item = normalizeBookmark(input, existing, now);
-  item.revision = Number(existing?.revision || 0) + 1;
+  item.revision = existing ? Number(existing.revision || 0) + 1 : Math.max(1, Number(item.revision) || 1);
   await request((await store("bookmarks", "readwrite")).put(item));
   if (enqueueSync) await enqueueLatest({ entity: "bookmark", id: item.id, baseRevision: Number(existing?.revision || 0), record: item });
   return item;
@@ -104,16 +104,21 @@ async function saveBookmarkWithCollection(input, collection) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
   const db = await database();
   const existing = input.id ? await request(db.transaction("bookmarks").objectStore("bookmarks").get(input.id)) : void 0;
+  const existingCollection = collection?.id ? await request(db.transaction("collections").objectStore("collections").get(collection.id)) : void 0;
   const item = normalizeBookmark(input, existing, now);
   const collectionItem = collection ? {
     id: collection.id || crypto.randomUUID(),
     name: collection.name.trim(),
     parentId: collection.parentId || null,
-    createdAt: collection.createdAt || now,
-    updatedAt: now,
-    revision: Number(collection.revision || 0) + 1
+    createdAt: existingCollection?.createdAt || collection.createdAt || now,
+    updatedAt: existingCollection ? now : collection.updatedAt || now,
+    position: collection.position ?? existingCollection?.position ?? 0,
+    ...(collection.source !== undefined || existingCollection?.source !== undefined ? { source: collection.source ?? existingCollection?.source } : {}),
+    ...(collection.deletedAt || existingCollection?.deletedAt ? { deletedAt: collection.deletedAt ?? existingCollection?.deletedAt } : {}),
+    ...(collection.deletedByCollectionId || existingCollection?.deletedByCollectionId ? { deletedByCollectionId: collection.deletedByCollectionId ?? existingCollection?.deletedByCollectionId } : {}),
+    revision: existingCollection ? Number(existingCollection.revision || 0) + 1 : Math.max(1, Number(collection.revision) || 1)
   } : null;
-  item.revision = Number(existing?.revision || 0) + 1;
+  item.revision = existing ? Number(existing.revision || 0) + 1 : Math.max(1, Number(item.revision) || 1);
   const tx = db.transaction(["bookmarks", "collections", "outbox"], "readwrite");
   tx.objectStore("bookmarks").put(item);
   if (collectionItem) tx.objectStore("collections").put(collectionItem);
@@ -133,7 +138,8 @@ async function saveBookmarkWithCollection(input, collection) {
 }
 async function trashBookmark(id) {
   const target = await request((await store("bookmarks")).get(id));
-  if (!target) return null;
+  if (!target || target.purgedAt || target.permanentDeletedAt) return null;
+  if (target.deletedAt) return target;
   target.deletedAt = target.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
   delete target.purgedAt;
   delete target.permanentDeletedAt;
@@ -146,6 +152,7 @@ async function trashBookmark(id) {
 async function restoreBookmark(id) {
   const target = await request((await store("bookmarks")).get(id));
   if (!target || target.permanentDeletedAt) return null;
+  if (!target.deletedAt) return target;
   delete target.deletedAt;
   delete target.purgedAt;
   target.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
@@ -154,6 +161,9 @@ async function restoreBookmark(id) {
   await request((await store("bookmarks", "readwrite")).put(target));
   await enqueueLatest({ entity: "bookmark", id, baseRevision, record: target });
   return target;
+}
+async function permanentDeleteBookmark(id) {
+  return batchBookmark(id, { type: "permanentDelete" });
 }
 async function batchBookmark(id, action) {
   const target = await request((await store("bookmarks")).get(id));
@@ -170,6 +180,7 @@ async function batchBookmark(id, action) {
     await restoreBookmark(id);
     return request((await store("bookmarks")).get(id));
   }
+  if (action.type === "permanentDelete" && target.permanentDeletedAt) return target;
   if (action.type === "screenshot") {
     const media = Array.isArray(target.media) ? [...target.media] : [];
     if (!media.some((value) => value === "<screenshot>" || value && typeof value === "object" && value.link === "<screenshot>")) media.push("<screenshot>");
@@ -194,7 +205,19 @@ async function batchBookmarks(ids, action) {
 async function saveCollection(input, { enqueueSync = true } = {}) {
   const id = input.id || crypto.randomUUID();
   const existing = await request((await store("collections")).get(id));
-  const item = { id, name: input.name.trim(), parentId: input.parentId || null, position: input.position ?? existing?.position ?? 0, createdAt: existing?.createdAt || input.createdAt || (/* @__PURE__ */ new Date()).toISOString(), updatedAt: (/* @__PURE__ */ new Date()).toISOString(), revision: Number(existing?.revision || 0) + 1 };
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const item = {
+    id,
+    name: input.name.trim(),
+    parentId: input.parentId || null,
+    position: input.position ?? existing?.position ?? 0,
+    ...(input.source !== undefined || existing?.source !== undefined ? { source: input.source ?? existing?.source } : {}),
+    ...(input.deletedAt || existing?.deletedAt ? { deletedAt: input.deletedAt ?? existing?.deletedAt } : {}),
+    ...(input.deletedByCollectionId || existing?.deletedByCollectionId ? { deletedByCollectionId: input.deletedByCollectionId ?? existing?.deletedByCollectionId } : {}),
+    createdAt: existing?.createdAt || input.createdAt || now,
+    updatedAt: existing ? now : input.updatedAt || now,
+    revision: existing ? Number(existing.revision || 0) + 1 : Math.max(1, Number(input.revision) || 1)
+  };
   await request((await store("collections", "readwrite")).put(item));
   if (enqueueSync) await enqueueLatest({ entity: "collection", id: item.id, baseRevision: Number(existing?.revision || 0), record: item });
   return item;
@@ -440,6 +463,7 @@ export {
   setWebdavSettings,
   syncSettings,
   trashBookmark,
+  permanentDeleteBookmark,
   trashCollection,
   updatePreferences,
   webdavSettings

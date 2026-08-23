@@ -23,9 +23,11 @@ export type Bookmark = {
   purgedAt?: string;
   permanentDeletedAt?: string;
   deletedByCollectionId?: string;
+  source?: unknown;
+  finalUrl?: string;
   revision?: number;
 };
-export type Collection = { id: string; name: string; parentId: string | null; position?: number; createdAt: string; updatedAt?: string; deletedAt?: string; deletedByCollectionId?: string; revision?: number };
+export type Collection = { id: string; name: string; parentId: string | null; position?: number; source?: unknown; createdAt: string; updatedAt?: string; deletedAt?: string; deletedByCollectionId?: string; revision?: number };
 export type ActionMode = "popup" | "sidepanel";
 export type BookmarkBatchAction =
   | { type: "move"; collectionId: string }
@@ -71,7 +73,7 @@ export declare const setSyncSettings: (input: any) => Promise<any>;
 export declare const setWebdavSettings: (input: any) => Promise<any>;
 export declare const syncSettings: () => Promise<any>;
 export declare const trashBookmark: (id: string) => Promise<Bookmark | null>;
+export declare const permanentDeleteBookmark: (id: string) => Promise<Bookmark | null>;
 export declare const trashCollection: (id: string) => Promise<Collection | null>;
 export declare const updatePreferences: (revision: number, changes: Record<string, unknown>) => Promise<any>;
 export declare const webdavSettings: () => Promise<any>;
-

@@ -52,16 +52,36 @@ function coverReference(value) {
 }
 
 export function normalizeBookmark(input, existing, now = new Date().toISOString(), id = crypto.randomUUID()) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new TypeError("书签数据无效");
   const link = input.link ?? existing?.link;
   if (!link) throw new TypeError("书签需要有效链接");
+  const parsedLink = new URL(link);
+  if (!/^https?:$/.test(parsedLink.protocol)) throw new TypeError("书签链接必须使用 HTTP(S)");
+  if (input.tags !== undefined && !Array.isArray(input.tags)) throw new TypeError("标签必须是数组");
+  if (input.media !== undefined && !Array.isArray(input.media)) throw new TypeError("媒体必须是数组");
+  if (input.highlights !== undefined && !Array.isArray(input.highlights)) throw new TypeError("高亮必须是数组");
   const hasCover = Object.prototype.hasOwnProperty.call(input, "cover");
   const cover = hasCover ? validateCover(input.cover) : existing?.cover || "";
   let coverRef = Object.prototype.hasOwnProperty.call(input, "coverRef") ? coverReference(input.coverRef) : existing?.coverRef;
   if (cover.startsWith("data:") && !coverRef) coverRef = { id: crypto.randomUUID() };
   if (hasCover && !cover) coverRef = undefined;
+  const healthInput = input.health ?? existing?.health;
+  const healthBase = existing?.health || {};
+  const health = input.health !== undefined || existing?.health !== undefined || input.finalUrl !== undefined || existing?.finalUrl !== undefined
+    ? { ...healthBase, ...(input.health || {}), status: healthInput?.status || "unknown", checkedAt: healthInput?.checkedAt ?? healthBase.checkedAt ?? null, finalUrl: input.finalUrl ?? healthInput?.finalUrl ?? healthBase.finalUrl ?? existing?.finalUrl ?? "" }
+    : undefined;
+  const metadata = {};
+  for (const field of ["position", "source", "revision", "deletedAt", "purgedAt", "permanentDeletedAt", "deletedByCollectionId", "finalUrl"]) {
+    const value = input[field] ?? existing?.[field];
+    if (value !== undefined && value !== null && value !== "") metadata[field] = value;
+  }
+  if (metadata.position !== undefined) {
+    if (!Number.isFinite(Number(metadata.position))) throw new TypeError("位置必须是数字");
+    metadata.position = Number(metadata.position);
+  }
   return {
     id: input.id || id,
-    link: new URL(link).href,
+    link: parsedLink.href,
     title: String(input.title ?? existing?.title ?? link).trim(),
     description: String(input.description ?? existing?.description ?? "").trim(),
     note: String(input.note ?? existing?.note ?? "").trim(),
@@ -73,11 +93,12 @@ export function normalizeBookmark(input, existing, now = new Date().toISOString(
     ...(input.reminder !== undefined || Object.prototype.hasOwnProperty.call(existing || {}, "reminder") ? { reminder: String(input.reminder ?? existing?.reminder ?? "") } : {}),
     ...(input.highlights !== undefined || Object.prototype.hasOwnProperty.call(existing || {}, "highlights") ? { highlights: Array.isArray(input.highlights) ? input.highlights : (existing?.highlights || []) } : {}),
     ...(input.media !== undefined || Object.prototype.hasOwnProperty.call(existing || {}, "media") ? { media: Array.isArray(input.media) ? input.media : (existing?.media || []) } : {}),
-    ...(input.health !== undefined || Object.prototype.hasOwnProperty.call(existing || {}, "health") ? { health: input.health || existing?.health || { status: "unknown", checkedAt: null, finalUrl: "" } } : {}),
+    ...(health ? { health } : {}),
     cover,
     ...(coverRef ? { coverRef } : {}),
+    ...metadata,
     createdAt: existing?.createdAt || input.createdAt || now,
-    updatedAt: now,
+    updatedAt: existing ? now : input.updatedAt || now,
   };
 }
 
@@ -137,4 +158,3 @@ export function filterSyncableOutbox(items = [], conflicts = []) {
   const paused = new Set(conflicts.map((item) => `${item.entity}:${item.id}`));
   return items.filter((item) => !paused.has(`${item.entity}:${item.id}`));
 }
-

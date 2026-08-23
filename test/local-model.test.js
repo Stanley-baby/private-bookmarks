@@ -23,6 +23,76 @@ test("local bookmarks normalize URLs, tags, defaults, and preserve creation time
   });
 });
 
+test("bookmark normalization preserves lifecycle and compatibility fields", () => {
+  const item = normalizeBookmark({
+    id: "bookmark-compat",
+    link: "https://example.com/article",
+    title: "Article",
+    description: "Description",
+    note: "**Note**",
+    collectionId: "collection-1",
+    tags: ["reading"],
+    type: "article",
+    language: "zh-CN",
+    favorite: true,
+    reminder: "2026-08-23T09:00:00.000Z",
+    cover: "https://example.com/cover.png",
+    media: [{ url: "https://example.com/media.png" }],
+    highlights: [{ text: "important", position: 2 }],
+    health: { status: "ok", checkedAt: "2026-08-23T08:00:00.000Z", finalUrl: "https://example.com/final" },
+    position: 7,
+    source: "legacy-extension",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-08-23T08:00:00.000Z",
+    revision: 4,
+    deletedAt: "2026-08-23T08:30:00.000Z",
+    deletedByCollectionId: "collection-1",
+    purgedAt: "2026-08-23T08:30:00.000Z",
+    permanentDeletedAt: "2026-08-23T08:30:00.000Z",
+  }, undefined, "2026-08-23T09:00:00.000Z", "fallback-id");
+
+  assert.deepEqual(item, {
+    id: "bookmark-compat",
+    link: "https://example.com/article",
+    title: "Article",
+    description: "Description",
+    note: "**Note**",
+    collectionId: "collection-1",
+    tags: ["reading"],
+    type: "article",
+    language: "zh-CN",
+    favorite: true,
+    reminder: "2026-08-23T09:00:00.000Z",
+    cover: "https://example.com/cover.png",
+    media: [{ url: "https://example.com/media.png" }],
+    highlights: [{ text: "important", position: 2 }],
+    health: { status: "ok", checkedAt: "2026-08-23T08:00:00.000Z", finalUrl: "https://example.com/final" },
+    position: 7,
+    source: "legacy-extension",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-08-23T08:00:00.000Z",
+    revision: 4,
+    deletedAt: "2026-08-23T08:30:00.000Z",
+    deletedByCollectionId: "collection-1",
+    purgedAt: "2026-08-23T08:30:00.000Z",
+    permanentDeletedAt: "2026-08-23T08:30:00.000Z",
+  });
+});
+
+test("bookmark normalization rejects unsafe links and malformed compatibility arrays", () => {
+  assert.throws(() => normalizeBookmark({ link: "javascript:alert(1)" }), /HTTP\(S\)/);
+  assert.throws(() => normalizeBookmark({ link: "https://example.com", media: "not-an-array" }), /媒体/);
+});
+
+test("partial health updates keep the existing final URL", () => {
+  assert.deepEqual(normalizeBookmark(
+    { link: "https://example.com", health: { status: "broken" } },
+    { health: { status: "healthy", checkedAt: "2026-08-23T08:00:00.000Z", finalUrl: "https://example.com/final" } },
+    "2026-08-23T09:00:00.000Z",
+    "bookmark-health",
+  ).health, { status: "broken", checkedAt: "2026-08-23T08:00:00.000Z", finalUrl: "https://example.com/final" });
+});
+
 test("custom covers stay local and validate image size/type", async () => {
   const cover = bytesToCover(new Uint8Array([1, 2, 3]), "image/png");
   const item = normalizeBookmark({ link: "https://example.com", cover }, undefined, "2026-08-12T00:00:00.000Z", "bookmark-cover");
