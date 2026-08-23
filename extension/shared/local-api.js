@@ -118,6 +118,34 @@ function createLocalApi({ db = defaultDb } = {}) {
       }
       if (method === "POST" && url.pathname === "/v1/bookmarks") return legacyBookmark(await db.saveBookmark(body));
       if (method === "POST" && url.pathname === "/v1/collections") return db.saveCollection(body);
+      if (method === "POST" && url.pathname === "/v1/collections/merge") {
+        if (!Array.isArray(body.sourceIds) || typeof body.targetId !== "string") fail("合并收藏夹参数无效", 400, "invalid_request");
+        if (typeof db.mergeCollections !== "function") unavailable();
+        return db.mergeCollections(body.sourceIds, body.targetId);
+      }
+      if (method === "POST" && url.pathname === "/v1/collections/merge/preview") {
+        if (!Array.isArray(body.sourceIds) || typeof body.targetId !== "string") fail("合并收藏夹参数无效", 400, "invalid_request");
+        if (typeof db.previewCollectionMerge !== "function") unavailable();
+        return db.previewCollectionMerge(body.sourceIds, body.targetId);
+      }
+      if (method === "POST" && url.pathname === "/v1/collections/move") {
+        if (typeof body.id !== "string") fail("收藏夹 ID 无效", 400, "invalid_request");
+        if (typeof db.moveCollection !== "function") unavailable();
+        return db.moveCollection(body.id, body);
+      }
+      if (method === "POST" && url.pathname === "/v1/collections/sort") {
+        if (typeof db.sortCollections !== "function") unavailable();
+        return db.sortCollections();
+      }
+      if (method === "POST" && url.pathname === "/v1/collections/cleanup") {
+        if (typeof db.cleanEmptyCollections !== "function") unavailable();
+        return db.cleanEmptyCollections();
+      }
+      const collectionShare = url.pathname.match(/^\/v1\/collections\/([^/]+)\/share$/);
+      if (collectionShare && method === "GET") {
+        if (typeof db.shareCollection !== "function") unavailable();
+        return db.shareCollection(decodeURIComponent(collectionShare[1] || ""));
+      }
       if (method === "POST" && url.pathname === "/v1/import") {
         const items = body.items ?? body.bookmarks;
         if (!Array.isArray(items) || !items.length) fail("\u81F3\u5C11\u9700\u8981\u4E00\u4E2A\u4E66\u7B7E", 400, "invalid_import");
@@ -150,9 +178,9 @@ function createLocalApi({ db = defaultDb } = {}) {
         const id = decodeURIComponent(collection[1] || "");
         const current = (await db.listCollections({ trash: true })).find((item) => item.id === id) || (await db.listCollections()).find((item) => item.id === id);
         if (!current) fail("\u6536\u85CF\u5939\u4E0D\u5B58\u5728", 404, "not_found");
-        return db.saveCollection({ ...current, ...body, id, name: body.name ?? current.name });
+        return db.saveCollection({ ...current, ...body, id, name: body.name ?? current.name }, body.revision == null ? {} : { expectedRevision: body.revision });
       }
-      if (collection && method === "DELETE") return db.trashCollection?.(decodeURIComponent(collection[1] || ""));
+      if (collection && method === "DELETE") return db.trashCollection?.(decodeURIComponent(collection[1] || ""), url.searchParams.get("revision") == null ? undefined : Number(url.searchParams.get("revision")));
       const collectionRestore = url.pathname.match(/^\/v1\/collections\/([^/]+)\/restore$/);
       if (collectionRestore && method === "POST") return db.restoreCollection(decodeURIComponent(collectionRestore[1] || ""), body.revision);
       if (method === "PATCH" && url.pathname === "/v1/preferences") {
@@ -164,6 +192,7 @@ function createLocalApi({ db = defaultDb } = {}) {
       fail("\u672C\u5730\u6A21\u5F0F\u6682\u4E0D\u652F\u6301\u6B64\u64CD\u4F5C", 400, "not_available");
     } catch (error) {
       if (error instanceof LocalApiError) throw error;
+      if (error?.code === "editing_conflict") throw new LocalApiError(error.message, 409, error.code);
       if (error instanceof TypeError || error instanceof SyntaxError) throw new LocalApiError(error.message, 400, error.code || "invalid_request");
       throw error;
     }
@@ -187,9 +216,15 @@ function createLocalApi({ db = defaultDb } = {}) {
     restoreBookmark: (id, revision) => jsonRequest(`/v1/bookmarks/${encodeURIComponent(id)}/restore`, "POST", revision === void 0 ? {} : { revision }),
     createCollection: (value) => jsonRequest("/v1/collections", "POST", value),
     updateCollection: (id, value) => jsonRequest(`/v1/collections/${encodeURIComponent(id)}`, "PATCH", value),
-    deleteCollection: (id) => request(`/v1/collections/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    deleteCollection: (id, revision) => request("/v1/collections/" + encodeURIComponent(id) + (revision == null ? "" : "?revision=" + encodeURIComponent(revision)), { method: "DELETE" }),
     restoreCollection: (id, revision) => jsonRequest(`/v1/collections/${encodeURIComponent(id)}/restore`, "POST", revision === void 0 ? {} : { revision }),
     batchBookmarks: (items, action) => jsonRequest("/v1/bookmarks/batch", "POST", { items, action }),
+    previewCollectionMerge: (sourceIds, targetId) => jsonRequest("/v1/collections/merge/preview", "POST", { sourceIds, targetId }),
+    mergeCollections: (sourceIds, targetId) => jsonRequest("/v1/collections/merge", "POST", { sourceIds, targetId }),
+    moveCollection: (id, options = {}) => jsonRequest("/v1/collections/move", "POST", { id, ...options }),
+    sortCollections: () => jsonRequest("/v1/collections/sort", "POST"),
+    cleanEmptyCollections: () => jsonRequest("/v1/collections/cleanup", "POST"),
+    shareCollection: (id) => request("/v1/collections/" + encodeURIComponent(id) + "/share"),
     importLibrary: (value) => jsonRequest("/v1/import", "POST", value),
     restoreLibrary: (value) => jsonRequest("/v1/restore", "POST", value),
     exportLibrary: () => jsonRequest("/v1/export"),
@@ -203,4 +238,3 @@ export {
   createLocalApi,
   localApi
 };
-

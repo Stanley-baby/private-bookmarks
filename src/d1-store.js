@@ -20,6 +20,8 @@ const DEFAULT_PREFERENCES = {
   brokenLevel: "default",
   nestedViewLegacy: false,
   layoutByScope: {},
+  collectionGroups: [{ id: "default", title: "收藏", hidden: false }],
+  collectionGroupByCollectionId: {},
 };
 
 function now() {

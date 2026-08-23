@@ -1,3 +1,5 @@
+import { collectionSubtreeIds } from "../../extension/shared/collection-model.js";
+
 function compareCollections(left, right) {
   return (left.position ?? 0) - (right.position ?? 0) || left.name.localeCompare(right.name, "zh-CN") || left.id.localeCompare(right.id);
 }
@@ -42,15 +44,7 @@ export function flattenCollections(collections, collapsed = new Set()) {
 }
 
 export function descendantCollectionIds(collections, collectionId) {
-  const ids = new Set([collectionId]);
-  for (let changed = true; changed;) {
-    changed = false;
-    for (const collection of collections) if (collection.parentId && ids.has(collection.parentId) && !ids.has(collection.id)) {
-      ids.add(collection.id);
-      changed = true;
-    }
-  }
-  return ids;
+  return collectionSubtreeIds(collections, collectionId);
 }
 
 export function collectionPath(collections, collectionId) {

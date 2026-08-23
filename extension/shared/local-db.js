@@ -1,4 +1,5 @@
 import { applyBookmarkBatch, mergeBookmarkConflict, normalizeBookmark } from "./local-model.js";
+import { collectionShareText, collectionSubtreeIds, emptyCollectionRoots, mergeCollectionRecords, positionBetween, validateCollectionChange } from "./collection-model.js";
 import { LOCAL_DATABASE, LOCAL_DATABASE_VERSION, openLocalDatabase } from "../local-storage.js";
 import {
   applyMigrationPackage,
@@ -27,7 +28,9 @@ const DEFAULT_PREFERENCES = {
   aiPrompt: "",
   brokenLevel: "default",
   nestedViewLegacy: false,
-  layoutByScope: {}
+  layoutByScope: {},
+  collectionGroups: [{ id: "default", title: "收藏", hidden: false }],
+  collectionGroupByCollectionId: {}
 };
 function request(value) {
   return new Promise((resolve, reject) => {
@@ -72,9 +75,9 @@ async function listCollections({ trash = false } = {}) {
   const items = await request((await store("collections")).getAll());
   if (trash) {
     const deleted = new Set(items.filter((item) => item.deletedAt).map((item) => item.id));
-    return items.filter((item) => item.deletedAt && !deleted.has(item.parentId || "")).sort((a, b) => a.name.localeCompare(b.name));
+    return items.filter((item) => item.deletedAt && !deleted.has(item.parentId || "")).sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
   }
-  return items.filter((item) => !item.deletedAt).sort((a, b) => (a.position ?? 0) - (b.position ?? 0) || a.name.localeCompare(b.name));
+  return items.filter((item) => !item.deletedAt).sort((a, b) => (a.position ?? 0) - (b.position ?? 0) || a.name.localeCompare(b.name, "zh-CN") || a.id.localeCompare(b.id));
 }
 async function getPreferences() {
   const value = await request((await store("settings")).get("preferences"));
@@ -105,14 +108,17 @@ async function saveBookmarkWithCollection(input, collection) {
   const db = await database();
   const existing = input.id ? await request(db.transaction("bookmarks").objectStore("bookmarks").get(input.id)) : void 0;
   const existingCollection = collection?.id ? await request(db.transaction("collections").objectStore("collections").get(collection.id)) : void 0;
+  const knownCollections = collection ? await request(db.transaction("collections").objectStore("collections").getAll()) : [];
+  const validatedCollection = collection ? validateCollectionChange(knownCollections, collection, existingCollection) : null;
   const item = normalizeBookmark(input, existing, now);
   const collectionItem = collection ? {
-    id: collection.id || crypto.randomUUID(),
-    name: collection.name.trim(),
-    parentId: collection.parentId || null,
+    id: validatedCollection.id || crypto.randomUUID(),
+    name: validatedCollection.name,
+    parentId: validatedCollection.parentId,
     createdAt: existingCollection?.createdAt || collection.createdAt || now,
     updatedAt: existingCollection ? now : collection.updatedAt || now,
-    position: collection.position ?? existingCollection?.position ?? 0,
+    position: validatedCollection.position,
+    ...(validatedCollection.icon ? { icon: validatedCollection.icon } : {}),
     ...(collection.source !== undefined || existingCollection?.source !== undefined ? { source: collection.source ?? existingCollection?.source } : {}),
     ...(collection.deletedAt || existingCollection?.deletedAt ? { deletedAt: collection.deletedAt ?? existingCollection?.deletedAt } : {}),
     ...(collection.deletedByCollectionId || existingCollection?.deletedByCollectionId ? { deletedByCollectionId: collection.deletedByCollectionId ?? existingCollection?.deletedByCollectionId } : {}),
@@ -202,35 +208,52 @@ async function batchBookmarks(ids, action) {
   }
   return changed;
 }
-async function saveCollection(input, { enqueueSync = true } = {}) {
-  const id = input.id || crypto.randomUUID();
-  const existing = await request((await store("collections")).get(id));
+async function saveCollection(input, { enqueueSync = true, expectedRevision, allowDeletedParent = false, allowUnsorted = false } = {}) {
+  const raw = input && typeof input === "object" ? input : {};
+  const id = raw.id || crypto.randomUUID();
+  const collectionStore = await store("collections");
+  const existing = await request(collectionStore.get(id));
+  if (expectedRevision != null && existing && Number(existing.revision || 0) !== Number(expectedRevision)) {
+    const error = new Error("收藏夹已被其他操作修改，请刷新后重试");
+    error.code = "editing_conflict";
+    throw error;
+  }
+  const collections = await request(collectionStore.getAll());
+  const validated = validateCollectionChange(collections, { ...raw, id }, existing, { allowDeletedParent, allowUnsorted });
   const now = (/* @__PURE__ */ new Date()).toISOString();
+  const position = raw.position === undefined && !existing
+    ? Math.max(-1, ...collections.filter((item) => !item.deletedAt && (item.parentId || null) === validated.parentId).map((item) => Number(item.position) || 0)) + 1
+    : validated.position;
   const item = {
     id,
-    name: input.name.trim(),
-    parentId: input.parentId || null,
-    position: input.position ?? existing?.position ?? 0,
-    ...(input.source !== undefined || existing?.source !== undefined ? { source: input.source ?? existing?.source } : {}),
-    ...(input.deletedAt || existing?.deletedAt ? { deletedAt: input.deletedAt ?? existing?.deletedAt } : {}),
-    ...(input.deletedByCollectionId || existing?.deletedByCollectionId ? { deletedByCollectionId: input.deletedByCollectionId ?? existing?.deletedByCollectionId } : {}),
-    createdAt: existing?.createdAt || input.createdAt || now,
-    updatedAt: existing ? now : input.updatedAt || now,
-    revision: existing ? Number(existing.revision || 0) + 1 : Math.max(1, Number(input.revision) || 1)
+    name: validated.name,
+    parentId: validated.parentId,
+    position,
+    ...(validated.icon ? { icon: validated.icon } : {}),
+    ...(raw.source !== undefined || existing?.source !== undefined ? { source: raw.source ?? existing?.source } : {}),
+    ...(raw.deletedAt || existing?.deletedAt ? { deletedAt: raw.deletedAt ?? existing?.deletedAt } : {}),
+    ...(raw.deletedByCollectionId || existing?.deletedByCollectionId ? { deletedByCollectionId: raw.deletedByCollectionId ?? existing?.deletedByCollectionId } : {}),
+    createdAt: existing?.createdAt || raw.createdAt || now,
+    updatedAt: existing ? now : raw.updatedAt || now,
+    revision: existing ? Number(existing.revision || 0) + 1 : Math.max(1, Number(raw.revision) || 1)
   };
   await request((await store("collections", "readwrite")).put(item));
   if (enqueueSync) await enqueueLatest({ entity: "collection", id: item.id, baseRevision: Number(existing?.revision || 0), record: item });
   return item;
 }
-async function trashCollection(id) {
+async function trashCollection(id, expectedRevision) {
   const target = await request((await store("collections")).get(id));
   if (!target || target.deletedAt || id === "unsorted") return null;
+  if (expectedRevision != null && Number(target.revision || 0) !== Number(expectedRevision)) {
+    const error = new Error("收藏夹已被其他操作修改，请刷新后重试");
+    error.code = "editing_conflict";
+    throw error;
+  }
   const all = await request((await store("collections")).getAll());
-  const ids = /* @__PURE__ */ new Set([id]);
-  for (const item of all) if (item.parentId && ids.has(item.parentId)) ids.add(item.id);
+  const ids = collectionSubtreeIds(all, id);
   const deletedAt = (/* @__PURE__ */ new Date()).toISOString();
   const bookmarks = await request((await store("bookmarks")).getAll());
-  for (const item of all) if (ids.has(item.id)) {
+  for (const item of all) if (ids.has(item.id) && !item.deletedAt) {
     item.deletedAt = deletedAt;
     item.deletedByCollectionId = id;
     item.updatedAt = deletedAt;
@@ -274,6 +297,92 @@ async function restoreCollection(id, expectedRevision) {
   }
   return request((await store("collections")).get(id));
 }
+
+async function moveCollection(id, { parentId, targetId, before = true, expectedRevision } = {}) {
+  const collectionStore = await store("collections");
+  const all = await request(collectionStore.getAll());
+  const current = all.find((item) => item.id === id);
+  if (!current || current.deletedAt || id === "unsorted") return null;
+  if (expectedRevision != null && Number(current.revision || 0) !== Number(expectedRevision)) {
+    const error = new Error("收藏夹已被其他操作修改，请刷新后重试");
+    error.code = "editing_conflict";
+    throw error;
+  }
+  const nextParentId = parentId === undefined ? current.parentId || null : parentId || null;
+  if (targetId && targetId !== id && parentId === undefined) {
+    const target = all.find((item) => item.id === targetId && !item.deletedAt);
+    if (!target || (target.parentId || null) !== nextParentId) throw new TypeError("排序目标必须是同级收藏夹");
+  }
+  const position = targetId && targetId !== id
+    ? positionBetween(all, id, targetId, before, nextParentId)
+    : positionBetween(all, id, null, true, nextParentId);
+  return saveCollection({ ...current, parentId: nextParentId, position }, { expectedRevision });
+}
+
+async function previewCollectionMerge(sourceIds, targetId) {
+  const collections = await request((await store("collections")).getAll());
+  const bookmarks = await request((await store("bookmarks")).getAll());
+  const plan = mergeCollectionRecords(collections, bookmarks, sourceIds, targetId);
+  return {
+    target: plan.target,
+    sourceIds: plan.removedIds,
+    movedBookmarks: plan.movedBookmarks,
+    movedCollections: plan.movedCollections,
+  };
+}
+
+async function mergeCollections(sourceIds, targetId) {
+  const db = await database();
+  const collections = await request(db.transaction("collections").objectStore("collections").getAll());
+  const bookmarks = await request(db.transaction("bookmarks").objectStore("bookmarks").getAll());
+  const plan = mergeCollectionRecords(collections, bookmarks, sourceIds, targetId);
+  const collectionById = new Map(collections.map((item) => [item.id, item]));
+  const bookmarkById = new Map(bookmarks.map((item) => [item.id, item]));
+  for (const item of plan.collections) {
+    if (JSON.stringify(item) !== JSON.stringify(collectionById.get(item.id))) await saveCollection(item);
+  }
+  for (const item of plan.bookmarks) {
+    if (JSON.stringify(item) !== JSON.stringify(bookmarkById.get(item.id))) await saveBookmark(item);
+  }
+  return { target: await request((await store("collections")).get(targetId)), sourceIds: plan.removedIds, movedBookmarks: plan.movedBookmarks, movedCollections: plan.movedCollections };
+}
+
+async function sortCollections() {
+  const items = await request((await store("collections")).getAll());
+  const groups = new Map();
+  for (const item of items) if (!item.deletedAt && item.id !== "unsorted") {
+    const key = item.parentId || null;
+    groups.set(key, [...(groups.get(key) || []), item]);
+  }
+  let changed = 0;
+  for (const siblings of groups.values()) {
+    siblings.sort((left, right) => String(left.name).localeCompare(String(right.name), "zh-CN") || left.id.localeCompare(right.id));
+    for (let position = 0; position < siblings.length; position += 1) {
+      if (siblings[position].position === position) continue;
+      await saveCollection({ ...siblings[position], position });
+      changed += 1;
+    }
+  }
+  return { changed };
+}
+
+async function cleanEmptyCollections() {
+  const collections = await request((await store("collections")).getAll());
+  const bookmarks = await request((await store("bookmarks")).getAll());
+  const roots = emptyCollectionRoots(collections, bookmarks);
+  for (const root of roots) await trashCollection(root.id);
+  return { removedIds: roots.flatMap((root) => [...collectionSubtreeIds(collections, root.id)]), removed: roots.length };
+}
+
+async function shareCollection(id) {
+  const collections = await request((await store("collections")).getAll());
+  const collection = collections.find((item) => item.id === id && !item.deletedAt);
+  if (!collection) return null;
+  const ids = collectionSubtreeIds(collections, id);
+  const bookmarks = (await request((await store("bookmarks")).getAll())).filter((item) => ids.has(item.collectionId) && !item.deletedAt);
+  return collectionShareText(collection, bookmarks);
+}
+
 async function enqueue(value) {
   await request((await store("outbox", "readwrite")).add({ ...value, createdAt: (/* @__PURE__ */ new Date()).toISOString(), status: "pending" }));
   if (typeof chrome !== "undefined" && chrome.alarms) {
@@ -375,12 +484,24 @@ async function saveConflict(value) {
 }
 async function importLibrary(data) {
   await ensureDefaults();
-  const collections = data.collections || [];
+  const collections = Array.isArray(data.collections) ? [...data.collections] : [];
+  const collectionCount = collections.length;
   const bookmarks = data.bookmarks || data.items || [];
-  for (const collection of collections) if (collection.name) await saveCollection(collection, { enqueueSync: false });
+  const known = await request((await store("collections")).getAll());
+  const savedIds = new Set(known.map((item) => item.id));
+  const orderedCollections = [];
+  while (collections.length) {
+    const index = collections.findIndex((item) => !item.parentId || savedIds.has(item.parentId));
+    if (index < 0) throw new TypeError("收藏夹层级无效");
+    const [collection] = collections.splice(index, 1);
+    if (!collection.name) continue;
+    orderedCollections.push(collection);
+    savedIds.add(collection.id);
+ }
+  for (const collection of orderedCollections) await saveCollection(collection, { enqueueSync: false, allowDeletedParent: true, allowUnsorted: true });
   for (const bookmark of bookmarks) if (bookmark.link) await saveBookmark(bookmark, { enqueueSync: false });
   await initialize();
-  return { bookmarks: bookmarks.length, collections: collections.length };
+  return { bookmarks: bookmarks.length, collections: collectionCount };
 }
 async function exportLibrary() {
   return { format: "private-bookmarks/v1", version: 1, exportedAt: (/* @__PURE__ */ new Date()).toISOString(), bookmarks: await request((await store("bookmarks")).getAll()), collections: await request((await store("collections")).getAll()), preferences: await getPreferences() };
@@ -438,6 +559,7 @@ export {
   exportMigrationPackage,
   getActionMode,
   getPreferences,
+  cleanEmptyCollections,
   importLibrary,
   importMigrationPackage,
   initialize,
@@ -446,9 +568,12 @@ export {
   listCollections,
   listConflicts,
   mergeLibrary,
+  mergeCollections,
+  moveCollection,
   outboxFor,
   outboxItems,
   previewMigrationPackage,
+  previewCollectionMerge,
   removeOutbox,
   replaceLibrary,
   resolveConflict,
@@ -457,6 +582,8 @@ export {
   saveBookmark,
   saveBookmarkWithCollection,
   saveCollection,
+  shareCollection,
+  sortCollections,
   saveConflict,
   setActionMode,
   setSyncSettings,

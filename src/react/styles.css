@@ -109,6 +109,35 @@ a { color: inherit; text-decoration: none; }
 .action-mode-setting select { width: auto; min-height: 28px; padding: 4px 7px; }
 .sync-toggle input { width: auto; }
 .sync-interval { width: 56px; min-height: 28px; padding: 4px 7px; }
+.collection-icon-image { width: 18px; height: 18px; object-fit: contain; }
+.collection-icon-value { display: inline-grid; width: 20px; place-items: center; color: var(--muted); }
+.collection-manager, .collection-icon-dialog, .collection-share-dialog { width: min(760px, calc(100% - 28px)); max-height: min(90vh, 820px); overflow: auto; border: 1px solid var(--line); border-radius: 8px; color: inherit; background: var(--page); box-shadow: 0 20px 70px #0005; }
+.collection-manager::backdrop, .collection-icon-dialog::backdrop, .collection-share-dialog::backdrop { background: #0006; }
+.collection-manager form, .collection-icon-dialog form, .collection-share-dialog form { display: grid; gap: 12px; }
+.collection-manager header, .collection-icon-dialog header, .collection-share-dialog header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.collection-manager h2, .collection-manager h3, .collection-icon-dialog h2, .collection-icon-dialog h3, .collection-share-dialog h2 { margin: 0; }
+.collection-manager header button, .collection-icon-dialog header button, .collection-share-dialog header button { font-size: 20px; }
+.collection-manager-actions, .collection-icon-actions, .collection-merge-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.collection-manager-list { display: grid; gap: 4px; max-height: 330px; overflow: auto; padding: 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--field); }
+.collection-manager-row { display: grid; grid-template-columns: 20px 24px minmax(0, 1fr) repeat(6, auto); align-items: center; gap: 5px; min-height: 34px; padding: 3px; border-radius: 4px; background: var(--page); }
+.collection-manager-row:hover { background: var(--hover); }
+.collection-manager-row input { width: auto; }
+.collection-manager-row strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.collection-merge-controls { padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--field); }
+.collection-merge-controls select { width: auto; min-width: 160px; }
+.collection-group-manager, .collection-trash-manager { display: grid; gap: 7px; padding-top: 10px; border-top: 1px solid var(--line); }
+.collection-group-row, .collection-trash-manager > div { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.collection-group-row > div { display: flex; flex-basis: 100%; flex-wrap: wrap; gap: 5px; color: var(--muted); font-size: 12px; }
+.collection-group-row > div span { padding: 2px 6px; border-radius: 4px; background: var(--field); }
+.collection-group-assignments { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.collection-group-assignments label { display: grid; grid-template-columns: minmax(0, 1fr) 120px; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+.collection-icon-actions input { flex: 1 1 180px; }
+.collection-icon-grid { display: grid; gap: 12px; max-height: 64vh; overflow: auto; }
+.collection-icon-grid section { display: grid; gap: 5px; }
+.collection-icon-grid section > div { display: grid; grid-template-columns: repeat(auto-fill, minmax(42px, 1fr)); gap: 4px; }
+.collection-icon-grid button { display: grid; width: 42px; height: 42px; place-items: center; padding: 4px; border: 1px solid var(--line); background: var(--field); }
+.collection-icon-grid img { width: 28px; height: 28px; object-fit: contain; }
+.collection-share-dialog textarea { min-height: 190px; }
 
 .bookmark-list { display: grid; }
 .bookmark-card { position: relative; display: grid; min-height: 117px; grid-template-columns: 20px 56px minmax(0, 1fr); gap: 12px; padding: 16px; background: var(--page); animation: card-in .2s both; animation-delay: calc(var(--stagger, 0) * 10ms); }
