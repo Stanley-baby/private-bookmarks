@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEven
 import { createRoot } from "react-dom/client";
 import { changePin, disablePin, enablePin, forgetPin, lockNow, lockState, prepareLock, setAutoLock, startLockMonitor, unlock } from "../../extension/shared/lock.js";
 import { configureWebdav, createWebdavBackup, listBackups, restoreWebdavBackup } from "../backup/webdav";
-import { batchBookmarks, exportLibrary, exportMigrationPackage, getActionMode, getPreferences, importLibrary, initialize, initialized, listBookmarks, listCollections, listConflicts, moveCollection, permanentDeleteBookmark, resolveConflict, restoreBookmark, saveBookmark, saveBookmarkWithCollection, saveCollection, setSyncSettings, syncSettings, trashBookmark, webdavSettings, type ActionMode, type Bookmark, type BookmarkBatchAction, type BookmarkConflictChoices, type Collection } from "../../extension/shared/local-db.js";
+import { batchBookmarks, exportLibrary, exportMigrationPackage, getActionMode, getPreferences, importLibrary, initialize, initialized, listBookmarks, listCollections, listConflicts, moveCollection, permanentDeleteBookmark, resolveConflict, restoreBookmark, saveBookmark, saveBookmarkWithCollection, saveCollection, setSyncSettings, syncSettings, trashBookmark, updatePreferences, webdavSettings, type ActionMode, type Bookmark, type BookmarkBatchAction, type BookmarkConflictChoices, type Collection } from "../../extension/shared/local-db.js";
 import { syncOnce } from "../local/sync";
 import { BOOKMARK_CONFLICT_FIELDS, fileToCover, mergeBookmarkConflict } from "../../extension/shared/local-model.js";
 import { recommendBookmark } from "../../extension/shared/recommendations.js";
@@ -12,6 +12,7 @@ import { CollectionIcon, CollectionManager } from "./collection-manager";
 import { classifyLibraryError, loadErrorMessage } from "./library-status.js";
 import { navigateLibraryRoute, readLibraryRoute } from "./library-route.js";
 import { createMigrationTransfer } from "./migration-transfer.js";
+import { filterBookmarks, reorderVisibleIds, searchSuggestions, sortBookmarks, visibleSelection } from "./library-view.js";
 import { renderMarkdown } from "../../extension/shared/markdown.js";
 import "./styles.css";
 
@@ -31,6 +32,18 @@ type AiSuggestion = {
 };
 const AUTO_LOCK_OPTIONS = [["open", "每次打开"], ["1", "1 分钟"], ["5", "5 分钟"], ["15", "15 分钟"], ["30", "30 分钟"], ["60", "1 小时"], ["never", "从不"]] as const;
 const COLLAPSED_COLLECTIONS_KEY = "private-bookmarks.collapsed-collections";
+const SEARCH_HISTORY_KEY = "private-bookmarks.search-history";
+
+function readSearchHistory() {
+  try {
+    const value = JSON.parse(localStorage.getItem(SEARCH_HISTORY_KEY) || "[]");
+    return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).slice(0, 5) : [];
+  } catch { return []; }
+}
+
+function persistSearchHistory(value: string[]) {
+  try { localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(value.slice(0, 5))); } catch { /* storage is optional */ }
+}
 
 function readCollapsedCollections() {
   try {
@@ -353,19 +366,21 @@ function CollectionSwitcher({ collections, collectionId, trash, tag, chooseColle
   }}><option value="all">所有书签</option><option value="unsorted">未分类</option><option value="trash">回收站</option>{flattenCollections(navigationCollections(collections)).map(({ collection, depth }) => <option key={collection.id} value={collection.id}>{`${"　".repeat(depth)}${collection.name}`}</option>)}{tag && <option value={`tag:${tag}`}>#{tag}</option>}</select></label>;
 }
 
-function BatchControls({ selectedCount, visibleCount, allSelected, trash, collections, onSelectAll, onAction }: {
+function BatchControls({ selectedCount, visibleCount, allSelected, trash, collections, manual, onSelectAll, onAction, onReorder }: {
   selectedCount: number;
   visibleCount: number;
   allSelected: boolean;
   trash: boolean;
   collections: Collection[];
+  manual: boolean;
   onSelectAll: (checked: boolean) => void;
   onAction: (action: BookmarkBatchAction) => void;
+  onReorder: (offset: number) => void;
 }) {
   if (!visibleCount) return null;
   return <div className="batch-controls">
     <label className="batch-select-all"><input type="checkbox" checked={allSelected} onChange={(event) => onSelectAll(event.target.checked)} />全选当前页</label>
-    {selectedCount > 0 && <><span className="batch-count">已选 {selectedCount}</span><select aria-label="批量移动到" value="" onChange={(event) => { if (event.target.value) onAction({ type: "move", collectionId: event.target.value }); }}><option value="">移动到…</option><option value="unsorted">未分类</option>{collections.filter((item) => item.id !== "unsorted").map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><button onClick={() => { const value = prompt("添加标签（逗号分隔）"); if (value?.trim()) onAction({ type: "tags", mode: "add", tags: value.split(",") }); }}>添加标签</button><button onClick={() => { const value = prompt("移除标签（逗号分隔）"); if (value?.trim()) onAction({ type: "tags", mode: "remove", tags: value.split(",") }); }}>移除标签</button>{trash ? <><button onClick={() => onAction({ type: "restore" })}>恢复</button><button className="danger" onClick={() => { if (confirm("永久删除所选书签？此操作不可撤销。")) onAction({ type: "permanentDelete" }); }}>永久删除</button></> : <button className="danger" onClick={() => { if (confirm("移到回收站？可以随时恢复。")) onAction({ type: "trash" }); }}>移到回收站</button>}</>}
+    {selectedCount > 0 && <><span className="batch-count">已选 {selectedCount}</span>{manual && selectedCount === 1 && <><button onClick={() => onReorder(-1)}>上移</button><button onClick={() => onReorder(1)}>下移</button></>}<select aria-label="批量移动到" value="" onChange={(event) => { if (event.target.value) onAction({ type: "move", collectionId: event.target.value }); }}><option value="">移动到…</option><option value="unsorted">未分类</option>{collections.filter((item) => item.id !== "unsorted").map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><button onClick={() => { const value = prompt("添加标签（逗号分隔）"); if (value?.trim()) onAction({ type: "tags", mode: "add", tags: value.split(",") }); }}>添加标签</button><button onClick={() => { const value = prompt("移除标签（逗号分隔）"); if (value?.trim()) onAction({ type: "tags", mode: "remove", tags: value.split(",") }); }}>移除标签</button>{trash ? <><button onClick={() => onAction({ type: "restore" })}>恢复</button><button className="danger" onClick={() => { if (confirm("永久删除所选书签？此操作不可撤销。")) onAction({ type: "permanentDelete" }); }}>永久删除</button></> : <button className="danger" onClick={() => { if (confirm("移到回收站？可以随时恢复。")) onAction({ type: "trash" }); }}>移到回收站</button>}</>}
   </div>;
 }
 
@@ -421,6 +436,7 @@ function App({ kind }: { kind: Surface }) {
   const [showAdvanced, setShowAdvanced] = useState(() => new URLSearchParams(location.search).get("settings") === "ai");
   const [collectionManagerOpen, setCollectionManagerOpen] = useState(false);
   const [collapsedCollections, setCollapsedCollections] = useState<Set<string>>(readCollapsedCollections);
+  const [searchHistory, setSearchHistory] = useState<string[]>(readSearchHistory);
   const load = async () => {
     setLoadStatus((status) => status === "ready" ? status : "loading");
     setLoadMessage("");
@@ -447,17 +463,12 @@ function App({ kind }: { kind: Surface }) {
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
-  const visible = useMemo(() => {
-    const needle = query.trim().toLocaleLowerCase();
-    const scope = collectionId ? descendantCollectionIds(collections, collectionId) : null;
-    return items.filter((item) => {
-      const matchesCollection = !scope || scope.has(item.collectionId);
-      const matchesTag = !tag || (tag === "__notes__" ? Boolean(item.note) : tag === "__untagged__" ? item.tags.length === 0 : item.tags.includes(tag));
-      const haystack = [item.title, item.link, item.description, item.note, item.tags.join(" "), collections.find((c) => c.id === item.collectionId)?.name].join(" ").toLocaleLowerCase();
-      return matchesCollection && matchesTag && (!needle || haystack.includes(needle));
-    });
-  }, [items, collections, query, collectionId, tag]);
-  useEffect(() => { const visibleIds = new Set(visible.map((item) => item.id)); setSelectedIds((ids) => { const next = ids.filter((id) => visibleIds.has(id)); return next.length === ids.length ? ids : next; }); }, [visible]);
+  const scopeKey = collectionId ? `collection:${collectionId}` : trash ? "view:trash" : "all";
+  const layout = ["list", "grid", "board", "masonry"].includes(preferences.layoutByScope?.[scopeKey]) ? preferences.layoutByScope[scopeKey] : preferences.layout || "list";
+  const sort = preferences.sort || "manual";
+  const manualOrder = preferences.manualOrderByScope?.[scopeKey] || [];
+  const visible = useMemo(() => sortBookmarks(filterBookmarks(items, { query, tag, scope: collectionId ? descendantCollectionIds(collections, collectionId) : null }), sort, manualOrder), [items, collections, query, collectionId, tag, sort, manualOrder]);
+  useEffect(() => { setSelectedIds((ids) => { const next = visibleSelection(ids, visible); return next.length === ids.length ? ids : next; }); }, [visible]);
   const davAction = async (action: () => Promise<any>) => { try { setError(""); await action(); setDavNames((await webdavSettings()).enabled ? await listBackups() : []); await load(); } catch (reason) { setError(reason instanceof Error ? reason.message : "WebDAV操作失败"); } };
   const route = (): LibraryRoute => ({ view: trash ? "trash" : "all", collectionId: trash ? null : collectionId || null, query, tag });
   const commitRoute = (next: LibraryRoute, mode: "push" | "replace" = "push") => { navigateLibraryRoute(next, mode); setTrash(next.view === "trash"); setCollectionId(next.collectionId || ""); setQuery(next.query); setTag(next.tag); setSelectedIds([]); };
@@ -465,8 +476,26 @@ function App({ kind }: { kind: Surface }) {
   const chooseTag = (value: string) => commitRoute({ ...route(), view: "all", collectionId: null, tag: value });
   const toggleTrash = () => commitRoute({ ...route(), view: trash ? "all" : "trash", collectionId: null, tag: "" });
   const toggleCollection = (id: string) => setCollapsedCollections((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); persistCollapsedCollections(next); return next; });
-  const applyBatch = async (action: BookmarkBatchAction) => { try { setError(""); await batchBookmarks(selectedIds, action); setSelectedIds([]); await load(); } catch (reason) { setError(reason instanceof Error ? reason.message : "批量操作失败"); } };
+  const applyBatch = async (action: BookmarkBatchAction) => { try { setError(""); await batchBookmarks(visibleSelection(selectedIds, visible), action); setSelectedIds([]); await load(); } catch (reason) { setError(reason instanceof Error ? reason.message : "批量操作失败"); } };
   const selectAll = (checked: boolean) => setSelectedIds(checked ? visible.map((item) => item.id) : []);
+  const savePreference = async (changes: Record<string, unknown>) => {
+    const result = await updatePreferences(Number(preferences.revision) || 0, changes);
+    if (result.conflict) { setPreferences(result.conflict); throw new Error("设置已在其他页面修改，请重试"); }
+    setPreferences(result.preferences);
+  };
+  const rememberSearch = () => {
+    const value = query.trim();
+    if (!value) return;
+    const next = [value, ...searchHistory.filter((item) => item !== value)].slice(0, 5);
+    setSearchHistory(next); persistSearchHistory(next);
+  };
+  const reorderSelected = async (offset: number) => {
+    if (!selectedIds[0]) return;
+    const scope = collectionId ? descendantCollectionIds(collections, collectionId) : null;
+    const allIds = sortBookmarks(filterBookmarks(items, { scope }), "manual", manualOrder).map((item) => item.id);
+    const order = reorderVisibleIds(allIds, visible.map((item) => item.id), selectedIds[0], offset);
+    await savePreference({ manualOrderByScope: { ...(preferences.manualOrderByScope || {}), [scopeKey]: order } });
+  };
   const createCollection = async () => { const name = prompt("收藏夹名称"); if (name?.trim()) { await saveCollection({ name: name.trim() }); await load(); } };
   const dropCollection = async (id: string, targetId: string) => {
     if (id === targetId) return;
@@ -476,14 +505,14 @@ function App({ kind }: { kind: Surface }) {
   if (lock?.enabled && lock.locked) return <LockScreen onUnlocked={setLock} />;
   if (ready === false) return <Setup done={() => setReady(true)} />;
 
-  return <main className={`app app-${kind}`}>
+  return <main className={`app app-${kind} layout-${layout}`}>
     {kind === "library" && <LibrarySidebar collections={collections} items={items} trash={trash} collectionId={collectionId} tag={tag} chooseCollection={chooseCollection} chooseTag={chooseTag} toggleTrash={toggleTrash} createCollection={createCollection} onManage={() => setCollectionManagerOpen(true)} onDropCollection={dropCollection} collapsedCollections={collapsedCollections} toggleCollection={toggleCollection} />}
     <section className="app-main">
     <CollectionSwitcher collections={collections} collectionId={collectionId} trash={trash} tag={tag} chooseCollection={chooseCollection} chooseTag={chooseTag} toggleTrash={toggleTrash} />
     <header className="app-header"><div className="app-heading">{kind === "library" ? <><span className="heading-icon">{trash ? "⌫" : "☁"}</span><strong>{trash ? "回收站" : collectionId ? collectionPath(collections, collectionId) : tag && !tag.startsWith("__") ? `#${tag}` : tag === "__notes__" ? "备注" : tag === "__untagged__" ? "没有标签" : "所有书签"}</strong></> : <div className="brand"><span className="brand-mark">◆</span><strong>私有书签</strong></div>}</div><div className="header-actions">{kind !== "library" && <button onClick={toggleTrash}>{trash ? "返回书签" : "回收站"}</button>}{kind !== "library" && <button onClick={() => chrome.tabs.create({ url: chrome.runtime.getURL("library.html") })}>完整页面</button>}{kind !== "library" && <button onClick={() => chrome.tabs.create({ url: chrome.runtime.getURL("library.html?settings=ai") })}>AI / 高级设置</button>}{kind === "library" && <button onClick={() => setShowAdvanced(true)}>AI / 高级设置</button>}{kind === "popup" && <button onClick={() => chrome.runtime.sendMessage({ type: "private-bookmarks-save-current" }).then(load)}>保存当前页</button>}<button type="button" onClick={load}>刷新</button><button className="primary" onClick={() => setSelected(null)}>＋ 添加</button></div></header>
-    <section className="toolbar"><label className="search"><span>⌕</span><input value={query} onChange={(event) => { const value = event.target.value; setQuery(value); navigateLibraryRoute({ ...route(), query: value }, "replace"); }} placeholder="搜索" /></label><span className="count">{loadStatus === "ready" ? `${visible.length} 个书签` : "正在加载…"}</span></section>
+    <section className="toolbar"><form className="search" onSubmit={(event) => { event.preventDefault(); rememberSearch(); }}><span>⌕</span><input value={query} list="library-search-suggestions" onBlur={rememberSearch} onChange={(event) => { const value = event.target.value; setQuery(value); navigateLibraryRoute({ ...route(), query: value }, "replace"); }} placeholder="搜索：React type:article lang:zh created:2026-08" aria-label="搜索书签" /><datalist id="library-search-suggestions">{searchSuggestions(query, searchHistory).map((value) => <option key={value} value={value} />)}</datalist>{searchHistory.length > 0 && <button type="button" onClick={() => { setSearchHistory([]); persistSearchHistory([]); }}>清除历史</button>}</form><label>排序<select aria-label="排序" value={sort} onChange={(event) => savePreference({ sort: event.target.value }).catch((reason) => setError(reason.message))}><option value="manual">手动顺序</option><option value="-created">创建时间 ↓</option><option value="created">创建时间 ↑</option><option value="title">标题 A–Z</option><option value="-title">标题 Z–A</option><option value="domain">网站 A–Z</option></select></label><label>布局<select aria-label="布局" value={layout} onChange={(event) => savePreference({ layoutByScope: { ...(preferences.layoutByScope || {}), [scopeKey]: event.target.value } }).catch((reason) => setError(reason.message))}><option value="list">列表</option><option value="grid">卡片</option><option value="board">心情看板</option><option value="masonry">瀑布流</option></select></label><span className="count">{loadStatus === "ready" ? `${visible.length} 个书签` : "正在加载…"}</span></section>
     <LibraryLoadState status={loadStatus} message={loadMessage} retry={load} />
-    {loadStatus === "ready" && <BatchControls selectedCount={selectedIds.length} visibleCount={visible.length} allSelected={visible.length > 0 && selectedIds.length === visible.length} trash={trash} collections={collections} onSelectAll={selectAll} onAction={applyBatch} />}
+    {loadStatus === "ready" && <BatchControls selectedCount={selectedIds.length} visibleCount={visible.length} allSelected={visible.length > 0 && selectedIds.length === visible.length} trash={trash} collections={collections} manual={sort === "manual"} onSelectAll={selectAll} onAction={applyBatch} onReorder={(offset) => reorderSelected(offset).catch((reason) => setError(reason.message))} />}
     {loadStatus === "ready" && <CollectionManager collections={collections} trashedCollections={trashedCollections} preferences={preferences} open={collectionManagerOpen} onOpenChange={setCollectionManagerOpen} onChanged={load} onPreferences={setPreferences} onError={setError} />}
     {loadStatus === "ready" && <div className="local-tools"><button onClick={createCollection}>新建收藏夹</button><button onClick={async () => download(await exportLibrary())}>导出</button><label className="file-button">导入<input type="file" accept="application/json" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; try { await importLibrary(JSON.parse(await file.text())); await load(); } catch (reason) { setError(reason instanceof Error ? reason.message : "导入失败，当前输入未改变"); } finally { event.currentTarget.value = ""; } }} /></label><MigrationTransfer onApplied={load} /><label className="action-mode-setting">操作模式<select value={actionMode} onChange={async (event) => { const mode = event.target.value as ActionMode; try { await updateActionMode(mode); setActionModeState(mode); } catch (reason) { setError(reason instanceof Error ? reason.message : "保存操作模式失败"); } }}><option value="popup">弹出窗口</option><option value="sidepanel">侧边栏</option></select></label><label className="sync-toggle"><input type="checkbox" checked={syncConfig.enabled} onChange={async (event) => { const settings = await setSyncSettings({ enabled: event.target.checked }); setSyncConfig(settings); await chrome.runtime.sendMessage({ type: "private-bookmarks-sync-settings", settings }); }} />Cloudflare 同步</label><input className="sync-interval" type="number" min="1" value={syncConfig.intervalMinutes} aria-label="同步间隔（分钟）" onChange={async (event) => setSyncConfig(await setSyncSettings({ intervalMinutes: Math.max(1, Number(event.target.value) || 15) }))} /><button disabled={!syncConfig.enabled || syncing} onClick={async () => { setSyncing(true); try { await syncOnce(); await load(); } catch (reason) { setError(reason instanceof Error ? reason.message : "同步失败"); } finally { setSyncing(false); } }}>{syncing ? "同步中…" : "立即同步"}</button><button onClick={async () => { setShowDav(!showDav); if (!showDav && dav.enabled) setDavNames(await listBackups().catch(() => [])); }}>WebDAV备份</button>{lock && <button onClick={() => setShowLockSettings((value) => !value)}>{lock.enabled ? "应用锁" : "启用应用锁"}</button>}</div>}
     {loadStatus === "ready" && lock && showLockSettings && <LockSettings status={lock} onChange={setLock} />}
