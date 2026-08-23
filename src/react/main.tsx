@@ -7,12 +7,17 @@ import { syncOnce } from "../local/sync";
 import { BOOKMARK_CONFLICT_FIELDS, fileToCover, mergeBookmarkConflict } from "../../extension/shared/local-model.js";
 import { recommendBookmark } from "../../extension/shared/recommendations.js";
 import { workerClient } from "../../extension/shared/worker-client.js";
+import { collectionPath, descendantCollectionIds, flattenCollections } from "./collection-navigation.js";
+import { classifyLibraryError, loadErrorMessage } from "./library-status.js";
+import { navigateLibraryRoute, readLibraryRoute } from "./library-route.js";
 import { createMigrationTransfer } from "./migration-transfer.js";
 import "./styles.css";
 
 declare const chrome: any;
 type Surface = "popup" | "sidepanel" | "library" | "welcome";
 type MigrationMode = "import" | "replace" | "merge" | "cancel";
+type LibraryRoute = { view: "all" | "trash"; collectionId: string | null; query: string; tag: string };
+type LibraryLoadStatus = "loading" | "ready" | "error" | "permission-denied";
 const surface = (): Surface => ["popup", "sidepanel", "welcome"].includes(document.body.dataset.surface || "") ? document.body.dataset.surface as Surface : "library";
 type LockStatus = Awaited<ReturnType<typeof lockState>>;
 type Connection = { endpoint: string; key: string };
@@ -23,6 +28,20 @@ type AiSuggestion = {
   note?: string;
 };
 const AUTO_LOCK_OPTIONS = [["open", "每次打开"], ["1", "1 分钟"], ["5", "5 分钟"], ["15", "15 分钟"], ["30", "30 分钟"], ["60", "1 小时"], ["never", "从不"]] as const;
+const COLLAPSED_COLLECTIONS_KEY = "private-bookmarks.collapsed-collections";
+
+function readCollapsedCollections() {
+  try {
+    const value = JSON.parse(localStorage.getItem(COLLAPSED_COLLECTIONS_KEY) || "[]");
+    return new Set(Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []);
+  } catch {
+    return new Set<string>();
+  }
+}
+
+function persistCollapsedCollections(value: Set<string>) {
+  try { localStorage.setItem(COLLAPSED_COLLECTIONS_KEY, JSON.stringify([...value])); } catch { /* storage is optional */ }
+}
 
 async function updateActionMode(mode: ActionMode) {
   const response = await chrome.runtime.sendMessage({ type: "private-bookmarks-set-action-mode", mode });
@@ -217,6 +236,10 @@ function Editor({ item, collections, contextItems, close }: { item?: Bookmark; c
   return <dialog open className="editor"><form onSubmit={save}><h2>{item ? "编辑书签" : "添加书签"}</h2><label>网址<input name="link" type="url" value={link} onChange={(event) => setLink(event.target.value)} required autoFocus /></label><label>标题<input name="title" value={title} onChange={(event) => setTitle(event.target.value)} /></label><label>描述<textarea name="description" value={description} onChange={(event) => setDescription(event.target.value)} /></label><label>备注<textarea name="note" value={note} onChange={(event) => setNote(event.target.value)} /></label><label>收藏夹<select name="collectionId" value={collectionId} onChange={(event) => setCollectionId(event.target.value)}><option value="unsorted">未分类</option>{collections.map((value) => <option key={value.id} value={value.id}>{value.name}</option>)}</select></label><label>标签（逗号分隔）<input name="tags" value={tags} onChange={(event) => setTags(event.target.value)} /></label><label>自定义封面<input type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/avif,image/svg+xml" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; try { setCover(await fileToCover(file)); setCoverError(""); } catch (reason) { setCoverError(reason instanceof Error ? reason.message : "封面读取失败"); } }} />{cover && <><img className="editor-cover-preview" src={cover} alt="当前封面预览" /><button type="button" onClick={() => setCover("")}>移除封面</button></>}{coverError && <small className="error">{coverError}</small>}</label><section className="recommendation-box"><div className="recommendation-actions"><button type="button" disabled={suggestionBusy} onClick={() => requestSuggestion("local")}>本地建议</button><button type="button" disabled={suggestionBusy || aiAvailable === false} onClick={() => requestSuggestion("ai")}>AI 建议</button></div>{aiAvailable === false && <p className="muted">AI 推荐不可用（可选）；本地书签不受影响。</p>}{suggestionNotice && <p className="error">{suggestionNotice}</p>}{suggestion && <div className="recommendation-preview"><strong>{suggestionMode === "ai" ? "AI 建议预览" : "本地建议预览"}</strong>{suggestion.collectionId && <div>收藏夹：{recommendationCollectionName(suggestion.collectionId, collections)}</div>}{suggestion.newCollection?.name && <div>新收藏夹：{suggestion.newCollection.name}{suggestion.newCollection.parentId ? `（位于 ${recommendationCollectionName(suggestion.newCollection.parentId, collections)}）` : ""}</div>}{suggestion.tags?.length ? <div>标签：{suggestion.tags.join(", ")}</div> : null}{suggestion.note && <div>备注：{suggestion.note}</div>}<button type="button" className="primary" disabled={suggestionBusy} onClick={applySuggestion}>确认并应用</button></div>}</section><menu><button type="button" onClick={() => close(false)}>取消</button><button className="primary">保存</button></menu></form></dialog>;
 }
 
+function navigationCollections(collections: Collection[]) {
+  return collections.filter((collection) => collection.id !== "unsorted");
+}
+
 function LibrarySidebar({
   collections,
   items,
@@ -227,6 +250,8 @@ function LibrarySidebar({
   chooseTag,
   toggleTrash,
   createCollection,
+  collapsedCollections,
+  toggleCollection,
 }: {
   collections: Collection[];
   items: Bookmark[];
@@ -237,8 +262,12 @@ function LibrarySidebar({
   chooseTag: (value: string) => void;
   toggleTrash: () => void;
   createCollection: () => void;
+  collapsedCollections: Set<string>;
+  toggleCollection: (id: string) => void;
 }) {
   const tags = [...new Set(items.flatMap((item) => item.tags).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const treeCollections = navigationCollections(collections);
+  const tree = flattenCollections(treeCollections, collapsedCollections);
   const countFor = (id: string) => items.filter((item) => item.collectionId === id).length;
   const visibleCount = (id: string) => items.filter((item) => item.collectionId === id && !item.deletedAt).length;
   return <aside className="library-sidebar">
@@ -247,11 +276,30 @@ function LibrarySidebar({
       <button className={`sidebar-item ${!trash && !collectionId && !tag ? "active" : ""}`} onClick={() => chooseCollection("")}><span>☁</span><span>所有书签</span><small>{items.length}</small></button>
       <button className={`sidebar-item ${!trash && collectionId === "unsorted" ? "active" : ""}`} onClick={() => chooseCollection("unsorted")}><span>▣</span><span>未分类</span><small>{visibleCount("unsorted")}</small></button>
       <button className={`sidebar-item ${trash ? "active" : ""}`} onClick={toggleTrash}><span>⌫</span><span>回收站</span><small>{trash ? items.length : ""}</small></button>
-      <div className="sidebar-section"><div className="sidebar-label"><span>收藏</span><button onClick={createCollection} title="新建收藏夹" aria-label="新建收藏夹">＋</button></div>{collections.length ? collections.map((collection) => <button className={`sidebar-item ${!trash && collectionId === collection.id ? "active" : ""}`} key={collection.id} onClick={() => chooseCollection(collection.id)}><span>▱</span><span>{collection.name}</span><small>{countFor(collection.id)}</small></button>) : <p className="sidebar-empty">还没有收藏夹</p>}</div>
+      <div className="sidebar-section"><div className="sidebar-label"><span>收藏</span><button onClick={createCollection} title="新建收藏夹" aria-label="新建收藏夹">＋</button></div>{tree.length ? tree.map(({ collection, depth }) => { const hasChildren = treeCollections.some((item) => item.parentId === collection.id); const collapsed = collapsedCollections.has(collection.id); return <div className="sidebar-collection-entry" key={collection.id}><button className={`sidebar-tree-toggle ${hasChildren ? "" : "placeholder"}`} style={{ marginLeft: `${depth * 16}px` }} disabled={!hasChildren} aria-label={hasChildren ? `${collapsed ? "展开" : "收起"}${collection.name}` : undefined} aria-expanded={hasChildren ? !collapsed : undefined} onClick={() => toggleCollection(collection.id)}>{hasChildren ? collapsed ? "▸" : "▾" : ""}</button><button className={`sidebar-item ${!trash && collectionId === collection.id ? "active" : ""}`} onClick={() => chooseCollection(collection.id)} aria-label={`打开 ${collectionPath(collections, collection.id)}`}><span>▱</span><span>{collection.name}</span><small>{countFor(collection.id)}</small></button></div>; }) : <p className="sidebar-empty">还没有收藏夹</p>}</div>
       <div className="sidebar-section"><div className="sidebar-label"><span>快速过滤</span></div><button className={`sidebar-item ${tag === "__notes__" ? "active" : ""}`} onClick={() => chooseTag("__notes__")}><span>▤</span><span>备注</span><small>{items.filter((item) => item.note).length}</small></button><button className={`sidebar-item ${tag === "__untagged__" ? "active" : ""}`} onClick={() => chooseTag("__untagged__")}><span>#</span><span>没有标签</span><small>{items.filter((item) => !item.tags.length).length}</small></button></div>
       {tags.length > 0 && <div className="sidebar-section"><div className="sidebar-label"><span>标签 ({tags.length})</span></div>{tags.map((value) => <button className={`sidebar-item ${tag === value ? "active" : ""}`} key={value} onClick={() => chooseTag(value)}><span>#</span><span>{value}</span><small>{items.filter((item) => item.tags.includes(value)).length}</small></button>)}</div>}
     </nav>
   </aside>;
+}
+
+function CollectionSwitcher({ collections, collectionId, trash, tag, chooseCollection, chooseTag, toggleTrash }: {
+  collections: Collection[];
+  collectionId: string;
+  trash: boolean;
+  tag: string;
+  chooseCollection: (id: string) => void;
+  chooseTag: (value: string) => void;
+  toggleTrash: () => void;
+}) {
+  const value = trash ? "trash" : tag ? `tag:${tag}` : collectionId || "all";
+  return <label className="collection-switcher"><span>工作区</span><select aria-label="选择工作区" value={value} onChange={(event) => {
+    const next = event.target.value;
+    if (next === "trash") return trash ? undefined : toggleTrash();
+    if (next === "all") return chooseCollection("");
+    if (next.startsWith("tag:")) return chooseTag(next.slice(4));
+    return chooseCollection(next);
+  }}><option value="all">所有书签</option><option value="unsorted">未分类</option><option value="trash">回收站</option>{flattenCollections(navigationCollections(collections)).map(({ collection, depth }) => <option key={collection.id} value={collection.id}>{`${"　".repeat(depth)}${collection.name}`}</option>)}{tag && <option value={`tag:${tag}`}>#{tag}</option>}</select></label>;
 }
 
 function BatchControls({ selectedCount, visibleCount, allSelected, trash, collections, onSelectAll, onAction }: {
@@ -299,21 +347,57 @@ function ConflictCenter({ conflicts, kind, reload }: { conflicts: any[]; kind: S
   return <section className="conflicts" ref={section}><strong>{conflicts.length} 项同步冲突</strong><div className="conflict-batch"><button onClick={async () => { for (const item of conflicts) await resolveConflict(item.key, "local"); await reload(); }}>全部保留本地</button><button onClick={async () => { for (const item of conflicts) await resolveConflict(item.key, "cloud"); await reload(); }}>全部采用云端</button></div>{conflicts.map((item) => <ConflictMerge key={item.key} conflict={item} resolve={resolve} />)}</section>;
 }
 
+function LibraryLoadState({ status, message, retry }: { status: LibraryLoadStatus; message: string; retry: () => void }) {
+  if (status === "ready") return null;
+  if (status === "loading") return <section className="library-state" role="status" aria-live="polite"><span className="loading-spinner" aria-hidden="true" />正在加载资料库…</section>;
+  if (status === "permission-denied") return <section className="library-state library-state-error" role="alert"><strong>权限被拒绝</strong><p>{message}</p><button className="primary" type="button" onClick={retry}>重试</button></section>;
+  return <section className="library-state library-state-error" role="alert"><strong>资料库加载失败</strong><p>{message}</p><button className="primary" type="button" onClick={retry}>重试</button></section>;
+}
+
+function DetailPanel({ item, onEdit, onClose }: { item: Bookmark | null; onEdit: () => void; onClose: () => void }) {
+  return <aside className="workspace-detail" aria-label="书签详情"><header><strong>书签详情</strong>{item && <button type="button" onClick={onClose} aria-label="关闭详情">×</button>}</header>{item ? <article className="detail-content"><img src={item.cover || "icons/bookmark.svg"} alt="" /><h2>{item.title || item.link}</h2><a href={item.link} target="_blank" rel="noreferrer">{item.link}</a>{item.description && <p>{item.description}</p>}{item.note && <p>{item.note}</p>}<div className="bookmark-meta">{item.tags.map((value) => <span key={value}>#{value}</span>)}</div><button className="primary" type="button" onClick={onEdit}>编辑书签</button></article> : <p className="detail-empty">选择书签查看详情</p>}</aside>;
+}
+
 function App({ kind }: { kind: Surface }) {
+  const initialRoute = useRef(readLibraryRoute(location.href) as LibraryRoute).current;
   const [ready, setReady] = useState<boolean | null>(null), [items, setItems] = useState<Bookmark[]>([]), [collections, setCollections] = useState<Collection[]>([]);
   const [lock, setLock] = useState<LockStatus | null>(null), [showLockSettings, setShowLockSettings] = useState(false);
-  const [query, setQuery] = useState(""), [selected, setSelected] = useState<Bookmark | null | undefined>(), [selectedIds, setSelectedIds] = useState<string[]>([]), [trash, setTrash] = useState(false), [collectionId, setCollectionId] = useState(""), [tag, setTag] = useState(""), [error, setError] = useState("");
+  const [query, setQuery] = useState(initialRoute.query), [selected, setSelected] = useState<Bookmark | null | undefined>(), [focused, setFocused] = useState<Bookmark | null>(null), [selectedIds, setSelectedIds] = useState<string[]>([]), [trash, setTrash] = useState(initialRoute.view === "trash"), [collectionId, setCollectionId] = useState(initialRoute.collectionId || ""), [tag, setTag] = useState(initialRoute.tag), [error, setError] = useState("");
+  const [loadStatus, setLoadStatus] = useState<LibraryLoadStatus>("loading"), [loadMessage, setLoadMessage] = useState("");
   const [conflicts, setConflicts] = useState<any[]>([]), [syncConfig, setSyncConfig] = useState<any>({ enabled: false, intervalMinutes: 15 }), [syncing, setSyncing] = useState(false), [actionMode, setActionModeState] = useState<ActionMode>("popup");
   const [dav, setDav] = useState<any>({ enabled: false, endpoint: "", username: "", password: "", encryptionPassword: "", retention: 10 }), [davNames, setDavNames] = useState<string[]>([]), [showDav, setShowDav] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(() => new URLSearchParams(location.search).get("settings") === "ai");
-  const load = async () => { try { setItems(await listBookmarks({ trash })); setCollections(await listCollections()); setConflicts(await listConflicts()); setSyncConfig(await syncSettings()); setDav(await webdavSettings()); const mode = await getActionMode(); if (mode) setActionModeState(mode); } catch (reason) { setError(reason instanceof Error ? reason.message : "加载失败"); } };
-  useEffect(() => { prepareLock().then(() => lockState()).then(setLock).catch(() => setLock({ enabled: false, locked: false, autoLock: "15", cooldownUntil: 0 })); initialized().then(setReady); }, []);
+  const [collapsedCollections, setCollapsedCollections] = useState<Set<string>>(readCollapsedCollections);
+  const load = async () => {
+    setLoadStatus((status) => status === "ready" ? status : "loading");
+    setLoadMessage("");
+    try {
+      setItems(await listBookmarks({ trash })); setCollections(await listCollections()); setConflicts(await listConflicts()); setSyncConfig(await syncSettings()); setDav(await webdavSettings()); const mode = await getActionMode(); if (mode) setActionModeState(mode);
+      setError(""); setLoadStatus("ready");
+    } catch (reason) {
+      setLoadStatus(classifyLibraryError(reason) as LibraryLoadStatus); setLoadMessage(loadErrorMessage(reason)); setItems([]); setCollections([]); setConflicts([]);
+      setFocused(null); setSelected(undefined);
+    }
+  };
+  useEffect(() => {
+    prepareLock().then(() => lockState()).then(setLock).catch(() => setLock({ enabled: false, locked: false, autoLock: "15", cooldownUntil: 0 }));
+    initialized().then(setReady).catch((reason) => { setReady(true); setLoadStatus(classifyLibraryError(reason) as LibraryLoadStatus); setLoadMessage(loadErrorMessage(reason)); });
+  }, []);
   useEffect(() => { if (lock?.enabled) startLockMonitor(() => lockState().then(setLock)); }, [lock?.enabled]);
   useEffect(() => { if (ready && lock && !lock.locked) { load(); syncOnce().then(load).catch(() => {}); } }, [ready, lock?.locked, trash]);
+  useEffect(() => {
+    const onPopState = () => {
+      const next = readLibraryRoute(location.href) as LibraryRoute;
+      setTrash(next.view === "trash"); setCollectionId(next.collectionId || ""); setQuery(next.query); setTag(next.tag); setSelectedIds([]);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
   const visible = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
+    const scope = collectionId ? descendantCollectionIds(collections, collectionId) : null;
     return items.filter((item) => {
-      const matchesCollection = !collectionId || item.collectionId === collectionId;
+      const matchesCollection = !scope || scope.has(item.collectionId);
       const matchesTag = !tag || (tag === "__notes__" ? Boolean(item.note) : tag === "__untagged__" ? item.tags.length === 0 : item.tags.includes(tag));
       const haystack = [item.title, item.link, item.description, item.note, item.tags.join(" "), collections.find((c) => c.id === item.collectionId)?.name].join(" ").toLocaleLowerCase();
       return matchesCollection && matchesTag && (!needle || haystack.includes(needle));
@@ -321,30 +405,34 @@ function App({ kind }: { kind: Surface }) {
   }, [items, collections, query, collectionId, tag]);
   useEffect(() => { const visibleIds = new Set(visible.map((item) => item.id)); setSelectedIds((ids) => { const next = ids.filter((id) => visibleIds.has(id)); return next.length === ids.length ? ids : next; }); }, [visible]);
   const davAction = async (action: () => Promise<any>) => { try { setError(""); await action(); setDavNames((await webdavSettings()).enabled ? await listBackups() : []); await load(); } catch (reason) { setError(reason instanceof Error ? reason.message : "WebDAV操作失败"); } };
-  const chooseCollection = (value: string) => { setCollectionId(value); setTag(""); setTrash(false); setSelectedIds([]); };
-  const chooseTag = (value: string) => { setTag(value); setCollectionId(""); setTrash(false); setSelectedIds([]); };
-  const toggleTrash = () => { setTrash((value) => !value); setCollectionId(""); setTag(""); setSelectedIds([]); };
+  const route = (): LibraryRoute => ({ view: trash ? "trash" : "all", collectionId: trash ? null : collectionId || null, query, tag });
+  const commitRoute = (next: LibraryRoute, mode: "push" | "replace" = "push") => { navigateLibraryRoute(next, mode); setTrash(next.view === "trash"); setCollectionId(next.collectionId || ""); setQuery(next.query); setTag(next.tag); setSelectedIds([]); };
+  const chooseCollection = (value: string) => commitRoute({ ...route(), view: "all", collectionId: value || null, tag: "" });
+  const chooseTag = (value: string) => commitRoute({ ...route(), view: "all", collectionId: null, tag: value });
+  const toggleTrash = () => commitRoute({ ...route(), view: trash ? "all" : "trash", collectionId: null, tag: "" });
+  const toggleCollection = (id: string) => setCollapsedCollections((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); persistCollapsedCollections(next); return next; });
   const applyBatch = async (action: BookmarkBatchAction) => { try { setError(""); await batchBookmarks(selectedIds, action); setSelectedIds([]); await load(); } catch (reason) { setError(reason instanceof Error ? reason.message : "批量操作失败"); } };
   const selectAll = (checked: boolean) => setSelectedIds(checked ? visible.map((item) => item.id) : []);
   const createCollection = async () => { const name = prompt("收藏夹名称"); if (name?.trim()) { await saveCollection({ name: name.trim() }); await load(); } };
   if (lock?.enabled && lock.locked) return <LockScreen onUnlocked={setLock} />;
   if (ready === false) return <Setup done={() => setReady(true)} />;
-  if (ready === null) return <p className="empty">正在打开本地资料库…</p>;
 
   return <main className={`app app-${kind}`}>
-    {kind === "library" && <LibrarySidebar collections={collections} items={items} trash={trash} collectionId={collectionId} tag={tag} chooseCollection={chooseCollection} chooseTag={chooseTag} toggleTrash={toggleTrash} createCollection={createCollection} />}
+    {kind === "library" && <LibrarySidebar collections={collections} items={items} trash={trash} collectionId={collectionId} tag={tag} chooseCollection={chooseCollection} chooseTag={chooseTag} toggleTrash={toggleTrash} createCollection={createCollection} collapsedCollections={collapsedCollections} toggleCollection={toggleCollection} />}
     <section className="app-main">
-    <header className="app-header"><div className="app-heading">{kind === "library" ? <><span className="heading-icon">{trash ? "⌫" : "☁"}</span><strong>{trash ? "回收站" : collectionId ? collections.find((item) => item.id === collectionId)?.name || "收藏夹" : tag && !tag.startsWith("__") ? `#${tag}` : tag === "__notes__" ? "备注" : tag === "__untagged__" ? "没有标签" : "所有书签"}</strong></> : <div className="brand"><span className="brand-mark">◆</span><strong>私有书签</strong></div>}</div><div className="header-actions">{kind !== "library" && <button onClick={toggleTrash}>{trash ? "返回书签" : "回收站"}</button>}{kind !== "library" && <button onClick={() => chrome.tabs.create({ url: chrome.runtime.getURL("library.html") })}>完整页面</button>}{kind !== "library" && <button onClick={() => chrome.tabs.create({ url: chrome.runtime.getURL("library.html?settings=ai") })}>AI / 高级设置</button>}{kind === "library" && <button onClick={() => setShowAdvanced(true)}>AI / 高级设置</button>}{kind === "popup" && <button onClick={() => chrome.runtime.sendMessage({ type: "private-bookmarks-save-current" }).then(load)}>保存当前页</button>}<button className="primary" onClick={() => setSelected(null)}>＋ 添加</button></div></header>
-    <section className="toolbar"><label className="search"><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索" /></label><span className="count">{visible.length} 个书签</span></section>
-    <BatchControls selectedCount={selectedIds.length} visibleCount={visible.length} allSelected={visible.length > 0 && selectedIds.length === visible.length} trash={trash} collections={collections} onSelectAll={selectAll} onAction={applyBatch} />
-    <div className="local-tools"><button onClick={createCollection}>新建收藏夹</button><button onClick={async () => download(await exportLibrary())}>导出</button><label className="file-button">导入<input type="file" accept="application/json" onChange={async (event) => { const file = event.target.files?.[0]; if (file) { await importLibrary(JSON.parse(await file.text())); load(); } }} /></label><MigrationTransfer onApplied={load} /><label className="action-mode-setting">操作模式<select value={actionMode} onChange={async (event) => { const mode = event.target.value as ActionMode; try { await updateActionMode(mode); setActionModeState(mode); } catch (reason) { setError(reason instanceof Error ? reason.message : "保存操作模式失败"); } }}><option value="popup">弹出窗口</option><option value="sidepanel">侧边栏</option></select></label><label className="sync-toggle"><input type="checkbox" checked={syncConfig.enabled} onChange={async (event) => { const settings = await setSyncSettings({ enabled: event.target.checked }); setSyncConfig(settings); await chrome.runtime.sendMessage({ type: "private-bookmarks-sync-settings", settings }); }} />Cloudflare 同步</label><input className="sync-interval" type="number" min="1" value={syncConfig.intervalMinutes} aria-label="同步间隔（分钟）" onChange={async (event) => setSyncConfig(await setSyncSettings({ intervalMinutes: Math.max(1, Number(event.target.value) || 15) }))} /><button disabled={!syncConfig.enabled || syncing} onClick={async () => { setSyncing(true); try { await syncOnce(); await load(); } catch (reason) { setError(reason instanceof Error ? reason.message : "同步失败"); } finally { setSyncing(false); } }}>{syncing ? "同步中…" : "立即同步"}</button><button onClick={async () => { setShowDav(!showDav); if (!showDav && dav.enabled) setDavNames(await listBackups().catch(() => [])); }}>WebDAV备份</button>{lock && <button onClick={() => setShowLockSettings((value) => !value)}>{lock.enabled ? "应用锁" : "启用应用锁"}</button>}</div>
-    {lock && showLockSettings && <LockSettings status={lock} onChange={setLock} />}
-    {showDav && <section className="webdav"><label><input type="checkbox" checked={dav.enabled} onChange={(event) => setDav({ ...dav, enabled: event.target.checked })} />启用WebDAV</label><label>地址<input value={dav.endpoint} onChange={(event) => setDav({ ...dav, endpoint: event.target.value })} placeholder="https://dav.example.com/path" /></label><label>用户名<input value={dav.username} onChange={(event) => setDav({ ...dav, username: event.target.value })} /></label><label>密码<input type="password" value={dav.password} onChange={(event) => setDav({ ...dav, password: event.target.value })} /></label><label>备份加密密码（可选）<input type="password" value={dav.encryptionPassword} onChange={(event) => setDav({ ...dav, encryptionPassword: event.target.value })} /></label><label>保留份数<input type="number" min="3" max="50" value={dav.retention} onChange={(event) => setDav({ ...dav, retention: Number(event.target.value) })} /></label><div className="webdav-actions"><button onClick={() => davAction(async () => { const url = new URL(dav.endpoint); if (!await chrome.permissions.request({ origins: [`${url.origin}/*`] })) throw new TypeError("未获得WebDAV站点权限"); setDav(await configureWebdav(dav)); })}>保存设置</button><button className="primary" disabled={!dav.enabled} onClick={() => davAction(() => createWebdavBackup(dav))}>立即备份</button></div>{dav.lastBackupAt && <small>上次备份：{new Date(dav.lastBackupAt).toLocaleString()}</small>}{davNames.map((name) => <div className="backup-row" key={name}><span>{name}</span><button onClick={() => davAction(async () => { const result = await restoreWebdavBackup(name, "merge", dav); download(result.safety, "pre-restore-safety.json"); })}>合并恢复</button><button onClick={() => davAction(async () => { if (!confirm("覆盖本地资料库？当前数据会先下载为安全快照。")) return; const result = await restoreWebdavBackup(name, "replace", dav); download(result.safety, "pre-restore-safety.json"); })}>覆盖恢复</button></div>)}</section>}
-    <ConflictCenter conflicts={conflicts} kind={kind} reload={load} />
-    {error && <p className="error">{error}</p>}
-    <section className="bookmark-list">{visible.map((item, index) => <article className={`bookmark-card ${selectedIds.includes(item.id) ? "selected" : ""}`} key={item.id} style={{ "--stagger": Math.min(index, 12) } as CSSProperties}><label className="bookmark-select"><input type="checkbox" checked={selectedIds.includes(item.id)} onChange={(event) => setSelectedIds((ids) => event.target.checked ? [...ids, item.id] : ids.filter((id) => id !== item.id))} aria-label={`选择 ${item.title || item.link}`} /></label><div className="bookmark-cover"><img src={item.cover || "icons/bookmark.svg"} alt="" /></div><div className="bookmark-card-body"><a className="bookmark-title" href={item.link} target="_blank" rel="noreferrer">{item.title || item.link}</a><div className="bookmark-details">{item.note || item.description || ""}</div><div className="bookmark-meta"><span>{collections.find((value) => value.id === item.collectionId)?.name || "未分类"}</span>{item.tags.map((value) => <button type="button" key={value} onClick={() => chooseTag(value)}>#{value}</button>)}</div><small className="bookmark-link">{item.link}</small><div className="card-actions">{trash ? <button onClick={async () => { await restoreBookmark(item.id); load(); }}>恢复</button> : <><button onClick={() => setSelected(item)}>编辑</button><button className="danger" onClick={async () => { await trashBookmark(item.id); load(); }}>删除</button></>}</div></div></article>)}</section>
-    {!visible.length && <p className="empty">{trash ? "回收站为空" : "还没有书签"}</p>}{selected !== undefined && <Editor item={selected || undefined} collections={collections} contextItems={items} close={(saved) => { setSelected(undefined); if (saved) load(); }} />}{kind === "library" && <AdvancedSettings open={showAdvanced} onClose={() => setShowAdvanced(false)} />}
+    <CollectionSwitcher collections={collections} collectionId={collectionId} trash={trash} tag={tag} chooseCollection={chooseCollection} chooseTag={chooseTag} toggleTrash={toggleTrash} />
+    <header className="app-header"><div className="app-heading">{kind === "library" ? <><span className="heading-icon">{trash ? "⌫" : "☁"}</span><strong>{trash ? "回收站" : collectionId ? collectionPath(collections, collectionId) : tag && !tag.startsWith("__") ? `#${tag}` : tag === "__notes__" ? "备注" : tag === "__untagged__" ? "没有标签" : "所有书签"}</strong></> : <div className="brand"><span className="brand-mark">◆</span><strong>私有书签</strong></div>}</div><div className="header-actions">{kind !== "library" && <button onClick={toggleTrash}>{trash ? "返回书签" : "回收站"}</button>}{kind !== "library" && <button onClick={() => chrome.tabs.create({ url: chrome.runtime.getURL("library.html") })}>完整页面</button>}{kind !== "library" && <button onClick={() => chrome.tabs.create({ url: chrome.runtime.getURL("library.html?settings=ai") })}>AI / 高级设置</button>}{kind === "library" && <button onClick={() => setShowAdvanced(true)}>AI / 高级设置</button>}{kind === "popup" && <button onClick={() => chrome.runtime.sendMessage({ type: "private-bookmarks-save-current" }).then(load)}>保存当前页</button>}<button className="primary" onClick={() => setSelected(null)}>＋ 添加</button></div></header>
+    <section className="toolbar"><label className="search"><span>⌕</span><input value={query} onChange={(event) => { const value = event.target.value; setQuery(value); navigateLibraryRoute({ ...route(), query: value }, "replace"); }} placeholder="搜索" /></label><span className="count">{loadStatus === "ready" ? `${visible.length} 个书签` : "正在加载…"}</span></section>
+    <LibraryLoadState status={loadStatus} message={loadMessage} retry={load} />
+    {loadStatus === "ready" && <BatchControls selectedCount={selectedIds.length} visibleCount={visible.length} allSelected={visible.length > 0 && selectedIds.length === visible.length} trash={trash} collections={collections} onSelectAll={selectAll} onAction={applyBatch} />}
+    {loadStatus === "ready" && <div className="local-tools"><button onClick={createCollection}>新建收藏夹</button><button onClick={async () => download(await exportLibrary())}>导出</button><label className="file-button">导入<input type="file" accept="application/json" onChange={async (event) => { const file = event.target.files?.[0]; if (file) { await importLibrary(JSON.parse(await file.text())); load(); } }} /></label><MigrationTransfer onApplied={load} /><label className="action-mode-setting">操作模式<select value={actionMode} onChange={async (event) => { const mode = event.target.value as ActionMode; try { await updateActionMode(mode); setActionModeState(mode); } catch (reason) { setError(reason instanceof Error ? reason.message : "保存操作模式失败"); } }}><option value="popup">弹出窗口</option><option value="sidepanel">侧边栏</option></select></label><label className="sync-toggle"><input type="checkbox" checked={syncConfig.enabled} onChange={async (event) => { const settings = await setSyncSettings({ enabled: event.target.checked }); setSyncConfig(settings); await chrome.runtime.sendMessage({ type: "private-bookmarks-sync-settings", settings }); }} />Cloudflare 同步</label><input className="sync-interval" type="number" min="1" value={syncConfig.intervalMinutes} aria-label="同步间隔（分钟）" onChange={async (event) => setSyncConfig(await setSyncSettings({ intervalMinutes: Math.max(1, Number(event.target.value) || 15) }))} /><button disabled={!syncConfig.enabled || syncing} onClick={async () => { setSyncing(true); try { await syncOnce(); await load(); } catch (reason) { setError(reason instanceof Error ? reason.message : "同步失败"); } finally { setSyncing(false); } }}>{syncing ? "同步中…" : "立即同步"}</button><button onClick={async () => { setShowDav(!showDav); if (!showDav && dav.enabled) setDavNames(await listBackups().catch(() => [])); }}>WebDAV备份</button>{lock && <button onClick={() => setShowLockSettings((value) => !value)}>{lock.enabled ? "应用锁" : "启用应用锁"}</button>}</div>}
+    {loadStatus === "ready" && lock && showLockSettings && <LockSettings status={lock} onChange={setLock} />}
+    {loadStatus === "ready" && showDav && <section className="webdav"><label><input type="checkbox" checked={dav.enabled} onChange={(event) => setDav({ ...dav, enabled: event.target.checked })} />启用WebDAV</label><label>地址<input value={dav.endpoint} onChange={(event) => setDav({ ...dav, endpoint: event.target.value })} placeholder="https://dav.example.com/path" /></label><label>用户名<input value={dav.username} onChange={(event) => setDav({ ...dav, username: event.target.value })} /></label><label>密码<input type="password" value={dav.password} onChange={(event) => setDav({ ...dav, password: event.target.value })} /></label><label>备份加密密码（可选）<input type="password" value={dav.encryptionPassword} onChange={(event) => setDav({ ...dav, encryptionPassword: event.target.value })} /></label><label>保留份数<input type="number" min="3" max="50" value={dav.retention} onChange={(event) => setDav({ ...dav, retention: Number(event.target.value) })} /></label><div className="webdav-actions"><button onClick={() => davAction(async () => { const url = new URL(dav.endpoint); if (!await chrome.permissions.request({ origins: [`${url.origin}/*`] })) throw new TypeError("未获得WebDAV站点权限"); setDav(await configureWebdav(dav)); })}>保存设置</button><button className="primary" disabled={!dav.enabled} onClick={() => davAction(() => createWebdavBackup(dav))}>立即备份</button></div>{dav.lastBackupAt && <small>上次备份：{new Date(dav.lastBackupAt).toLocaleString()}</small>}{davNames.map((name) => <div className="backup-row" key={name}><span>{name}</span><button onClick={() => davAction(async () => { const result = await restoreWebdavBackup(name, "merge", dav); download(result.safety, "pre-restore-safety.json"); })}>合并恢复</button><button onClick={() => davAction(async () => { if (!confirm("覆盖本地资料库？当前数据会先下载为安全快照。")) return; const result = await restoreWebdavBackup(name, "replace", dav); download(result.safety, "pre-restore-safety.json"); })}>覆盖恢复</button></div>)}</section>}
+    {loadStatus === "ready" && <ConflictCenter conflicts={conflicts} kind={kind} reload={load} />}
+    {error && <p className="error" role="alert">{error}</p>}
+    {loadStatus === "ready" && <><section className="bookmark-list">{visible.map((item, index) => <article className={`bookmark-card ${focused?.id === item.id ? "focused" : ""} ${selectedIds.includes(item.id) ? "selected" : ""}`} key={item.id} style={{ "--stagger": Math.min(index, 12) } as CSSProperties} onClick={() => setFocused(item)}><label className="bookmark-select"><input type="checkbox" checked={selectedIds.includes(item.id)} onChange={(event) => setSelectedIds((ids) => event.target.checked ? [...ids, item.id] : ids.filter((id) => id !== item.id))} aria-label={`选择 ${item.title || item.link}`} /></label><div className="bookmark-cover"><img src={item.cover || "icons/bookmark.svg"} alt="" /></div><div className="bookmark-card-body"><a className="bookmark-title" href={item.link} target="_blank" rel="noreferrer">{item.title || item.link}</a><div className="bookmark-details">{item.note || item.description || ""}</div><div className="bookmark-meta"><span>{collections.find((value) => value.id === item.collectionId)?.name || "未分类"}</span>{item.tags.map((value) => <button type="button" key={value} onClick={(event) => { event.stopPropagation(); chooseTag(value); }}>#{value}</button>)}</div><small className="bookmark-link">{item.link}</small><div className="card-actions">{trash ? <button onClick={async (event) => { event.stopPropagation(); await restoreBookmark(item.id); load(); }}>恢复</button> : <><button onClick={(event) => { event.stopPropagation(); setSelected(item); }}>编辑</button><button className="danger" onClick={async (event) => { event.stopPropagation(); await trashBookmark(item.id); setFocused(null); load(); }}>删除</button></>}</div></div></article>)}</section>{!visible.length && <p className="empty" role="status">{query.trim() ? "没有匹配的书签" : trash ? "回收站为空" : collectionId ? "此收藏夹还没有书签" : "还没有书签"}</p>}</>}{selected !== undefined && <Editor item={selected || undefined} collections={collections} contextItems={items} close={(saved) => { setSelected(undefined); if (saved) load(); }} />}{kind === "library" && <AdvancedSettings open={showAdvanced} onClose={() => setShowAdvanced(false)} />}
     </section>
+    {kind === "library" && <DetailPanel item={focused} onEdit={() => focused && setSelected(focused)} onClose={() => setFocused(null)} />}
   </main>;
 }
 
