@@ -453,6 +453,34 @@ test("collection API creates nested collections and bootstrap returns preference
   assert.equal(data.trashCount, 0);
 });
 
+test("bootstrap returns safe cloud connection statuses for the settings center", async () => {
+  const store = new MemoryStore();
+  store.listCloudConnections = async () => [{
+    provider: "dropbox",
+    accessToken: "secret-access-token",
+    refreshToken: "secret-refresh-token",
+    accountName: "Tester",
+    accountEmail: "tester@example.com",
+    connectedAt: "2026-08-24T00:00:00.000Z",
+  }];
+  const api = createApi({
+    key: "test-key",
+    store,
+    oauth: { dropbox: { clientId: "client", clientSecret: "secret" } },
+  });
+
+  const data = await (await api.fetch(request("/v1/bootstrap"))).json();
+  assert.deepEqual(data.cloudConnections.find((item) => item.provider === "dropbox"), {
+    provider: "dropbox",
+    configured: true,
+    connected: true,
+    accountName: "Tester",
+    accountEmail: "tester@example.com",
+    connectedAt: "2026-08-24T00:00:00.000Z",
+  });
+  assert.equal(JSON.stringify(data.cloudConnections).includes("secret-"), false);
+});
+
 test("bookmark and tag list APIs forward reference sorting options", async () => {
   const store = new MemoryStore();
   const api = createApi({ key: "test-key", store });
