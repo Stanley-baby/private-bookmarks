@@ -71,6 +71,23 @@ async function listBookmarks({ trash = false } = {}) {
   const items = await request((await store("bookmarks")).getAll());
   return items.filter((item) => trash ? Boolean(item.deletedAt) && !item.purgedAt && !item.permanentDeletedAt : !item.deletedAt && !item.purgedAt && !item.permanentDeletedAt).sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
 }
+async function healthCandidates(before, scope = null) {
+  const value = typeof scope === "string" ? { collectionId: scope } : scope || {};
+  const ids = Array.isArray(value.ids) ? new Set(value.ids) : null;
+  let collectionIds = null;
+  if (value.collectionId) collectionIds = collectionSubtreeIds(await listCollections(), value.collectionId);
+  return (await listBookmarks()).filter((item) =>
+    (value.force || !item.health?.checkedAt || item.health.checkedAt < before)
+    && (!ids || ids.has(item.id))
+    && (!value.favorite || item.favorite)
+    && (!collectionIds || collectionIds.has(item.collectionId))
+  );
+}
+async function updateHealth(id, health) {
+  const item = await request((await store("bookmarks")).get(id));
+  if (!item || item.deletedAt || item.purgedAt || item.permanentDeletedAt) return null;
+  return saveBookmark({ ...item, health: { ...item.health, ...health, checkedAt: new Date().toISOString() } });
+}
 async function listCollections({ trash = false } = {}) {
   const items = await request((await store("collections")).getAll());
   if (trash) {
@@ -424,6 +441,14 @@ async function setSyncSettings(input) {
   await request((await store("settings", "readwrite")).put(value, "sync"));
   return value;
 }
+async function healthProgress() {
+  return (await request((await store("settings")).get("healthProgress"))) || { status: "idle", checked: 0, total: 0, errors: 0, updatedAt: "" };
+}
+async function setHealthProgress(value) {
+  const next = { ...await healthProgress(), ...value, updatedAt: new Date().toISOString() };
+  await request((await store("settings", "readwrite")).put(next, "healthProgress"));
+  return next;
+}
 async function listConflicts() {
   return request((await store("conflicts")).getAll());
 }
@@ -558,6 +583,8 @@ export {
   exportLibrary,
   exportMigrationPackage,
   getActionMode,
+  healthProgress,
+  healthCandidates,
   getPreferences,
   cleanEmptyCollections,
   importLibrary,
@@ -586,6 +613,7 @@ export {
   sortCollections,
   saveConflict,
   setActionMode,
+  setHealthProgress,
   setSyncSettings,
   setWebdavSettings,
   syncSettings,
@@ -593,5 +621,6 @@ export {
   permanentDeleteBookmark,
   trashCollection,
   updatePreferences,
+  updateHealth,
   webdavSettings
 };

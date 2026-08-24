@@ -25,6 +25,9 @@ test("the production WXT build mounts the shared React bundle on every user-faci
     assert.match(html, /<script type="module"[^>]+src="\/chunks\/main-[^\"]+\.js"/, `${name} needs the React bundle`);
     assert.doesNotMatch(html, /(?:src\/)?legacy\//, `${name} must not load the legacy runtime`);
   }
+  const manifest = JSON.parse(readFileSync(`${buildRoot}/manifest.json`, "utf8"));
+  assert.ok(manifest.optional_permissions.includes("tabs"), "tab capture remains optional");
+  assert.ok(manifest.content_scripts.some((script) => script.js.includes("content-scripts/content.js")), "highlights need the WXT content script");
 });
 
 test("migration file selection previews without applying until an explicit decision", async () => {

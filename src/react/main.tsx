@@ -4,7 +4,7 @@ import { changePin, disablePin, enablePin, forgetPin, lockNow, lockState, prepar
 import { configureWebdav, createWebdavBackup, listBackups, restoreWebdavBackup } from "../backup/webdav";
 import { DEFAULT_PREFERENCES, batchBookmarks, exportLibrary, exportMigrationPackage, getActionMode, getPreferences, importLibrary, initialize, initialized, listBookmarks, listCollections, listConflicts, moveCollection, permanentDeleteBookmark, resolveConflict, restoreBookmark, saveBookmark, saveBookmarkWithCollection, saveCollection, setSyncSettings, syncSettings, trashBookmark, updatePreferences, webdavSettings, type ActionMode, type Bookmark, type BookmarkBatchAction, type BookmarkConflictChoices, type Collection } from "../../extension/shared/local-db.js";
 import { syncOnce } from "../local/sync";
-import { BOOKMARK_CONFLICT_FIELDS, fileToCover, mergeBookmarkConflict } from "../../extension/shared/local-model.js";
+import { BOOKMARK_CONFLICT_FIELDS, fileToCover, fileToMedia, mergeBookmarkConflict } from "../../extension/shared/local-model.js";
 import { recommendBookmark } from "../../extension/shared/recommendations.js";
 import { workerClient } from "../../extension/shared/worker-client.js";
 import { collectionPath, descendantCollectionIds, flattenCollections } from "./collection-navigation.js";
@@ -15,6 +15,8 @@ import { createMigrationTransfer } from "./migration-transfer.js";
 import { filterBookmarks, reorderVisibleIds, searchSuggestions, sortBookmarks, visibleSelection } from "./library-view.js";
 import { renderMarkdown } from "../../extension/shared/markdown.js";
 import { currentPageDraft, saveFeedback } from "./surface-workflows.js";
+import { previewImport } from "../../extension/shared/import-preview.js";
+import { exportCsv, exportHtml, exportSummary, exportTxt, exportZip, scopedExport } from "../../extension/shared/export-formats.js";
 import "./styles.css";
 
 declare const chrome: any;
@@ -34,6 +36,7 @@ type AiSuggestion = {
 const AUTO_LOCK_OPTIONS = [["open", "每次打开"], ["1", "1 分钟"], ["5", "5 分钟"], ["15", "15 分钟"], ["30", "30 分钟"], ["60", "1 小时"], ["never", "从不"]] as const;
 const COLLAPSED_COLLECTIONS_KEY = "private-bookmarks.collapsed-collections";
 const SEARCH_HISTORY_KEY = "private-bookmarks.search-history";
+const IMPORT_PROGRESS_KEY = "private-bookmarks.import-progress";
 
 function readSearchHistory() {
   try {
@@ -59,6 +62,14 @@ function persistCollapsedCollections(value: Set<string>) {
   try { localStorage.setItem(COLLAPSED_COLLECTIONS_KEY, JSON.stringify([...value])); } catch { /* storage is optional */ }
 }
 
+function readImportPreview() {
+  try { return JSON.parse(localStorage.getItem(IMPORT_PROGRESS_KEY) || "null"); } catch { return null; }
+}
+
+function persistImportPreview(value: unknown) {
+  try { if (value) localStorage.setItem(IMPORT_PROGRESS_KEY, JSON.stringify(value)); else localStorage.removeItem(IMPORT_PROGRESS_KEY); } catch { /* storage is optional */ }
+}
+
 async function updateActionMode(mode: ActionMode) {
   const response = await chrome.runtime.sendMessage({ type: "private-bookmarks-set-action-mode", mode });
   if (response?.error) throw new Error(response.error);
@@ -66,8 +77,9 @@ async function updateActionMode(mode: ActionMode) {
 }
 
 function download(value: unknown, name = `private-bookmarks-${new Date().toISOString().slice(0, 10)}.json`) {
+  const blob = value instanceof Blob ? value : value instanceof Uint8Array ? new Blob([value.slice().buffer as ArrayBuffer]) : typeof value === "string" ? new Blob([value]) : new Blob([JSON.stringify(value, null, 2)], { type: "application/json" });
   const link = document.createElement("a");
-  link.href = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: "application/json" }));
+  link.href = URL.createObjectURL(blob);
   link.download = name; link.click(); URL.revokeObjectURL(link.href);
 }
 
@@ -316,12 +328,24 @@ function Editor({ item, initial, collections, contextItems, close }: { item?: Bo
       setCoverError(reason instanceof Error ? reason.message : "应用建议失败");
     } finally { setSuggestionBusy(false); }
   };
+  const addMedia = async (files?: FileList | null) => {
+    if (!files?.length) return;
+    setCoverError("");
+    try {
+      const upload = await workerClient.connection() ? workerClient.media.upload : undefined;
+      const results = await Promise.allSettled([...files].map((file) => fileToMedia(file, upload)));
+      const accepted = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+      setMedia(JSON.stringify([...jsonArray(media, "媒体"), ...accepted], null, 2));
+      const failed = results.flatMap((result) => result.status === "rejected" ? [result.reason instanceof Error ? result.reason.message : "媒体上传失败"] : []);
+      if (failed.length) setCoverError(`以下媒体未保存：${failed.join("；")}`);
+    } catch (reason) { setCoverError(reason instanceof Error ? reason.message : "媒体上传失败"); }
+  };
   const save = async (event: FormEvent) => {
     event.preventDefault(); setCoverError("");
     try { close(await saveBookmark(draft())); }
     catch (reason) { setCoverError(reason instanceof Error ? reason.message : "保存失败"); }
   };
-  return <dialog open className="editor"><form onSubmit={save}><h2>{item ? "编辑书签" : "添加书签"}</h2><div className="editor-compatibility">{item ? <>ID：{item.id} · 修订 {item.revision || 0} · 创建于 {item.createdAt ? new Date(item.createdAt).toLocaleString() : "未知"}</> : "保存后生成兼容 ID、时间和修订号"}{item?.source !== undefined && <> · 来源：{typeof item.source === "string" ? item.source : "已记录"}</>}</div><label>网址<input name="link" type="url" value={link} onChange={(event) => setLink(event.target.value)} required autoFocus /></label><label>标题<input name="title" value={title} onChange={(event) => setTitle(event.target.value)} /></label><label>描述<textarea name="description" value={description} onChange={(event) => setDescription(event.target.value)} /></label><label>备注<div className="markdown-editor">{previewNote ? <div className="markdown-preview" aria-label="Markdown 预览" dangerouslySetInnerHTML={{ __html: renderMarkdown(note) }} /> : <textarea name="note" value={note} onChange={(event) => setNote(event.target.value)} />}<button type="button" className="markdown-toggle" aria-pressed={previewNote} onClick={() => setPreviewNote((value) => !value)}>{previewNote ? "编辑 Markdown" : "预览 Markdown"}</button></div></label><label>收藏夹<select name="collectionId" value={collectionId} onChange={(event) => setCollectionId(event.target.value)}><option value="unsorted">未分类</option>{collections.filter((value) => value.id !== "unsorted").map((value) => <option key={value.id} value={value.id}>{value.name}</option>)}</select></label><label>标签（逗号分隔）<input name="tags" value={tags} onChange={(event) => setTags(event.target.value)} /></label><div className="editor-field-grid"><label>类型<select name="type" value={type} onChange={(event) => setType(event.target.value)}>{[["link", "链接"], ["article", "文章"], ["image", "图片"], ["video", "视频"], ["audio", "音频"], ["document", "文档"]].map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label>语言<input name="language" value={language} onChange={(event) => setLanguage(event.target.value)} placeholder="zh-CN" /></label><label className="check-row"><input name="favorite" type="checkbox" checked={favorite} onChange={(event) => setFavorite(event.target.checked)} />收藏</label><label>提醒<input name="reminder" type="datetime-local" value={reminder} onChange={(event) => setReminder(event.target.value)} /></label></div><label>封面 URL<input name="cover" type="url" value={cover.startsWith("data:") ? "" : cover} onChange={(event) => setCover(event.target.value)} placeholder="https://…" /></label><label>上传封面<input type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/avif,image/svg+xml" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; try { setCover(await fileToCover(file)); setCoverError(""); } catch (reason) { setCoverError(reason instanceof Error ? reason.message : "封面读取失败"); } }} />{cover && <><img className="editor-cover-preview" src={cover} alt="当前封面预览" /><button type="button" onClick={() => setCover("")}>移除封面</button></>}{coverError && <small className="error">{coverError}</small>}</label><div className="editor-field-grid"><label>媒体（JSON 数组）<textarea name="media" rows={3} value={media} onChange={(event) => setMedia(event.target.value)} /></label><label>高亮（JSON 数组）<textarea name="highlights" rows={3} value={highlights} onChange={(event) => setHighlights(event.target.value)} /></label></div><div className="editor-field-grid"><label>健康状态<select name="healthStatus" value={healthStatus} onChange={(event) => setHealthStatus(event.target.value)}><option value="unknown">未知</option><option value="healthy">正常</option><option value="broken">失效</option></select></label><label>检查时间<input name="healthCheckedAt" type="datetime-local" value={healthCheckedAt} onChange={(event) => setHealthCheckedAt(event.target.value)} /></label><label>最终 URL<input name="finalUrl" type="url" value={healthFinalUrl} onChange={(event) => setHealthFinalUrl(event.target.value)} /></label></div><section className="recommendation-box"><div className="recommendation-actions"><button type="button" disabled={suggestionBusy} onClick={() => requestSuggestion("local")}>本地建议</button><button type="button" disabled={suggestionBusy || aiAvailable === false} onClick={() => requestSuggestion("ai")}>AI 建议</button></div>{aiAvailable === false && <p className="muted">AI 推荐不可用（可选）；本地书签不受影响。</p>}{suggestionNotice && <p className="error">{suggestionNotice}</p>}{suggestion && <div className="recommendation-preview"><strong>{suggestionMode === "ai" ? "AI 建议预览" : "本地建议预览"}</strong>{suggestion.collectionId && <div>收藏夹：{recommendationCollectionName(suggestion.collectionId, collections)}</div>}{suggestion.newCollection?.name && <div>新收藏夹：{suggestion.newCollection.name}{suggestion.newCollection.parentId ? `（位于 ${recommendationCollectionName(suggestion.newCollection.parentId, collections)}）` : ""}</div>}{suggestion.tags?.length ? <div>标签：{suggestion.tags.join(", ")}</div> : null}{suggestion.note && <div>备注：{suggestion.note}</div>}<button type="button" className="primary" disabled={suggestionBusy} onClick={applySuggestion}>确认并应用</button></div>}</section><menu><button type="button" onClick={() => close(false)}>取消</button><button className="primary">保存</button></menu></form></dialog>;
+  return <dialog open className="editor"><form onSubmit={save}><h2>{item ? "编辑书签" : "添加书签"}</h2><div className="editor-compatibility">{item ? <>ID：{item.id} · 修订 {item.revision || 0} · 创建于 {item.createdAt ? new Date(item.createdAt).toLocaleString() : "未知"}</> : "保存后生成兼容 ID、时间和修订号"}{item?.source !== undefined && <> · 来源：{typeof item.source === "string" ? item.source : "已记录"}</>}</div><label>网址<input name="link" type="url" value={link} onChange={(event) => setLink(event.target.value)} required autoFocus /></label><label>标题<input name="title" value={title} onChange={(event) => setTitle(event.target.value)} /></label><label>描述<textarea name="description" value={description} onChange={(event) => setDescription(event.target.value)} /></label><label>备注<div className="markdown-editor">{previewNote ? <div className="markdown-preview" aria-label="Markdown 预览" dangerouslySetInnerHTML={{ __html: renderMarkdown(note) }} /> : <textarea name="note" value={note} onChange={(event) => setNote(event.target.value)} />}<button type="button" className="markdown-toggle" aria-pressed={previewNote} onClick={() => setPreviewNote((value) => !value)}>{previewNote ? "编辑 Markdown" : "预览 Markdown"}</button></div></label><label>收藏夹<select name="collectionId" value={collectionId} onChange={(event) => setCollectionId(event.target.value)}><option value="unsorted">未分类</option>{collections.filter((value) => value.id !== "unsorted").map((value) => <option key={value.id} value={value.id}>{value.name}</option>)}</select></label><label>标签（逗号分隔）<input name="tags" value={tags} onChange={(event) => setTags(event.target.value)} /></label><div className="editor-field-grid"><label>类型<select name="type" value={type} onChange={(event) => setType(event.target.value)}>{[["link", "链接"], ["article", "文章"], ["image", "图片"], ["video", "视频"], ["audio", "音频"], ["document", "文档"]].map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label>语言<input name="language" value={language} onChange={(event) => setLanguage(event.target.value)} placeholder="zh-CN" /></label><label className="check-row"><input name="favorite" type="checkbox" checked={favorite} onChange={(event) => setFavorite(event.target.checked)} />收藏</label><label>提醒<input name="reminder" type="datetime-local" value={reminder} onChange={(event) => setReminder(event.target.value)} /></label></div><label>封面 URL<input name="cover" type="url" value={cover.startsWith("data:") ? "" : cover} onChange={(event) => setCover(event.target.value)} placeholder="https://…" /></label><label>上传封面<input type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/avif,image/svg+xml" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; try { setCover(await fileToCover(file)); setCoverError(""); } catch (reason) { setCoverError(reason instanceof Error ? reason.message : "封面读取失败"); } }} />{cover && <><img className="editor-cover-preview" src={cover} alt="当前封面预览" /><button type="button" onClick={() => setCover("")}>移除封面</button></>}{coverError && <small className="error">{coverError}</small>}</label><div className="editor-field-grid"><label>上传媒体<input type="file" multiple onChange={(event) => { addMedia(event.target.files); event.currentTarget.value = ""; }} /></label><label>媒体（JSON 数组）<textarea name="media" rows={3} value={media} onChange={(event) => setMedia(event.target.value)} /></label><label>高亮（JSON 数组）<textarea name="highlights" rows={3} value={highlights} onChange={(event) => setHighlights(event.target.value)} /></label></div><div className="editor-field-grid"><label>健康状态<select name="healthStatus" value={healthStatus} onChange={(event) => setHealthStatus(event.target.value)}><option value="unknown">未知</option><option value="healthy">正常</option><option value="broken">失效</option></select></label><label>检查时间<input name="healthCheckedAt" type="datetime-local" value={healthCheckedAt} onChange={(event) => setHealthCheckedAt(event.target.value)} /></label><label>最终 URL<input name="finalUrl" type="url" value={healthFinalUrl} onChange={(event) => setHealthFinalUrl(event.target.value)} /></label></div><section className="recommendation-box"><div className="recommendation-actions"><button type="button" disabled={suggestionBusy} onClick={() => requestSuggestion("local")}>本地建议</button><button type="button" disabled={suggestionBusy || aiAvailable === false} onClick={() => requestSuggestion("ai")}>AI 建议</button></div>{aiAvailable === false && <p className="muted">AI 推荐不可用（可选）；本地书签不受影响。</p>}{suggestionNotice && <p className="error">{suggestionNotice}</p>}{suggestion && <div className="recommendation-preview"><strong>{suggestionMode === "ai" ? "AI 建议预览" : "本地建议预览"}</strong>{suggestion.collectionId && <div>收藏夹：{recommendationCollectionName(suggestion.collectionId, collections)}</div>}{suggestion.newCollection?.name && <div>新收藏夹：{suggestion.newCollection.name}{suggestion.newCollection.parentId ? `（位于 ${recommendationCollectionName(suggestion.newCollection.parentId, collections)}）` : ""}</div>}{suggestion.tags?.length ? <div>标签：{suggestion.tags.join(", ")}</div> : null}{suggestion.note && <div>备注：{suggestion.note}</div>}<button type="button" className="primary" disabled={suggestionBusy} onClick={applySuggestion}>确认并应用</button></div>}</section><menu><button type="button" onClick={() => close(false)}>取消</button><button className="primary">保存</button></menu></form></dialog>;
 }
 
 function navigationCollections(collections: Collection[]) {
@@ -448,18 +472,79 @@ function LibraryLoadState({ status, message, retry }: { status: LibraryLoadStatu
   return <section className="library-state library-state-error" role="alert"><strong>资料库加载失败</strong><p>{message}</p><button className="primary" type="button" onClick={retry}>重试</button></section>;
 }
 
+function TransferPanel({ items, collections, collectionId, selectedIds, reload }: { items: Bookmark[]; collections: Collection[]; collectionId: string; selectedIds: string[]; reload: () => Promise<void> }) {
+  const [preview, setPreview] = useState<any>(readImportPreview), [busy, setBusy] = useState(false), [result, setResult] = useState("");
+  const selected = selectedIds.length ? selectedIds : null;
+  const summary = exportSummary(scopedExport({ bookmarks: items, collections }, selected ? null : collectionId || null, selected));
+  const chooseFile = async (file?: File) => {
+    if (!file) return;
+    setBusy(true); setResult("");
+    try { const next = previewImport(await file.text(), { name: file.name, type: file.type }, items.map((item) => item.link)); setPreview(next); persistImportPreview(next); }
+    catch (reason) { setPreview(null); persistImportPreview(null); setResult(reason instanceof Error ? reason.message : "无法解析导入文件"); }
+    finally { setBusy(false); }
+  };
+  const importItems = async () => {
+    if (!preview || busy) return;
+    setBusy(true); setResult("");
+    const cache = new Map(collections.filter((item) => !item.deletedAt).map((item) => [`${item.parentId || ""}\u0000${item.name}`, item.id]));
+    const ensureCollection = async (path: string[] = []) => {
+      let parentId: string | null = null;
+      for (const name of path.filter(Boolean)) {
+        const key: string = `${parentId || ""}\u0000${name}`;
+        if (!cache.has(key)) cache.set(key, (await saveCollection({ name, parentId })).id);
+        parentId = cache.get(key) || null;
+      }
+      return parentId || "unsorted";
+    };
+    const upload = await workerClient.connection() ? workerClient.media.upload : undefined;
+    const failures: string[] = [];
+    const existing = new Set((await listBookmarks()).map((item) => item.link));
+    let saved = 0;
+    for (const item of preview.items.filter((item: Bookmark) => !existing.has(item.link))) {
+      try {
+        const resources = [];
+        for (const resource of item.resources || []) {
+          if (resource.error) { failures.push(`${item.title || item.link}：${resource.error}`); continue; }
+          try {
+            const binary = atob(String(resource.data || ""));
+            const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+            resources.push(await fileToMedia({ name: resource.name || "attachment", type: resource.mime || "application/octet-stream", arrayBuffer: async () => bytes.buffer }, upload));
+          } catch (reason) { failures.push(`${item.title || item.link}：${reason instanceof Error ? reason.message : "附件导入失败"}`); }
+        }
+        const { collectionPath, resources: _resources, ...bookmark } = item;
+        await saveBookmark({ ...bookmark, collectionId: await ensureCollection(collectionPath), media: [...(bookmark.media || []), ...resources] });
+        saved += 1; existing.add(item.link);
+      } catch (reason) { failures.push(`${item.title || item.link}：${reason instanceof Error ? reason.message : "导入失败"}`); }
+    }
+    setBusy(false); setPreview(null); persistImportPreview(null); setResult(`已导入 ${saved} 条；跳过重复 ${preview.duplicates} 条${failures.length ? `；${failures.length} 项失败：${failures.join("；")}` : ""}`); await reload();
+  };
+  const exportItems = async (format: "json" | "csv" | "html" | "txt" | "zip") => {
+    setBusy(true); setResult("");
+    try {
+      const backup = scopedExport(await exportLibrary(), selected ? null : collectionId || null, selected);
+      const content = format === "json" ? backup : format === "csv" ? exportCsv(backup) : format === "html" ? exportHtml(backup) : format === "txt" ? exportTxt(backup) : await exportZip(backup);
+      download(content, `private-bookmarks.${format}`);
+      const failures = format === "zip" ? (content as any).failures || [] : [];
+      setResult(`已导出 ${format.toUpperCase()}：${exportSummary(backup).bookmarks} 条书签${failures.length ? `；${failures.length} 个媒体未归档` : ""}`);
+    } catch (reason) { setResult(reason instanceof Error ? reason.message : "导出失败"); }
+    finally { setBusy(false); }
+  };
+  return <section className="transfer-panel" aria-label="导入与导出"><span>范围：{selected ? `已选 ${selected.length} 项` : collectionId ? "当前收藏夹树" : "全部资料库"} · {summary.bookmarks} 条 · 媒体 {summary.media} · 约 {Math.ceil(summary.estimatedBytes / 1024)} KB</span><div><label className="file-button">导入<input type="file" accept="application/json,.json,text/html,.html,.htm,text/csv,.csv,text/plain,.txt,.enex" disabled={busy} onChange={(event) => { chooseFile(event.target.files?.[0]); event.currentTarget.value = ""; }} /></label>{(["json", "html", "csv", "txt", "zip"] as const).map((format) => <button key={format} disabled={busy} onClick={() => exportItems(format)}>{format.toUpperCase()}</button>)}</div>{preview && <div className="transfer-preview"><strong>{preview.format.toUpperCase()} 预览</strong><span>记录 {preview.records} · 收藏 {preview.favorites} · 重复 {preview.duplicates} · 无效 {preview.invalid.length} · 媒体 {preview.media}</span>{preview.invalid.length > 0 && <small>问题：{preview.invalid.slice(0, 3).map((item: any) => `${item.reason} ${item.value}`).join("；")}</small>}<button className="primary" disabled={busy || !preview.items.length} onClick={importItems}>导入有效记录</button><button disabled={busy} onClick={() => { setPreview(null); persistImportPreview(null); }}>取消</button></div>}{result && <p className="notice" role="status">{result}</p>}</section>;
+}
+
 function DetailPanel({ item, onEdit, onClose }: { item: Bookmark | null; onEdit: () => void; onClose: () => void }) {
   return <aside className="workspace-detail" aria-label="书签详情"><header><strong>书签详情</strong>{item && <button type="button" onClick={onClose} aria-label="关闭详情">×</button>}</header>{item ? <article className="detail-content"><img src={item.cover || "icons/bookmark.svg"} alt="" /><h2>{item.title || item.link}</h2><a href={item.link} target="_blank" rel="noreferrer">{item.link}</a>{item.description && <p>{item.description}</p>}{item.note && <div className="markdown-preview" dangerouslySetInnerHTML={{ __html: renderMarkdown(item.note) }} />}{item.health?.finalUrl && <p>最终 URL：<a href={item.health.finalUrl} target="_blank" rel="noreferrer">{item.health.finalUrl}</a></p>}<div className="bookmark-meta">{item.tags.map((value) => <span key={value}>#{value}</span>)}</div><button className="primary" type="button" onClick={onEdit}>编辑书签</button></article> : <p className="detail-empty">选择书签查看详情</p>}</aside>;
 }
 
 function App({ kind }: { kind: Surface }) {
   const initialRoute = useRef(readLibraryRoute(location.href) as LibraryRoute).current;
+  const searchInput = useRef<HTMLInputElement>(null);
   const [ready, setReady] = useState<boolean | null>(null), [items, setItems] = useState<Bookmark[]>([]), [collections, setCollections] = useState<Collection[]>([]);
   const [trashedCollections, setTrashedCollections] = useState<Collection[]>([]), [preferences, setPreferences] = useState<any>({});
   const [lock, setLock] = useState<LockStatus | null>(null);
   const [query, setQuery] = useState(initialRoute.query), [selected, setSelected] = useState<Bookmark | null | undefined>(), [draft, setDraft] = useState<Partial<Bookmark> | null>(null), [focused, setFocused] = useState<Bookmark | null>(null), [selectedIds, setSelectedIds] = useState<string[]>([]), [trash, setTrash] = useState(initialRoute.view === "trash"), [collectionId, setCollectionId] = useState(initialRoute.collectionId || ""), [tag, setTag] = useState(initialRoute.tag), [error, setError] = useState(""), [notice, setNotice] = useState("");
   const [loadStatus, setLoadStatus] = useState<LibraryLoadStatus>("loading"), [loadMessage, setLoadMessage] = useState("");
-  const [conflicts, setConflicts] = useState<any[]>([]), [syncConfig, setSyncConfig] = useState<any>({ enabled: false, intervalMinutes: 15 }), [syncing, setSyncing] = useState(false), [actionMode, setActionModeState] = useState<ActionMode>("popup");
+  const [conflicts, setConflicts] = useState<any[]>([]), [syncConfig, setSyncConfig] = useState<any>({ enabled: false, intervalMinutes: 15 }), [syncing, setSyncing] = useState(false), [healthChecking, setHealthChecking] = useState(false), [healthState, setHealthState] = useState<any>({ status: "idle", checked: 0, total: 0 }), [actionMode, setActionModeState] = useState<ActionMode>("popup");
   const [dav, setDav] = useState<any>({ enabled: false, endpoint: "", username: "", password: "", encryptionPassword: "", retention: 10 });
   const [showSettings, setShowSettings] = useState(() => Boolean(new URLSearchParams(location.search).get("settings")));
   const [collectionManagerOpen, setCollectionManagerOpen] = useState(false);
@@ -481,7 +566,14 @@ function App({ kind }: { kind: Surface }) {
     prepareLock().then(() => lockState()).then(setLock).catch(() => setLock({ enabled: false, locked: false, autoLock: "15", cooldownUntil: 0 }));
     initialized().then(setReady).catch((reason) => { setReady(true); setLoadStatus(classifyLibraryError(reason) as LibraryLoadStatus); setLoadMessage(loadErrorMessage(reason)); });
   }, []);
+  useEffect(() => { if (new URLSearchParams(location.search).get("focus") === "search") searchInput.current?.focus(); }, []);
   useEffect(() => { if (lock?.enabled) startLockMonitor(() => lockState().then(setLock)); }, [lock?.enabled]);
+  useEffect(() => {
+    const read = () => chrome.runtime.sendMessage({ type: "private-bookmarks-health-status" }).then((response: any) => response?.result && setHealthState(response.result)).catch(() => {});
+    read();
+    const timer = window.setInterval(read, 1_000);
+    return () => window.clearInterval(timer);
+  }, []);
   useEffect(() => { if (ready && lock && !lock.locked) { load(); syncOnce().then(load).catch(() => {}); } }, [ready, lock?.locked, trash]);
   useEffect(() => {
     document.documentElement.lang = preferences.language === "en" ? "en" : "zh-Hans";
@@ -541,6 +633,27 @@ function App({ kind }: { kind: Surface }) {
       setSelected(null);
     } catch (reason) { setError(reason instanceof Error ? reason.message : "无法读取当前页面"); }
   };
+  const captureCurrentPage = async () => {
+    setError(""); setNotice("");
+    try {
+      const response = await chrome.runtime.sendMessage({ type: "private-bookmarks-capture-screenshot" });
+      if (response?.error) throw new Error(response.error);
+      setNotice("页面截图已保存。"); await load();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "截图失败"); }
+  };
+  const checkHealth = async (scope: Record<string, unknown>) => {
+    setHealthChecking(true); setError("");
+    try {
+      const response = await chrome.runtime.sendMessage({ type: "private-bookmarks-health-check", scope });
+      if (response?.error) throw new Error(response.error);
+      setHealthState(response.result); setNotice("链接检查已开始；可继续使用资料库。");
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "链接检查失败"); }
+    finally { setHealthChecking(false); }
+  };
+  const cancelHealth = async () => {
+    const response = await chrome.runtime.sendMessage({ type: "private-bookmarks-health-cancel" });
+    if (response?.result) setHealthState(response.result);
+  };
   const openSettings = () => {
     const url = new URL(location.href); url.searchParams.set("settings", "app"); history.pushState({}, "", `${url.pathname}${url.search}${url.hash}`); setShowSettings(true);
   };
@@ -554,12 +667,12 @@ function App({ kind }: { kind: Surface }) {
     {kind === "library" && <LibrarySidebar collections={collections} items={items} trash={trash} collectionId={collectionId} tag={tag} chooseCollection={chooseCollection} chooseTag={chooseTag} toggleTrash={toggleTrash} createCollection={createCollection} onManage={() => setCollectionManagerOpen(true)} onDropCollection={dropCollection} collapsedCollections={collapsedCollections} toggleCollection={toggleCollection} />}
     <section className="app-main">
     <CollectionSwitcher collections={collections} collectionId={collectionId} trash={trash} tag={tag} chooseCollection={chooseCollection} chooseTag={chooseTag} toggleTrash={toggleTrash} />
-    <header className="app-header"><div className="app-heading">{kind === "library" ? <><span className="heading-icon">{trash ? "⌫" : "☁"}</span><strong>{trash ? "回收站" : collectionId ? collectionPath(collections, collectionId) : tag && !tag.startsWith("__") ? `#${tag}` : tag === "__notes__" ? "备注" : tag === "__untagged__" ? "没有标签" : "所有书签"}</strong></> : <div className="brand"><span className="brand-mark">◆</span><strong>私有书签</strong></div>}</div><div className="header-actions">{kind !== "library" && <button onClick={toggleTrash}>{trash ? "返回书签" : "回收站"}</button>}{kind !== "library" && <button onClick={() => chrome.tabs.create({ url: chrome.runtime.getURL("library.html") })}>完整页面</button>}{kind !== "library" && <button onClick={() => chrome.tabs.create({ url: chrome.runtime.getURL("library.html?settings=app") })}>设置</button>}{kind === "library" && <button onClick={openSettings}>设置</button>}{kind === "popup" && <button onClick={editCurrentPage}>保存当前页</button>}<button type="button" onClick={load}>刷新</button><button className="primary" onClick={addBookmark}>＋ 添加</button></div></header>
-    <section className="toolbar"><form className="search" onSubmit={(event) => { event.preventDefault(); rememberSearch(); }}><span>⌕</span><input value={query} list="library-search-suggestions" onBlur={rememberSearch} onChange={(event) => { const value = event.target.value; setQuery(value); navigateLibraryRoute({ ...route(), query: value }, "replace"); }} placeholder="搜索：React type:article lang:zh created:2026-08" aria-label="搜索书签" /><datalist id="library-search-suggestions">{searchSuggestions(query, searchHistory).map((value) => <option key={value} value={value} />)}</datalist>{searchHistory.length > 0 && <button type="button" onClick={() => { setSearchHistory([]); persistSearchHistory([]); }}>清除历史</button>}</form><label>排序<select aria-label="排序" value={sort} onChange={(event) => savePreference({ sort: event.target.value }).catch((reason) => setError(reason.message))}><option value="manual">手动顺序</option><option value="-created">创建时间 ↓</option><option value="created">创建时间 ↑</option><option value="title">标题 A–Z</option><option value="-title">标题 Z–A</option><option value="domain">网站 A–Z</option></select></label><label>布局<select aria-label="布局" value={layout} onChange={(event) => savePreference({ layoutByScope: { ...(preferences.layoutByScope || {}), [scopeKey]: event.target.value } }).catch((reason) => setError(reason.message))}><option value="list">列表</option><option value="grid">卡片</option><option value="board">心情看板</option><option value="masonry">瀑布流</option></select></label><span className="count">{loadStatus === "ready" ? `${visible.length} 个书签` : "正在加载…"}</span></section>
+    <header className="app-header"><div className="app-heading">{kind === "library" ? <><span className="heading-icon">{trash ? "⌫" : "☁"}</span><strong>{trash ? "回收站" : collectionId ? collectionPath(collections, collectionId) : tag && !tag.startsWith("__") ? `#${tag}` : tag === "__notes__" ? "备注" : tag === "__untagged__" ? "没有标签" : "所有书签"}</strong></> : <div className="brand"><span className="brand-mark">◆</span><strong>私有书签</strong></div>}</div><div className="header-actions">{kind !== "library" && <button onClick={toggleTrash}>{trash ? "返回书签" : "回收站"}</button>}{kind !== "library" && <button onClick={() => chrome.tabs.create({ url: chrome.runtime.getURL("library.html") })}>完整页面</button>}{kind !== "library" && <button onClick={() => chrome.tabs.create({ url: chrome.runtime.getURL("library.html?settings=app") })}>设置</button>}{kind === "library" && <button onClick={openSettings}>设置</button>}{kind === "popup" && <button onClick={editCurrentPage}>保存当前页</button>}{kind === "popup" && <button onClick={captureCurrentPage}>截取当前页</button>}<button type="button" onClick={load}>刷新</button><button className="primary" onClick={addBookmark}>＋ 添加</button></div></header>
+    <section className="toolbar"><form className="search" onSubmit={(event) => { event.preventDefault(); rememberSearch(); }}><span>⌕</span><input ref={searchInput} value={query} list="library-search-suggestions" onBlur={rememberSearch} onChange={(event) => { const value = event.target.value; setQuery(value); navigateLibraryRoute({ ...route(), query: value }, "replace"); }} placeholder="搜索：React type:article lang:zh created:2026-08" aria-label="搜索书签" /><datalist id="library-search-suggestions">{searchSuggestions(query, searchHistory).map((value) => <option key={value} value={value} />)}</datalist>{searchHistory.length > 0 && <button type="button" onClick={() => { setSearchHistory([]); persistSearchHistory([]); }}>清除历史</button>}</form><label>排序<select aria-label="排序" value={sort} onChange={(event) => savePreference({ sort: event.target.value }).catch((reason) => setError(reason.message))}><option value="manual">手动顺序</option><option value="-created">创建时间 ↓</option><option value="created">创建时间 ↑</option><option value="title">标题 A–Z</option><option value="-title">标题 Z–A</option><option value="domain">网站 A–Z</option></select></label><label>布局<select aria-label="布局" value={layout} onChange={(event) => savePreference({ layoutByScope: { ...(preferences.layoutByScope || {}), [scopeKey]: event.target.value } }).catch((reason) => setError(reason.message))}><option value="list">列表</option><option value="grid">卡片</option><option value="board">心情看板</option><option value="masonry">瀑布流</option></select></label><span className="count">{loadStatus === "ready" ? `${visible.length} 个书签` : "正在加载…"}</span></section>
     <LibraryLoadState status={loadStatus} message={loadMessage} retry={load} />
     {loadStatus === "ready" && <BatchControls selectedCount={selectedIds.length} visibleCount={visible.length} allSelected={visible.length > 0 && selectedIds.length === visible.length} trash={trash} collections={collections} manual={sort === "manual"} onSelectAll={selectAll} onAction={applyBatch} onReorder={(offset) => reorderSelected(offset).catch((reason) => setError(reason.message))} />}
     {loadStatus === "ready" && kind !== "popup" && <CollectionManager collections={collections} trashedCollections={trashedCollections} preferences={preferences} open={collectionManagerOpen} onOpenChange={setCollectionManagerOpen} onChanged={load} onPreferences={setPreferences} onError={setError} />}
-    {loadStatus === "ready" && <div className="local-tools"><button onClick={createCollection}>新建收藏夹</button><button onClick={async () => download(await exportLibrary())}>导出</button><label className="file-button">导入<input type="file" accept="application/json" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; try { await importLibrary(JSON.parse(await file.text())); await load(); } catch (reason) { setError(reason instanceof Error ? reason.message : "导入失败，当前输入未改变"); } finally { event.currentTarget.value = ""; } }} /></label><MigrationTransfer onApplied={load} /><button disabled={!syncConfig.enabled || syncing} onClick={async () => { setSyncing(true); try { await syncOnce(); await load(); } catch (reason) { setError(reason instanceof Error ? reason.message : "同步失败"); } finally { setSyncing(false); } }}>{syncing ? "同步中…" : "立即同步"}</button></div>}
+    {loadStatus === "ready" && <div className="local-tools"><button onClick={createCollection}>新建收藏夹</button><TransferPanel items={items} collections={collections} collectionId={collectionId} selectedIds={selectedIds} reload={load} /><MigrationTransfer onApplied={load} /><button disabled={healthChecking || healthState.status === "running"} onClick={() => checkHealth({ force: true })}>检查全库</button><button disabled={healthChecking || healthState.status === "running"} onClick={() => checkHealth({ favorite: true, force: true })}>检查收藏</button>{collectionId && <button disabled={healthChecking || healthState.status === "running"} onClick={() => checkHealth({ collectionId, force: true })}>检查收藏夹</button>}{selectedIds.length > 0 && <button disabled={healthChecking || healthState.status === "running"} onClick={() => checkHealth({ ids: selectedIds, force: true })}>检查已选</button>}{healthState.status === "running" && <><span className="count">检查中 {healthState.checked}/{healthState.total}</span><button onClick={cancelHealth}>取消检查</button></>}<button disabled={!syncConfig.enabled || syncing} onClick={async () => { setSyncing(true); try { await syncOnce(); await load(); } catch (reason) { setError(reason instanceof Error ? reason.message : "同步失败"); } finally { setSyncing(false); } }}>{syncing ? "同步中…" : "立即同步"}</button></div>}
     {loadStatus === "ready" && <ConflictCenter conflicts={conflicts} kind={kind} reload={load} />}
     {notice && <p className="notice" role="status">{notice}</p>}
     {error && <p className="error" role="alert">{error}</p>}

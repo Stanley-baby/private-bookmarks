@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyBookmarkBatch, normalizeBookmark, bytesToCover, fileToCover, filterSyncableOutbox, mergeBookmarkConflict } from "../extension/shared/local-model.js";
+import { applyBookmarkBatch, normalizeBookmark, bytesToCover, fileToCover, fileToMedia, filterSyncableOutbox, mergeBookmarkConflict } from "../extension/shared/local-model.js";
 
 test("local bookmarks normalize URLs, tags, defaults, and preserve creation time", () => {
   const item = normalizeBookmark(
@@ -99,6 +99,25 @@ test("custom covers stay local and validate image size/type", async () => {
   assert.equal(item.cover, cover);
   assert.match(item.coverRef.id, /^[0-9a-f-]{36}$/i);
   await assert.rejects(() => fileToCover({ type: "text/plain", arrayBuffer: async () => new ArrayBuffer(1) }), /请选择/);
+});
+
+test("media records retain their type, size, checksum, and uploaded reference", async () => {
+  const bytes = new Uint8Array([1, 2, 3]);
+  const media = await fileToMedia({ name: "clip.png", type: "image/png", arrayBuffer: async () => bytes.buffer }, async () => ({ id: "media-1", url: "https://private.example/v1/media/media-1" }));
+  assert.deepEqual(media, {
+    id: "media-1",
+    url: "https://private.example/v1/media/media-1",
+    name: "clip.png",
+    contentType: "image/png",
+    size: 3,
+    checksum: "039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81",
+  });
+});
+
+test("media validation rejects malformed types, checksums, and oversized files", async () => {
+  await assert.rejects(() => fileToMedia({ name: "bad", type: "not-a-type", arrayBuffer: async () => new ArrayBuffer(1) }), /媒体类型/);
+  await assert.rejects(() => fileToMedia({ name: "large", type: "image/png", arrayBuffer: async () => new ArrayBuffer(20 * 1024 * 1024 + 1) }), /媒体不能超过/);
+  assert.throws(() => normalizeBookmark({ link: "https://example.com", media: [{ url: "https://example.com/file", contentType: "image/png", size: 1, checksum: "invalid" }] }), /校验和/);
 });
 
 test("batch transforms preserve metadata and create syncable tombstones", () => {

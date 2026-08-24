@@ -172,34 +172,40 @@ export async function mediaArchiveEntries(backup, options = {}) {
   const references = collectMediaReferences(backup);
   const entries = [];
   const uploads = [];
+  const failures = [];
   const usedNames = new Set();
   for (const [index, referenceItem] of references.entries()) {
-    let bytes = referenceItem.bytes;
-    let type = referenceItem.contentType;
-    let filename = referenceItem.name;
-    if (referenceItem.kind === "upload") {
-      const fetchImpl = settings.fetchImpl || settings.fetch || globalThis.fetch;
-      if (typeof fetchImpl !== "function") throw new TypeError("需要 fetch 才能归档上传媒体");
-      const response = await fetchImpl(resolvedUrl(referenceItem.url, settings.baseUrl || settings.endpoint));
-      if (!response || response.ok === false || (Number.isFinite(response.status) && response.status >= 400)) throw new Error(`媒体下载失败: ${referenceItem.id}`);
-      bytes = new Uint8Array(await response.arrayBuffer());
-      filename = contentDispositionFilename(headerValue(response.headers, "content-disposition")) || filename;
-      type = contentType(headerValue(response.headers, "content-type"), type);
+    try {
+      let bytes = referenceItem.bytes;
+      let type = referenceItem.contentType;
+      let filename = referenceItem.name;
+      if (referenceItem.kind === "upload") {
+        const fetchImpl = settings.fetchImpl || settings.fetch || globalThis.fetch;
+        if (typeof fetchImpl !== "function") throw new TypeError("需要 fetch 才能归档上传媒体");
+        const response = await fetchImpl(resolvedUrl(referenceItem.url, settings.baseUrl || settings.endpoint));
+        if (!response || response.ok === false || (Number.isFinite(response.status) && response.status >= 400)) throw new Error(`媒体下载失败: ${referenceItem.id}`);
+        bytes = new Uint8Array(await response.arrayBuffer());
+        filename = contentDispositionFilename(headerValue(response.headers, "content-disposition")) || filename;
+        type = contentType(headerValue(response.headers, "content-type"), type);
+      }
+      const fallback = `${referenceItem.id || `data-${index + 1}`}${mimeExtension(type)}`;
+      const name = archiveName(filename, fallback, usedNames);
+      entries.push({ name, bytes });
+      uploads.push({
+        id: referenceItem.id || null,
+        path: name,
+        name: name.slice("uploads/".length),
+        contentType: type,
+        size: bytes.byteLength,
+        source: referenceItem.kind,
+        ...(referenceItem.kind === "upload" ? { url: referenceItem.path } : {}),
+      });
+    } catch (error) {
+      if (!settings.continueOnError) throw error;
+      failures.push({ id: referenceItem.id || null, message: error instanceof Error ? error.message : "媒体下载失败" });
     }
-    const fallback = `${referenceItem.id || `data-${index + 1}`}${mimeExtension(type)}`;
-    const name = archiveName(filename, fallback, usedNames);
-    entries.push({ name, bytes });
-    uploads.push({
-      id: referenceItem.id || null,
-      path: name,
-      name: name.slice("uploads/".length),
-      contentType: type,
-      size: bytes.byteLength,
-      source: referenceItem.kind,
-      ...(referenceItem.kind === "upload" ? { url: referenceItem.path } : {}),
-    });
   }
   entries.push({ name: "uploads.json", bytes: metadataBytes(uploads) });
+  entries.failures = failures;
   return entries;
 }
-

@@ -1,4 +1,5 @@
 export const MAX_COVER_BYTES = 5 * 1024 * 1024;
+export const MAX_MEDIA_BYTES = 20 * 1024 * 1024;
 export const COVER_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp", "image/avif", "image/svg+xml"]);
 
 function dataCover(value) {
@@ -38,6 +39,52 @@ export async function fileToCover(file) {
   return bytesToCover(new Uint8Array(await file.arrayBuffer()), contentType);
 }
 
+function dataUrl(bytes, contentType) {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return `data:${contentType};base64,${btoa(binary)}`;
+}
+
+async function checksum(bytes) {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  return [...digest].map((value) => value.toString(16).padStart(2, "0")).join("");
+}
+
+export async function fileToMedia(file, upload) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const contentType = String(file?.type || "application/octet-stream").toLocaleLowerCase();
+  if (!/^[\w!#$&^.+-]+\/[\w!#$&^.+-]+$/.test(contentType)) throw new TypeError("媒体类型无效");
+  if (bytes.byteLength > MAX_MEDIA_BYTES) throw new TypeError("媒体不能超过 20 MB");
+  const id = crypto.randomUUID();
+  const uploaded = typeof upload === "function" ? await upload(bytes, contentType, id, { kind: "attachment", name: String(file?.name || "attachment") }) : null;
+  return {
+    id: uploaded?.id || id,
+    url: uploaded?.url || dataUrl(bytes, contentType),
+    name: String(file?.name || "attachment"),
+    contentType,
+    size: bytes.byteLength,
+    checksum: await checksum(bytes),
+  };
+}
+
+function validateMedia(values) {
+  for (const value of values) {
+    if (typeof value === "string") {
+      if (value === "<screenshot>" || value.startsWith("data:")) continue;
+      const url = new URL(value);
+      if (!/^https?:$/.test(url.protocol)) throw new TypeError("媒体引用必须使用 HTTP(S)");
+      continue;
+    }
+    if (!value || typeof value !== "object") throw new TypeError("媒体引用无效");
+    const url = value.url || value.link || value.src;
+    if (typeof url !== "string") throw new TypeError("媒体引用无效");
+    if (value.contentType !== undefined && !/^[\w!#$&^.+-]+\/[\w!#$&^.+-]+$/.test(String(value.contentType))) throw new TypeError("媒体类型无效");
+    if (value.size !== undefined && (!Number.isFinite(Number(value.size)) || Number(value.size) < 0 || Number(value.size) > MAX_MEDIA_BYTES)) throw new TypeError("媒体大小无效");
+    if (value.checksum !== undefined && !/^[0-9a-f]{64}$/i.test(String(value.checksum))) throw new TypeError("媒体校验和无效");
+  }
+  return values;
+}
+
 function coverReference(value) {
   if (!value || typeof value !== "object") return undefined;
   const id = typeof value.id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.id) ? value.id : "";
@@ -59,6 +106,7 @@ export function normalizeBookmark(input, existing, now = new Date().toISOString(
   if (!/^https?:$/.test(parsedLink.protocol)) throw new TypeError("书签链接必须使用 HTTP(S)");
   if (input.tags !== undefined && !Array.isArray(input.tags)) throw new TypeError("标签必须是数组");
   if (input.media !== undefined && !Array.isArray(input.media)) throw new TypeError("媒体必须是数组");
+  if (input.media !== undefined) validateMedia(input.media);
   if (input.highlights !== undefined && !Array.isArray(input.highlights)) throw new TypeError("高亮必须是数组");
   const hasCover = Object.prototype.hasOwnProperty.call(input, "cover");
   const cover = hasCover ? validateCover(input.cover) : existing?.cover || "";

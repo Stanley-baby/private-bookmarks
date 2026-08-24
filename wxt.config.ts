@@ -14,7 +14,8 @@ export default defineConfig({
     default_locale: "en",
     permissions: ["activeTab", "alarms", "contextMenus", "scripting", "sidePanel", "storage"],
     host_permissions: ["https://api.raindrop.io/*"],
-    optional_host_permissions: ["https://*/*"],
+    optional_permissions: ["tabs"],
+    optional_host_permissions: ["http://*/*", "https://*/*"],
     omnibox: { keyword: "pb" },
     commands: {
       save_page: {
@@ -24,6 +25,14 @@ export default defineConfig({
       open_side_panel: {
         suggested_key: { default: "Ctrl+Period" },
         description: "__MSG_openSidePanel__",
+      },
+      open_library: {
+        suggested_key: { default: "Ctrl+Shift+L" },
+        description: "__MSG_openLibrary__",
+      },
+      focus_search: {
+        suggested_key: { default: "Ctrl+Shift+K" },
+        description: "__MSG_focusSearch__",
       },
     },
   },
