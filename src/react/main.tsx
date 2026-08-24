@@ -15,7 +15,6 @@ import { createMigrationTransfer } from "./migration-transfer.js";
 import { filterBookmarks, reorderVisibleIds, searchSuggestions, sortBookmarks, visibleSelection } from "./library-view.js";
 import { renderMarkdown } from "../../extension/shared/markdown.js";
 import { currentPageDraft, saveFeedback } from "./surface-workflows.js";
-import { enableAppLock } from "./settings.js";
 import "./styles.css";
 
 declare const chrome: any;
@@ -161,7 +160,7 @@ function LockSettings({ status, onChange }: { status: LockStatus; onChange: (sta
   const [autoLock, setAutoLockState] = useState(status.autoLock || "15");
   const run = async (action: () => Promise<unknown>) => { setBusy(true); setError(""); try { await action(); onChange(await lockState()); } catch (reason) { setError(reason instanceof Error ? reason.message : "操作失败"); } finally { setBusy(false); } };
   const select = <select value={autoLock} aria-label="自动锁定" onChange={(event) => { const value = event.target.value; setAutoLockState(value); if (status.enabled) run(() => setAutoLock(value)); }}>{AUTO_LOCK_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>;
-  if (!status.enabled) return <section className="lock-settings"><h2>应用锁</h2><p className="muted">保护此扩展的界面，不会暂停后台同步。</p><form onSubmit={(event) => { event.preventDefault(); if (pin !== confirm) return setError("两次输入的 PIN 不一致"); run(() => enableAppLock(enablePin, pin, autoLock, workerClient.connection)); }}><label>设置 PIN（6–12 位数字）<input value={pin} onChange={(event) => setPin(event.target.value)} type="password" inputMode="numeric" autoComplete="new-password" minLength={6} maxLength={12} pattern="[0-9]{6,12}" required /></label><label>再次输入 PIN<input value={confirm} onChange={(event) => setConfirm(event.target.value)} type="password" inputMode="numeric" autoComplete="new-password" minLength={6} maxLength={12} pattern="[0-9]{6,12}" required /></label><label>自动锁定{select}</label><button className="primary" disabled={busy}>启用应用锁</button></form>{error && <p className="error" role="alert">{error}</p>}</section>;
+  if (!status.enabled) return <section className="lock-settings"><h2>应用锁</h2><p className="muted">保护此扩展的界面，不会暂停后台同步。</p><form onSubmit={(event) => { event.preventDefault(); if (pin !== confirm) return setError("两次输入的 PIN 不一致"); run(async () => enablePin(pin, autoLock, await workerClient.connection())); }}><label>设置 PIN（6–12 位数字）<input value={pin} onChange={(event) => setPin(event.target.value)} type="password" inputMode="numeric" autoComplete="new-password" minLength={6} maxLength={12} pattern="[0-9]{6,12}" required /></label><label>再次输入 PIN<input value={confirm} onChange={(event) => setConfirm(event.target.value)} type="password" inputMode="numeric" autoComplete="new-password" minLength={6} maxLength={12} pattern="[0-9]{6,12}" required /></label><label>自动锁定{select}</label><button className="primary" disabled={busy}>启用应用锁</button></form>{error && <p className="error" role="alert">{error}</p>}</section>;
   return <section className="lock-settings"><h2>应用锁</h2><p className="muted">PIN 仅保护界面，后台 Cloudflare 同步和 WebDAV 定时任务会继续运行。</p><label>自动锁定{select}</label><div className="lock-settings-actions"><button type="button" onClick={() => run(lockNow)}>立即锁定</button><button type="button" onClick={() => { setPin(""); setNextPin(""); setConfirm(""); setError(""); }}>更改或关闭 PIN</button></div><form onSubmit={(event) => { event.preventDefault(); if (nextPin !== confirm) return setError("两次输入的新 PIN 不一致"); run(() => changePin(pin, nextPin)); }}><h3>更改 PIN</h3><label>当前 PIN<input value={pin} onChange={(event) => setPin(event.target.value)} type="password" inputMode="numeric" autoComplete="current-password" minLength={6} maxLength={12} pattern="[0-9]{6,12}" required /></label><label>新 PIN<input value={nextPin} onChange={(event) => setNextPin(event.target.value)} type="password" inputMode="numeric" autoComplete="new-password" minLength={6} maxLength={12} pattern="[0-9]{6,12}" required /></label><label>再次输入新 PIN<input value={confirm} onChange={(event) => setConfirm(event.target.value)} type="password" inputMode="numeric" autoComplete="new-password" minLength={6} maxLength={12} pattern="[0-9]{6,12}" required /></label><div className="lock-settings-actions"><button className="primary" disabled={busy}>更改 PIN</button><button type="button" className="danger" disabled={busy} onClick={() => run(() => disablePin(pin))}>关闭应用锁</button></div></form>{error && <p className="error" role="alert">{error}</p>}</section>;
 }
 
@@ -194,7 +193,7 @@ function SettingsDialog({ open, onClose, preferences, savePreference, scopeKey, 
       await refreshWebdavStatus();
     } catch (reason) {
       const current = await workerClient.connection().catch(() => null);
-      notify(current ? { endpoint: current.endpoint } : null, null, reason instanceof Error ? reason.message : "无法加载 Cloudflare 设置");
+      notify(null, null, reason instanceof Error ? reason.message : "无法加载 Cloudflare 设置");
       await refreshWebdavStatus();
     } finally { setBusy(false); }
   };
