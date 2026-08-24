@@ -21,11 +21,33 @@
     return ranges;
   }
 
+  function rangeAt(location) {
+    if (!Number.isInteger(location?.start) || !Number.isInteger(location?.end) || location.start < 0 || location.end <= location.start) return null;
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    let node, offset = 0, startNode, endNode, startOffset, endOffset;
+    while ((node = walker.nextNode())) {
+      const next = offset + node.data.length;
+      if (!startNode && location.start >= offset && location.start <= next) { startNode = node; startOffset = location.start - offset; }
+      if (location.end >= offset && location.end <= next) { endNode = node; endOffset = location.end - offset; break; }
+      offset = next;
+    }
+    if (!startNode || !endNode) return null;
+    const range = new Range();
+    range.setStart(startNode, startOffset);
+    range.setEnd(endNode, endOffset);
+    return range;
+  }
+
+  function rangeFor(item) {
+    const located = rangeAt(item.location);
+    return located?.toString().trim() === item.text ? located : rangesFor(item.text)[item.position || 0];
+  }
+
   function render(highlights) {
     for (const [name] of styles) CSS.highlights?.delete(name);
     styles.clear();
     for (const item of highlights) {
-      const range = rangesFor(item.text)[item.position || 0];
+      const range = rangeFor(item);
       if (!range || !globalThis.Highlight || !CSS.highlights) continue;
       const name = `private-bookmarks-${item.id}`;
       CSS.highlights.set(name, new Highlight(range));
@@ -45,7 +67,11 @@
     const text = range?.toString().trim();
     if (!text) return null;
     const matches = rangesFor(text);
-    return { id: crypto.randomUUID(), text, position: Math.max(0, matches.findIndex((item) => item.compareBoundaryPoints(Range.START_TO_START, range) === 0)) };
+    const prefix = document.createRange();
+    prefix.selectNodeContents(document.body);
+    prefix.setEnd(range.startContainer, range.startOffset);
+    const start = prefix.toString().length;
+    return { id: crypto.randomUUID(), text, position: Math.max(0, matches.findIndex((item) => item.compareBoundaryPoints(Range.START_TO_START, range) === 0)), location: { start, end: start + range.toString().length, quote: text }, revision: 1 };
   }
 
   function compose(base) {
@@ -67,6 +93,20 @@
         window.getSelection()?.removeAllRanges();
       });
     };
+    const manage = (bookmark) => {
+      const highlights = bookmark.highlights || [];
+      const choice = window.prompt(`高亮：\n${highlights.map((item, index) => `${index + 1}. ${item.text}${item.note ? ` — ${item.note}` : ""}`).join("\n")}\n\n输入编号编辑，或 d<编号> 删除`, "");
+      if (!choice?.trim()) return;
+      const remove = choice.trim().match(/^d(\d+)$/i);
+      const index = Number(remove?.[1] || choice) - 1;
+      const current = highlights[index];
+      if (!current) return window.alert("请选择列表中的高亮编号");
+      const changes = remove ? { deleted: true } : { color: window.prompt("颜色", current.color || "#ffe920") || current.color, note: window.prompt("备注", current.note || "") ?? current.note };
+      chrome.runtime.sendMessage({ type: "private-bookmarks-update-highlight", bookmarkId: bookmark.id, highlightId: current.id, expectedRevision: current.revision, changes }, (response) => {
+        if (chrome.runtime.lastError || response?.error) return window.alert(response?.error || "无法更新高亮");
+        dialog.remove();
+      });
+    };
     dialog.onsubmit = (event) => {
       event.preventDefault();
       save();
@@ -86,6 +126,13 @@
         label.append("保存到 ", select);
         target.replaceChildren(label);
       } else target.remove();
+      if (bookmarks.length === 1 && bookmarks[0].highlights?.length) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = "编辑已有高亮";
+        button.onclick = () => manage(bookmarks[0]);
+        dialog.insertBefore(button, dialog.lastElementChild);
+      }
       saveButton.disabled = false;
     });
   }

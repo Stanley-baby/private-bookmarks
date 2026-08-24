@@ -69,3 +69,16 @@ test("strict health checks mark more than five redirects as broken", async () =>
   assert.deepEqual(await runHealthChecks(store, fetcher), { checked: 1 });
   assert.deepEqual(updates, [["loop", { status: "broken", finalUrl: "https://example.test/5" }]]);
 });
+
+test("temporary failures preserve a healthy result while recording an attempted check", async () => {
+  const updates = [];
+  await runHealthChecks({
+    async getPreferences() { return { brokenLevel: "default" }; },
+    async healthCandidates() { return [{ id: "healthy", link: "https://example.test", health: { status: "healthy", checkedAt: "2026-08-01T00:00:00.000Z", finalUrl: "https://example.test/final" } }]; },
+    async updateHealth(...value) { updates.push(value); },
+  }, async () => { throw new Error("temporary network outage"); });
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0][1].status, "healthy");
+  assert.equal(updates[0][1].finalUrl, "https://example.test/final");
+  assert.match(updates[0][1].checkedAt, /^\d{4}-\d{2}-\d{2}T/);
+});

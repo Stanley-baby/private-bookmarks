@@ -49,7 +49,7 @@ async function checkLink(link, fetcher, level) {
   }
 }
 
-export async function runHealthChecks(store, fetcher = fetch, collectionId = null) {
+export async function runHealthChecks(store, fetcher = fetch, collectionId = null, options = {}) {
   const preferences = typeof store.getPreferences === "function" ? await store.getPreferences() : null;
   const level = normalizeBrokenLevel(preferences?.brokenLevel);
   if (level === "off") return { checked: 0 };
@@ -57,14 +57,21 @@ export async function runHealthChecks(store, fetcher = fetch, collectionId = nul
   const before = new Date(Date.now() - 7 * 24 * 60 * 60 * 1_000).toISOString();
   const candidates = await store.healthCandidates(before, collectionId);
   let checked = 0;
+  await options.onProgress?.({ checked, total: candidates.length, errors: 0 });
   // ponytail: sequential checks, add a bounded pool only if a large library makes the weekly job too slow.
   for (const item of candidates) {
+    if (options.isCancelled?.()) return { checked, cancelled: true };
+    let failed = false;
     try {
-      await store.updateHealth(item.id, await checkLink(item.link, fetcher, level));
+      const health = await checkLink(item.link, fetcher, level);
+      await store.updateHealth(item.id, item.health?.status === "healthy" && health.status === "unknown" ? { ...item.health, checkedAt: new Date().toISOString() } : health);
     } catch (error) {
-      await store.updateHealth(item.id, { status: errorStatus(error, level), finalUrl: item.link });
+      const health = { status: errorStatus(error, level), finalUrl: item.link };
+      failed = true;
+      await store.updateHealth(item.id, item.health?.status === "healthy" && health.status === "unknown" ? { ...item.health, checkedAt: new Date().toISOString() } : health);
     }
     checked += 1;
+    await options.onProgress?.({ checked, total: candidates.length, errors: failed ? 1 : 0 });
   }
   return { checked };
 }

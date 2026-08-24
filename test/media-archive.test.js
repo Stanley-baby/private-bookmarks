@@ -50,3 +50,12 @@ test("prefers extended content-disposition filenames and safely falls back", () 
   assert.equal(contentDispositionFilename("attachment; filename*=UTF-8''%E8%AF%B4%E6%98%8E.txt"), "说明.txt");
   assert.equal(contentDispositionFilename("attachment; filename=../secret.txt"), "secret.txt");
 });
+
+test("ZIP exports report a failed media download without dropping other media", async () => {
+  const archive = await mediaArchiveEntries({ bookmarks: [{ media: [
+    `https://private.example/v1/media/${mediaId}`,
+    "https://private.example/v1/media/223e4567-e89b-12d3-a456-426614174000",
+  ] }] }, { continueOnError: true, fetchImpl: async (url) => url.includes(mediaId) ? new Response(new Uint8Array([1]), { headers: { "content-type": "image/png" } }) : new Response(null, { status: 503 }) });
+  assert.equal(archive.filter((item) => item.name.startsWith("uploads/")).length, 1);
+  assert.deepEqual(archive.failures, [{ id: "223e4567-e89b-12d3-a456-426614174000", message: "媒体下载失败: 223e4567-e89b-12d3-a456-426614174000" }]);
+});
