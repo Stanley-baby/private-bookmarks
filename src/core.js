@@ -1211,6 +1211,31 @@ function mediaType(request) {
   return { value, kind };
 }
 
+function mergeBackupData(current, incoming) {
+  const collections = [...(current.collections || [])];
+  const collectionById = new Map(collections.map((item) => [item.id, item]));
+  const collectionIds = new Map();
+  for (const item of incoming.collections || []) {
+    const existing = collectionById.get(item.id);
+    if (!existing || JSON.stringify(existing) === JSON.stringify(item)) {
+      if (!existing) collections.push(item);
+      collectionIds.set(item.id, item.id);
+      continue;
+    }
+    const copy = { ...item, id: crypto.randomUUID(), name: `${item.name || "收藏夹"}（恢复副本）`, parentId: null, revision: 1 };
+    collections.push(copy); collectionIds.set(item.id, copy.id);
+  }
+  const bookmarks = [...(current.bookmarks || [])];
+  const bookmarkById = new Map(bookmarks.map((item) => [item.id, item]));
+  for (const item of incoming.bookmarks || []) {
+    const existing = bookmarkById.get(item.id);
+    const collectionId = collectionIds.get(item.collectionId) || item.collectionId;
+    if (!existing) { bookmarks.push({ ...item, collectionId }); continue; }
+    if (JSON.stringify(existing) !== JSON.stringify(item)) bookmarks.push({ ...item, id: crypto.randomUUID(), title: `${item.title || item.link || "书签"}（恢复副本）`, collectionId, revision: 1 });
+  }
+  return { ...current, format: incoming.format || current.format, collections, bookmarks };
+}
+
 export function createApi({ key, store, healthCheck, mediaBucket = null, backupBucket = null, oauth = {}, ai = null, aiModel = AI_DEFAULT_MODEL, fetchImpl = globalThis.fetch }) {
   const cloudBucket = backupBucket || mediaBucket;
   const oauthSecret = oauth.encryptionKey || oauth.secret || key;
@@ -1359,9 +1384,12 @@ export function createApi({ key, store, healthCheck, mediaBucket = null, backupB
             if (!cloudBucket) return error(501, "not_available", "Backup storage is not configured");
             const input = await readJson(request);
             if (input.confirm !== true) return error(400, "invalid_backup", "Restore requires explicit confirmation");
+            const mode = input.mode || "replace";
+            if (!["replace", "merge"].includes(mode)) return error(400, "invalid_backup", "Restore mode is invalid");
             const archive = await remoteArchiveBytes({ provider, accessToken, fileId, fetchImpl, secret: oauthSecret });
             const restoredArchive = await validateArchiveBackup(zipEntries(archive));
-            if (restoreStatementCount(restoredArchive.backup) > MAX_RESTORE_STATEMENTS) return error(413, "backup_too_large", `Backup is too large to restore in one D1 batch (maximum ${MAX_RESTORE_STATEMENTS} statements)`);
+            const restored = mode === "merge" ? mergeBackupData(await store.exportData(), restoredArchive.backup) : restoredArchive.backup;
+            if (restoreStatementCount(restored) > MAX_RESTORE_STATEMENTS) return error(413, "backup_too_large", `Backup is too large to restore in one D1 batch (maximum ${MAX_RESTORE_STATEMENTS} statements)`);
             let preRestoreBackup;
             try {
               preRestoreBackup = await createCloudBackup({ store, bucket: cloudBucket, mediaBucket: mediaBucket || cloudBucket, kind: "pre_restore", includeMedia: restoredArchive.manifest.includeMedia === true });
@@ -1372,7 +1400,7 @@ export function createApi({ key, store, healthCheck, mediaBucket = null, backupB
             let restoredMediaIds = [];
             try {
               restoredMediaIds = await restoreArchiveMedia(mediaBucket || cloudBucket, restoredArchive.entries, restoredArchive.manifest);
-              await store.replaceData(restoredArchive.backup);
+              await store.replaceData(restored);
             } catch (reason) {
               try {
                 if (preRestoreBackup.manifest.includeMedia === true) await restoreBackupMedia(cloudBucket, preRestoreBackup.metadata.id, preRestoreBackup.manifest, mediaBucket || cloudBucket);
@@ -1381,7 +1409,7 @@ export function createApi({ key, store, healthCheck, mediaBucket = null, backupB
               try { await removeMediaObjects(mediaBucket || cloudBucket, restoredMediaIds.filter((id) => !previousMediaIds.has(id))); } catch (cleanupReason) { console.error(cleanupReason); }
               throw reason;
             }
-            return json({ ok: true, provider, id: fileId, preRestoreBackupId: preRestoreBackup.metadata.id });
+            return json({ ok: true, provider, id: fileId, mode, preRestoreBackupId: preRestoreBackup.metadata.id });
           }
           return error(404, "not_found", "Cloud backup route not found");
         }
@@ -1430,7 +1458,10 @@ export function createApi({ key, store, healthCheck, mediaBucket = null, backupB
             const input = await readJson(request);
             if (input.confirm !== true) return error(400, "invalid_backup", "Restore requires explicit confirmation");
             const { backup, manifest } = await readCloudBackup({ store, bucket: cloudBucket, id });
-            if (restoreStatementCount(backup) > MAX_RESTORE_STATEMENTS) return error(413, "backup_too_large", `Backup is too large to restore in one D1 batch (maximum ${MAX_RESTORE_STATEMENTS} statements)`);
+            const mode = input.mode || "replace";
+            if (!["replace", "merge"].includes(mode)) return error(400, "invalid_backup", "Restore mode is invalid");
+            const restored = mode === "merge" ? mergeBackupData(await store.exportData(), backup) : backup;
+            if (restoreStatementCount(restored) > MAX_RESTORE_STATEMENTS) return error(413, "backup_too_large", `Backup is too large to restore in one D1 batch (maximum ${MAX_RESTORE_STATEMENTS} statements)`);
             let preRestoreBackup;
             try {
               preRestoreBackup = await createCloudBackup({ store, bucket: cloudBucket, mediaBucket: mediaBucket || cloudBucket, kind: "pre_restore", includeMedia: manifest.includeMedia === true });
@@ -1440,14 +1471,14 @@ export function createApi({ key, store, healthCheck, mediaBucket = null, backupB
             }
             try {
               if (manifest.includeMedia === true) await restoreBackupMedia(cloudBucket, id, manifest, mediaBucket || cloudBucket);
-              await store.replaceData(backup);
+              await store.replaceData(restored);
             } catch (reason) {
               try {
                 if (preRestoreBackup.manifest.includeMedia === true) await restoreBackupMedia(cloudBucket, preRestoreBackup.metadata.id, preRestoreBackup.manifest, mediaBucket || cloudBucket);
               } catch (rollbackReason) { console.error(rollbackReason); }
               throw reason;
             }
-            return json({ ok: true, id, preRestoreBackupId: preRestoreBackup.metadata.id });
+            return json({ ok: true, id, mode, preRestoreBackupId: preRestoreBackup.metadata.id });
           }
         }
         if (request.method === "POST" && pathname === "/v1/restore") {

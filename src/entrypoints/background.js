@@ -1,4 +1,5 @@
-import { ensureDefaults, getActionMode, getPreferences, healthCandidates, healthProgress, listBookmarks, saveBookmark, setActionMode, setHealthProgress, setSyncSettings, syncSettings, updateHealth } from "../../extension/shared/local-db.js";
+import { ensureDefaults, getActionMode, getPreferences, healthCandidates, healthProgress, listBookmarks, listConflicts, saveBookmark, setActionMode, setHealthProgress, setSyncSettings, syncSettings, updateHealth } from "../../extension/shared/local-db.js";
+import { updateConflictBadge } from "../../extension/shared/conflict-badge.js";
 import { requestPagePermission } from "../../extension/shared/api.js";
 import { lockState } from "../../extension/shared/lock.js";
 import { fileToMedia } from "../../extension/shared/local-model.js";
@@ -166,9 +167,11 @@ export default defineBackground(() => {
     chrome.contextMenus.create({ id: "save-tabs", title: "保存此窗口的全部标签页", contexts: ["action"] });
     chrome.contextMenus.create({ id: "open-side-panel", title: "打开侧边栏", contexts: ["action"] });
     chrome.contextMenus.create({ id: "open-library", title: "打开私有书签", contexts: ["action"] });
+    chrome.contextMenus.create({ id: "open-cloud-backups", title: "管理云端备份", contexts: ["action"] });
   });
   const initializeBackground = () => Promise.all([
     ensureDefaults(),
+    listConflicts().then((conflicts) => updateConflictBadge(conflicts.length)),
     getActionMode().then((mode) => mode && applyActionMode(mode)),
     scheduleSync(),
     workerClient.connection(),
@@ -250,6 +253,7 @@ export default defineBackground(() => {
       }
       if (info.menuItemId === "save-tabs") await saveCurrentWindow(tab);
       if (info.menuItemId === "open-library") await chrome.tabs.create({ url: chrome.runtime.getURL("library.html") });
+      if (info.menuItemId === "open-cloud-backups") await chrome.tabs.create({ url: chrome.runtime.getURL("cloud-backups.html") });
       if (info.menuItemId === "open-side-panel" && tab?.windowId) await chrome.sidePanel.open({ windowId: tab.windowId });
     } catch (error) {
       await badge(tab?.id, "!", "#ca4b53").catch(() => {});

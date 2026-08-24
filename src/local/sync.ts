@@ -1,10 +1,11 @@
 import { workerClient } from "../../extension/shared/worker-client.js";
-import { applyRemoteRecord, listConflicts, outboxItems, removeOutbox, saveConflict, setSyncSettings, syncSettings, type Bookmark } from "../../extension/shared/local-db.js";
+import { applyRemoteRecord, listConflicts, outboxItems, recoveryState, removeOutbox, saveConflict, setSyncSettings, syncSettings, type Bookmark } from "../../extension/shared/local-db.js";
 import { bytesToCover, coverBytes, filterSyncableOutbox } from "../../extension/shared/local-model.js";
 
 declare const chrome: any;
 
 export async function syncOnce() {
+  if (await recoveryState()) return { skipped: true, reason: "recovery" };
   const settingsBefore = await syncSettings();
   if (!settingsBefore.enabled) return { skipped: true, reason: "disabled" };
   if (!await workerClient.connection()) return { skipped: true, reason: "offline" };
@@ -13,7 +14,6 @@ export async function syncOnce() {
   if (pending.length) {
     const existingConflicts = await listConflicts();
     const pendingForPush = filterSyncableOutbox(pending, existingConflicts);
-    pushedCount = groupedSize(pendingForPush);
     const grouped = new Map<string, any[]>();
     for (const item of pendingForPush) {
       const key = `${item.entity}:${item.id}`;
@@ -28,13 +28,15 @@ export async function syncOnce() {
     const changes = prepared.flatMap((item) => item.change ? [item.change] : []);
     const pushed = changes.length ? await workerClient.request("/v1/sync/push", { method: "POST", body: JSON.stringify({ changes: changes.map(({ id: _queueId, ...item }) => item) }) }) : { applied: [], conflicts: [] };
     const conflictKeys = new Set((pushed.conflicts || []).map((item: any) => `${item.entity}:${item.id}`));
+    const confirmed = new Set(confirmedOutboxIds(pending, pushed));
+    pushedCount = confirmed.size;
     for (const item of pending) {
       const key = `${item.entity}:${item.id}`;
       if (pausedKeys.has(key)) continue;
       if (conflictKeys.has(key)) {
         const conflict = pushed.conflicts.find((value: any) => `${value.entity}:${value.id}` === key);
         await saveConflict(conflict);
-      } else await removeOutbox(item.id);
+      } else if (confirmed.has(item.id)) await removeOutbox(item.id);
     }
     for (const change of pushed.applied || []) {
       const local = pending.find((item) => item.entity === change.entity && item.id === change.record.id)?.record;
@@ -86,7 +88,10 @@ async function localBookmark(record: any): Promise<Bookmark | any> {
   } catch { return record; }
 }
 
-function groupedSize(items: any[]) { return new Set(items.map((item) => `${item.entity}:${item.id}`)).size; }
+export function confirmedOutboxIds(items: any[] = [], pushed: any = {}) {
+  const applied = new Set((pushed.applied || []).map((item: any) => `${item.entity}:${item.record?.id || item.id}`));
+  return items.filter((item) => applied.has(`${item.entity}:${item.id}`)).map((item) => item.id);
+}
 
 export async function scheduleSync() {
   const settings = await syncSettings();

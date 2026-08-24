@@ -202,6 +202,19 @@ export function mergeBookmarkConflict(local = {}, remote = {}, choices = {}) {
   return merged;
 }
 
+export function conflictRecoveryCopy(conflict = {}, choice, id = crypto.randomUUID()) {
+  const source = choice === "cloud" ? conflict.local : conflict.remote;
+  if (!source || typeof source !== "object") return null;
+  const copy = { ...source, id, revision: 1 };
+  if (conflict.entity === "collection") return { ...copy, name: `${source.name || "收藏夹"}（冲突恢复副本）`, parentId: null };
+  return { ...copy, title: `${source.title || source.link || "书签"}（冲突恢复副本）` };
+}
+
+export function conflictRecoveryCopies(conflict = {}, choice) {
+  if (choice && typeof choice === "object") return [conflictRecoveryCopy(conflict, "cloud"), conflictRecoveryCopy(conflict, "local")].filter(Boolean);
+  return [conflictRecoveryCopy(conflict, choice)].filter(Boolean);
+}
+
 export function filterSyncableOutbox(items = [], conflicts = []) {
   const paused = new Set(conflicts.map((item) => `${item.entity}:${item.id}`));
   return items.filter((item) => !paused.has(`${item.entity}:${item.id}`));

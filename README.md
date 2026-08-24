@@ -24,6 +24,8 @@ The staging workflow runs for `staging/**` and `codex/**` pushes, or by manually
 
 The cover editor uploads JPG, PNG, GIF, WebP, and AVIF files up to 5 MB to the configured R2 bucket. Cloud backups use the same bucket under the isolated `backups/<backup-id>/` prefix (or an optional `BACKUPS` binding). Media-enabled backups copy only this instance's uploaded `/v1/media/<uuid>` objects, verify SHA-256 checksums on restore, and can be downloaded as a store-only ZIP. If no R2 bucket is bound, media upload and server-side backups remain unavailable while the rest of the library still works.
 
+Use the extension action menu’s **管理云端备份** entry to manage R2, Dropbox, Google Drive, and OneDrive backups. A provider that is not configured or whose authorization is rejected stays unavailable without affecting local-only use or the other providers.
+
 To enable third-party cloud backup, register OAuth applications with Dropbox, Google Drive, and/or Microsoft identity, then set the corresponding Worker secrets/vars before deploying:
 
 ```text
@@ -53,17 +55,13 @@ npm run build:extension
 
 Open `chrome://extensions` or `edge://extensions`, enable Developer mode, choose **Load unpacked**, then select `.output/chrome-mv3/`.
 
-The previous vanilla implementation remains in `extension/` while features are migrated.
+The production path is the WXT + React extension. The old vanilla implementation is retained only as a rollback archive and is not part of production checks or release loading.
 
 On first launch, the generated extension can create an empty local IndexedDB library, restore its JSON backup, or import the currently configured Cloudflare library once. The local library works without a backend; Cloudflare synchronization and WebDAV backup are later migration stages.
 
 Cloudflare incremental sync is optional and disabled by default. Apply all D1 migrations (including `0009_sync.sql`) and deploy the Worker before enabling it in the generated extension. Local bookmark and collection changes are queued offline, synchronized on UI open and with a configurable background alarm, and stale record revisions appear in the conflict panel. Deleted records remain as sync tombstones for 90 days.
 
 WebDAV backup is also optional. Its endpoint must use HTTPS and is stored with the credentials only in the browser's local IndexedDB settings. Backups run manually, about five minutes after local edits, and daily; the default retention is 10 files (configurable from 3 to 50). JSON is the default format, while an optional independent password encrypts the file with PBKDF2-SHA256 and AES-GCM. Restore always downloads a pre-restore safety snapshot; merge keeps differing records as recovery copies instead of silently overwriting them.
-
-## Load the legacy extension
-
-Open `chrome://extensions` or `edge://extensions`, enable Developer mode, choose **Load unpacked**, then select `extension/`.
 
 ## Local checks
 
