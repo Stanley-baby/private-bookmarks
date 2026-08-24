@@ -882,6 +882,15 @@ function cloudConfig(provider, oauth = {}, request) {
   return clientId && clientSecret ? { ...definition, clientId, clientSecret, redirectUri } : null;
 }
 
+async function cloudConnectionStatuses(store, oauth, request) {
+  if (!store.listCloudConnections) return [];
+  const saved = new Map((await store.listCloudConnections()).map((item) => [item.provider, item]));
+  return Object.keys(CLOUD_PROVIDERS).map((provider) => {
+    const item = saved.get(provider);
+    return { provider, configured: Boolean(cloudConfig(provider, oauth, request)), connected: Boolean(item), accountName: item?.accountName || "", accountEmail: item?.accountEmail || "", connectedAt: item?.connectedAt || "" };
+  });
+}
+
 function encodeBase64(bytes) {
   let value = "";
   for (const byte of bytes) value += String.fromCharCode(byte);
@@ -1286,12 +1295,7 @@ export function createApi({ key, store, healthCheck, mediaBucket = null, backupB
         if (request.method === "GET" && pathname === "/v1/export") return json(await store.exportData());
         if (request.method === "GET" && pathname === "/v1/cloud/connections") {
           if (!store.listCloudConnections) return error(501, "oauth_not_available", "Cloud OAuth storage is not configured");
-          const saved = new Map((await store.listCloudConnections()).map((item) => [item.provider, item]));
-          return json(Object.keys(CLOUD_PROVIDERS).map((provider) => {
-            const config = cloudConfig(provider, oauth, request);
-            const item = saved.get(provider);
-            return { provider, configured: Boolean(config), connected: Boolean(item), accountName: item?.accountName || "", accountEmail: item?.accountEmail || "", connectedAt: item?.connectedAt || "" };
-          }));
+          return json(await cloudConnectionStatuses(store, oauth, request));
         }
         const cloudMatch = pathname.match(/^\/v1\/cloud\/([^/]+)(?:\/(authorize|disconnect|backups))?$/i);
         if (cloudMatch) {
@@ -1462,11 +1466,12 @@ export function createApi({ key, store, healthCheck, mediaBucket = null, backupB
           return json({ count: result.count ?? result.bookmarks?.length ?? items.length });
         }
         if (request.method === "GET" && pathname === "/v1/bootstrap") {
-          const [collections, preferences, collectionCounts, trashCount] = await Promise.all([
+          const [collections, preferences, collectionCounts, trashCount, cloudConnections] = await Promise.all([
             store.listCollections(),
             store.getPreferences(),
             store.listCollectionCounts(),
             store.getTrashCount(),
+            cloudConnectionStatuses(store, oauth, request),
           ]);
           const aiSettings = publicAiSettings(preferences, ai, aiModel);
           return json({
@@ -1474,6 +1479,7 @@ export function createApi({ key, store, healthCheck, mediaBucket = null, backupB
             preferences,
             collectionCounts,
             trashCount,
+            cloudConnections,
             ai: aiSettings,
             capabilities: { mediaUpload: Boolean(mediaBucket), cloudBackup: Boolean(cloudBucket), aiRecommendations: aiSettings.available },
           });
