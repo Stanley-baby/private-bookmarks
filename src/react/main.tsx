@@ -108,7 +108,14 @@ function jsonArray(value: string, label: string) {
 function Setup({ done }: { done: () => void }) {
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const run = async (action: () => Promise<unknown>) => { setBusy(true); setError(""); try { await action(); done(); } catch (reason) { setError(reason instanceof Error ? reason.message : "初始化失败"); } finally { setBusy(false); } };
-  const cloud = () => run(async () => { if (!await workerClient.connection()) throw new TypeError("尚未配置 Cloudflare 实例"); const [backup, boot] = await Promise.all([workerClient.request("/v1/export"), workerClient.request("/v1/bootstrap")]); await importLibrary({ ...backup, collections: backup.collections || boot.collections || [] }); });
+  const cloud = async () => {
+    setBusy(true); setError("");
+    try {
+      if (!await workerClient.connection()) throw new TypeError("尚未配置 Cloudflare 实例");
+      location.href = "cloud-import.html";
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "初始化失败"); }
+    finally { setBusy(false); }
+  };
   return <main className="setup"><div className="brand"><span className="brand-mark">◆</span><strong>私有书签</strong></div><h1>建立本地资料库</h1><p className="muted">无需后端也能使用。</p><div className="setup-actions"><button className="primary" disabled={busy} onClick={() => run(initialize)}>创建空资料库</button><label className="file-button">从备份恢复<input type="file" accept="application/json" disabled={busy} onChange={(event) => { const file = event.target.files?.[0]; if (file) run(async () => importLibrary(JSON.parse(await file.text()))); }} /></label><button disabled={busy} onClick={cloud}>从 Cloudflare 导入</button></div><MigrationTransfer onApplied={async () => done()} />{error && <p className="error">{error}</p>}</main>;
 }
 
@@ -239,7 +246,7 @@ function SettingsDialog({ open, onClose, preferences, savePreference, scopeKey, 
     await createWebdavBackup(dav); const next = await webdavSettings(); onDavChange(next); await refreshWebdavStatus(next);
   });
   const restoreBackup = (name: string, mode: "replace" | "merge") => run(async () => {
-    if (mode === "replace" && !window.confirm("覆盖本地资料库？当前数据会先下载为安全快照。")) return;
+    if (!window.confirm(`${mode === "replace" ? "覆盖" : "合并"}本地资料库？当前数据会先下载为安全快照。`)) return;
     const result = await restoreWebdavBackup(name, mode, dav); download(result.safety, "pre-restore-safety.json"); await refresh();
   });
   const diagnostics = { mode: connected ? "connected" : "local-only", webdav: webdavStatus, r2Backup: Boolean(bootstrap?.capabilities?.cloudBackup), cloudProviders: cloudConnections.map(({ provider: name, configured, connected: active }: any) => ({ provider: name, configured, connected: active })) };

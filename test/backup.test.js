@@ -225,6 +225,24 @@ test("backup restore validates checksums and snapshots the current data", async 
   assert.equal(store.restored.format, "private-bookmarks/v1");
 });
 
+test("backup restore merges collisions into recovery copies", async () => {
+  const store = new MemoryStore();
+  const bucket = new MemoryBucket();
+  const api = createApi({ key: KEY, store, backupBucket: bucket });
+  const created = await (await api.fetch(request("/v1/backups", { method: "POST", body: "{}" }))).json();
+  store.exportData = async () => ({
+    format: "private-bookmarks/v1",
+    collections: [{ id: "unsorted", parentId: null, name: "Unsorted", position: 0, revision: 1 }],
+    bookmarks: [{ id: "bookmark-1", link: "https://local.example", collectionId: "unsorted", title: "Local" }],
+    preferences: {},
+  });
+
+  const restored = await api.fetch(request(`/v1/backups/${created.id}/restore`, { method: "POST", body: JSON.stringify({ confirm: true, mode: "merge" }) }));
+  assert.equal(restored.status, 200);
+  assert.equal(store.restored.bookmarks.length, 2);
+  assert.equal(store.restored.bookmarks.some((item) => /恢复副本/.test(item.title)), true);
+});
+
 test("deleting a backup removes metadata and both R2 objects", async () => {
   const store = new MemoryStore();
   const bucket = new MemoryBucket();

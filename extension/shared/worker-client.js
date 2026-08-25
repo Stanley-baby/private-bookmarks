@@ -65,7 +65,7 @@ export function createWorkerClient({
   };
 
   const connection = () => readConnection();
-  const request = async (path, init = {}) => {
+  const responseFor = async (path, init = {}) => {
     const config = await readConnection();
     if (!config) fail("尚未配置私有实例", 503, "not_configured");
     if (typeof path !== "string" || !path.startsWith("/") || path.startsWith("//")) fail("Worker 请求路径必须是相对路径", 400, "invalid_path");
@@ -74,7 +74,7 @@ export function createWorkerClient({
     if (target.origin !== base.origin) fail("Worker 请求路径必须保持同源", 400, "invalid_path");
     const url = target.toString();
     try {
-      const response = await fetchImpl(url, {
+      return await fetchImpl(url, {
         ...init,
         headers: {
           "content-type": "application/json",
@@ -82,23 +82,31 @@ export function createWorkerClient({
           ...(init.headers || {}),
         },
       });
-      let body = null;
-      if (response.status !== 204) {
-        if (typeof response.text === "function") {
-          const text = await response.text();
-          try { body = text ? JSON.parse(text) : null; } catch { body = text; }
-        } else body = await response.json();
-      }
-      if (!response.ok) {
-        const message = typeof body === "object" && body?.message ? body.message : `Worker 请求失败（${response.status}）`;
-        const code = typeof body === "object" && body?.code ? body.code : response.status >= 500 ? "server_error" : "request_failed";
-        throw new WorkerClientError(message, response.status, code);
-      }
-      return body;
     } catch (error) {
       if (error instanceof WorkerClientError) throw error;
       throw new WorkerClientError("无法连接私有实例", 0, "network_error", error);
     }
+  };
+  const responseError = async (response) => {
+    let body = null;
+    if (typeof response.text === "function") {
+      const text = await response.text();
+      try { body = text ? JSON.parse(text) : null; } catch { body = text; }
+    } else body = await response.json();
+    return new WorkerClientError(typeof body === "object" && body?.message ? body.message : `Worker 请求失败（${response.status}）`, response.status, typeof body === "object" && body?.code ? body.code : response.status >= 500 ? "server_error" : "request_failed");
+  };
+  const request = async (path, init = {}) => {
+    const response = await responseFor(path, init);
+    if (!response.ok) throw await responseError(response);
+    if (response.status === 204) return null;
+    if (typeof response.text !== "function") return response.json();
+    const text = await response.text();
+    try { return text ? JSON.parse(text) : null; } catch { return text; }
+  };
+  const download = async (path) => {
+    const response = await responseFor(path);
+    if (!response.ok) throw await responseError(response);
+    return response;
   };
 
   const health = () => request("/v1/health");
@@ -149,7 +157,7 @@ export function createWorkerClient({
     },
   });
 
-  return { connection, connect, disconnect, request, health, search, sync, media: { upload } };
+  return { connection, connect, disconnect, request, download, health, search, sync, media: { upload } };
 }
 
 export const workerClient = createWorkerClient();

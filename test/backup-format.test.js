@@ -14,6 +14,16 @@ test("WebDAV backup encryption round-trips and rejects the wrong password", asyn
   await assert.rejects(() => decodeBackup(encoded.body, "wrong", webcrypto));
 });
 
+test("WebDAV backup identifies corrupted encrypted files before password validation", async () => {
+  const encoded = await encodeBackup({ bookmarks: [], collections: [] }, "correct horse", webcrypto);
+  const corrupted = JSON.parse(new TextDecoder().decode(encoded.body));
+  corrupted.ciphertext = "AA==";
+  await assert.rejects(
+    () => decodeBackup(JSON.stringify(corrupted), "correct horse", webcrypto),
+    (error) => error.code === "backup_corrupt",
+  );
+});
+
 test("WebDAV retention keeps the newest configured backup count", () => {
   const names = Array.from({ length: 12 }, (_, index) => `private-bookmarks-2026-08-${String(index + 1).padStart(2, "0")}T00-00-00.000Z.json`);
   assert.deepEqual(retainedBackupNames(names, 3), names.slice(-3).reverse());

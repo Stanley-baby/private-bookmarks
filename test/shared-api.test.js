@@ -96,6 +96,17 @@ test("Worker client exposes connection, health, search, sync, and media contract
   assert.match(requests.at(-1)[1].headers["content-type"], /image\/png/);
 });
 
+test("Worker client downloads cloud backup archives without parsing their binary body", async () => {
+  const client = createWorkerClient({
+    storage: Object.assign(storageFixture(), { async get() { return { endpoint: "https://worker.example", key: "secret" }; } }),
+    fetchImpl: async () => new Response(new Uint8Array([1, 2, 3]), { headers: { "content-type": "application/zip" } }),
+  });
+
+  const response = await client.download("/v1/cloud/dropbox/backups/remote/download");
+  assert.equal(response.headers.get("content-type"), "application/zip");
+  assert.deepEqual([...new Uint8Array(await response.arrayBuffer())], [1, 2, 3]);
+});
+
 test("Worker client distinguishes unconfigured, permission, network, and server failures", async () => {
   const unconfigured = createWorkerClient({ storage: storageFixture(), fetchImpl: async () => Response.json({ ok: true }) });
   await assert.rejects(() => unconfigured.health(), (error) => error.code === "not_configured");

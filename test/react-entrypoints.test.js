@@ -7,7 +7,7 @@ import { createMigrationTransfer } from "../src/react/migration-transfer.js";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const buildRoot = `${repoRoot}.output/chrome-mv3`;
-const entrypoints = ["library", "popup", "sidepanel", "welcome"];
+const entrypoints = ["library", "popup", "sidepanel", "welcome", "cloud-backups", "cloud-import"];
 
 test("the production WXT build mounts the shared React bundle on every user-facing page", () => {
   try {
@@ -22,7 +22,7 @@ test("the production WXT build mounts the shared React bundle on every user-faci
   for (const name of entrypoints) {
     const html = readFileSync(`${buildRoot}/${name}.html`, "utf8");
     assert.match(html, /<div id="root"><\/div>/, `${name} needs a React mount`);
-    assert.match(html, /<script type="module"[^>]+src="\/chunks\/main-[^\"]+\.js"/, `${name} needs the React bundle`);
+    assert.match(html, new RegExp(`<script type="module"[^>]+src="/chunks/${["cloud-backups", "cloud-import"].includes(name) ? name : "main"}-[^\\"]+\\.js"`), `${name} needs the React bundle`);
     assert.doesNotMatch(html, /(?:src\/)?legacy\//, `${name} must not load the legacy runtime`);
   }
   const manifest = JSON.parse(readFileSync(`${buildRoot}/manifest.json`, "utf8"));

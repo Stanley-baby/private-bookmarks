@@ -1,4 +1,5 @@
-import { applyBookmarkBatch, mergeBookmarkConflict, normalizeBookmark } from "./local-model.js";
+import { applyBookmarkBatch, conflictRecoveryCopies, mergeBookmarkConflict, normalizeBookmark } from "./local-model.js";
+import { updateConflictBadge } from "./conflict-badge.js";
 import { collectionShareText, collectionSubtreeIds, emptyCollectionRoots, mergeCollectionRecords, positionBetween, validateCollectionChange } from "./collection-model.js";
 import { LOCAL_DATABASE, LOCAL_DATABASE_VERSION, openLocalDatabase } from "../local-storage.js";
 import {
@@ -101,6 +102,7 @@ async function getPreferences() {
   return { ...DEFAULT_PREFERENCES, ...value || {}, revision: Number(value?.revision) || 0 };
 }
 async function updatePreferences(expectedRevision, changes) {
+  await assertEditable();
   const current = await getPreferences();
   if (current.revision !== Number(expectedRevision)) return { conflict: current };
   const next = { ...current, ...changes };
@@ -109,7 +111,8 @@ async function updatePreferences(expectedRevision, changes) {
   await request((await store("settings", "readwrite")).put(preferences, "preferences"));
   return { preferences };
 }
-async function saveBookmark(input, { enqueueSync = true } = {}) {
+async function saveBookmark(input, { enqueueSync = true, recovery = false } = {}) {
+  await assertEditable(recovery);
   await ensureDefaults();
   const now = (/* @__PURE__ */ new Date()).toISOString();
   const existing = input.id ? await request((await store("bookmarks")).get(input.id)) : void 0;
@@ -120,6 +123,7 @@ async function saveBookmark(input, { enqueueSync = true } = {}) {
   return item;
 }
 async function saveBookmarkWithCollection(input, collection) {
+  await assertEditable();
   await ensureDefaults();
   const now = (/* @__PURE__ */ new Date()).toISOString();
   const db = await database();
@@ -160,6 +164,7 @@ async function saveBookmarkWithCollection(input, collection) {
   return { bookmark: item, collection: collectionItem };
 }
 async function trashBookmark(id) {
+  await assertEditable();
   const target = await request((await store("bookmarks")).get(id));
   if (!target || target.purgedAt || target.permanentDeletedAt) return null;
   if (target.deletedAt) return target;
@@ -173,6 +178,7 @@ async function trashBookmark(id) {
   return target;
 }
 async function restoreBookmark(id) {
+  await assertEditable();
   const target = await request((await store("bookmarks")).get(id));
   if (!target || target.permanentDeletedAt) return null;
   if (!target.deletedAt) return target;
@@ -189,6 +195,7 @@ async function permanentDeleteBookmark(id) {
   return batchBookmark(id, { type: "permanentDelete" });
 }
 async function batchBookmark(id, action) {
+  await assertEditable();
   const target = await request((await store("bookmarks")).get(id));
   if (!target) return null;
   if (action.type === "move" && action.collectionId !== "unsorted") {
@@ -225,7 +232,8 @@ async function batchBookmarks(ids, action) {
   }
   return changed;
 }
-async function saveCollection(input, { enqueueSync = true, expectedRevision, allowDeletedParent = false, allowUnsorted = false } = {}) {
+async function saveCollection(input, { enqueueSync = true, expectedRevision, allowDeletedParent = false, allowUnsorted = false, recovery = false } = {}) {
+  await assertEditable(recovery);
   const raw = input && typeof input === "object" ? input : {};
   const id = raw.id || crypto.randomUUID();
   const collectionStore = await store("collections");
@@ -259,6 +267,7 @@ async function saveCollection(input, { enqueueSync = true, expectedRevision, all
   return item;
 }
 async function trashCollection(id, expectedRevision) {
+  await assertEditable();
   const target = await request((await store("collections")).get(id));
   if (!target || target.deletedAt || id === "unsorted") return null;
   if (expectedRevision != null && Number(target.revision || 0) !== Number(expectedRevision)) {
@@ -289,6 +298,7 @@ async function trashCollection(id, expectedRevision) {
   return target;
 }
 async function restoreCollection(id, expectedRevision) {
+  await assertEditable();
   const target = await request((await store("collections")).get(id));
   if (!target || !target.deletedAt) return null;
   if (expectedRevision != null && Number(target.revision || 0) !== Number(expectedRevision)) return null;
@@ -441,6 +451,16 @@ async function setSyncSettings(input) {
   await request((await store("settings", "readwrite")).put(value, "sync"));
   return value;
 }
+async function recoveryState() {
+  return (await request((await store("settings")).get("recovery"))) === true;
+}
+async function setRecoveryState(value) {
+  await request((await store("settings", "readwrite")).put(Boolean(value), "recovery"));
+  return Boolean(value);
+}
+async function assertEditable(recovery = false) {
+  if (!recovery && await recoveryState()) throw Object.assign(new Error("恢复期间不能编辑资料库"), { code: "recovery_in_progress" });
+}
 async function healthProgress() {
   return (await request((await store("settings")).get("healthProgress"))) || { status: "idle", checked: 0, total: 0, errors: 0, updatedAt: "" };
 }
@@ -453,8 +473,9 @@ async function listConflicts() {
   return request((await store("conflicts")).getAll());
 }
 async function resolveConflict(key, choice) {
+  await assertEditable();
   const db = await database();
-  return new Promise((resolve, reject) => {
+  const result = await new Promise((resolve, reject) => {
     const conflictStore = db.transaction("conflicts").objectStore("conflicts");
     const read = conflictStore.get(key);
     read.onerror = () => reject(read.error);
@@ -473,6 +494,7 @@ async function resolveConflict(key, choice) {
       }
       const baseRevision = Number(conflict.remote?.revision || 0);
       const record = { ...selected, id: conflict.id, revision: baseRevision + 1, updatedAt: (/* @__PURE__ */ new Date()).toISOString() };
+      const recoveries = conflictRecoveryCopies(conflict, choice);
       let result = record;
       tx.onerror = () => reject(tx.error);
       tx.oncomplete = () => resolve(result);
@@ -487,10 +509,16 @@ async function resolveConflict(key, choice) {
         }
         entityStore.put(record);
         outboxStore.add({ entity: conflict.entity, id: conflict.id, baseRevision, record, createdAt: (/* @__PURE__ */ new Date()).toISOString(), status: "pending" });
+        for (const recovery of recoveries) {
+          entityStore.put(recovery);
+          outboxStore.add({ entity: conflict.entity, id: recovery.id, baseRevision: 0, record: recovery, createdAt: (/* @__PURE__ */ new Date()).toISOString(), status: "pending" });
+        }
         tx.objectStore("conflicts").delete(key);
       };
     };
   });
+  await updateConflictBadge((await listConflicts()).length);
+  return result;
 }
 async function outboxItems() {
   return request((await store("outbox")).getAll());
@@ -506,8 +534,10 @@ async function removeOutbox(id) {
 }
 async function saveConflict(value) {
   await request((await store("conflicts", "readwrite")).put({ ...value, key: `${value.entity}:${value.id}` }));
+  await updateConflictBadge((await listConflicts()).length);
 }
-async function importLibrary(data) {
+async function importLibrary(data, { recovery = false } = {}) {
+  await assertEditable(recovery);
   await ensureDefaults();
   const collections = Array.isArray(data.collections) ? [...data.collections] : [];
   const collectionCount = collections.length;
@@ -523,25 +553,27 @@ async function importLibrary(data) {
     orderedCollections.push(collection);
     savedIds.add(collection.id);
  }
-  for (const collection of orderedCollections) await saveCollection(collection, { enqueueSync: false, allowDeletedParent: true, allowUnsorted: true });
-  for (const bookmark of bookmarks) if (bookmark.link) await saveBookmark(bookmark, { enqueueSync: false });
+  for (const collection of orderedCollections) await saveCollection(collection, { enqueueSync: false, allowDeletedParent: true, allowUnsorted: true, recovery });
+  for (const bookmark of bookmarks) if (bookmark.link) await saveBookmark(bookmark, { enqueueSync: false, recovery });
   await initialize();
   return { bookmarks: bookmarks.length, collections: collectionCount };
 }
 async function exportLibrary() {
   return { format: "private-bookmarks/v1", version: 1, exportedAt: (/* @__PURE__ */ new Date()).toISOString(), bookmarks: await request((await store("bookmarks")).getAll()), collections: await request((await store("collections")).getAll()), preferences: await getPreferences() };
 }
-async function replaceLibrary(data) {
+async function replaceLibrary(data, { recovery = false } = {}) {
+  await assertEditable(recovery);
   await request((await store("bookmarks", "readwrite")).clear());
   await request((await store("collections", "readwrite")).clear());
   await request((await store("settings", "readwrite")).delete("preferences"));
-  await importLibrary(data);
+  await importLibrary(data, { recovery });
   if (data.preferences) {
     const preferences = { ...DEFAULT_PREFERENCES, ...data.preferences };
     await request((await store("settings", "readwrite")).put(preferences, "preferences"));
   }
 }
-async function mergeLibrary(data) {
+async function mergeLibrary(data, { recovery = false } = {}) {
+  await assertEditable(recovery);
   const currentBookmarks = new Map((await request((await store("bookmarks")).getAll())).map((item) => [item.id, item]));
   const currentCollections = new Map((await request((await store("collections")).getAll())).map((item) => [item.id, item]));
   const collectionIds = /* @__PURE__ */ new Map();
@@ -558,8 +590,8 @@ async function mergeLibrary(data) {
   }
   for (const incoming of data.bookmarks || []) {
     const current = currentBookmarks.get(incoming.id);
-    if (!current) await saveBookmark({ ...incoming, collectionId: collectionIds.get(incoming.collectionId) || incoming.collectionId }, { enqueueSync: false });
-    else if (JSON.stringify(current) !== JSON.stringify(incoming)) await saveBookmark({ ...incoming, id: crypto.randomUUID(), title: `${incoming.title}\uFF08\u6062\u590D\u526F\u672C\uFF09`, collectionId: collectionIds.get(incoming.collectionId) || incoming.collectionId }, { enqueueSync: true });
+    if (!current) await saveBookmark({ ...incoming, collectionId: collectionIds.get(incoming.collectionId) || incoming.collectionId }, { enqueueSync: false, recovery });
+    else if (JSON.stringify(current) !== JSON.stringify(incoming)) await saveBookmark({ ...incoming, id: crypto.randomUUID(), title: `${incoming.title}\uFF08\u6062\u590D\u526F\u672C\uFF09`, collectionId: collectionIds.get(incoming.collectionId) || incoming.collectionId }, { enqueueSync: true, recovery });
   }
   await initialize();
 }
@@ -601,6 +633,7 @@ export {
   outboxItems,
   previewMigrationPackage,
   previewCollectionMerge,
+  recoveryState,
   removeOutbox,
   replaceLibrary,
   resolveConflict,
@@ -614,6 +647,7 @@ export {
   saveConflict,
   setActionMode,
   setHealthProgress,
+  setRecoveryState,
   setSyncSettings,
   setWebdavSettings,
   syncSettings,
